@@ -25,3 +25,14 @@ export interface AIRiskFinding{id:string;title:string;reason:string;severity:"Lo
 export interface AIPotentialExclusion{id:string;label:string;status:"Potential Exclusion"|"Needs Confirmation"}
 export interface AIReviewData{projectId:string;status:"Analysis In Progress"|"Awaiting Documents"|"Ready for Human Review"|"Review Approved";documentsAnalyzed:number;drawingSheetsReviewed:number;findingsCount:number;attentionCount:number;overallConfidence:number;fields:AIExtractedField[];disciplines:string[];trades:AITradeFinding[];observations:AIScopeObservation[];risks:AIRiskFinding[];exclusions:AIPotentialExclusion[]}
 export interface AIReviewApprovalState{projectInformation:boolean;requiredTrades:boolean;scopeObservations:boolean;riskItems:boolean;potentialExclusions:boolean}
+export type ScopeItemCategory="Included Scope"|"Exclusion"|"Clarification"|"Allowance"|"Alternate"|"General Requirement";
+export type ScopeItemReviewStatus="AI Generated"|"Reviewed"|"Human Revised"|"Human Added"|"Removed";
+export type TradeScopeStatus="Draft"|"Needs Review"|"Ready for Approval"|"Approved"|"Human Revised";
+export type BidPackageStatus="Not Generated"|"Draft"|"Ready for Review"|"Approved for Outreach";
+export interface TradeScopeItem{id:string;tradeId:string;category:ScopeItemCategory;description:string;status:ScopeItemReviewStatus;confidence?:number;sources:DocumentSourceReference[];humanModified:boolean;originalDescription?:string;notes?:string}
+export interface TradeScopeWarning{id:string;tradeId:string;message:string;reviewed?:boolean}
+export interface TradeScopeDetail{id:string;projectId:string;trade:string;status:TradeScopeStatus;confidence:number;sourceCount:number;packageStatus:BidPackageStatus;items:TradeScopeItem[];warnings:TradeScopeWarning[];approvedBy?:string;approvedAt?:string}
+export interface TradeScopeReview{scopeItems:boolean;exclusions:boolean;clarifications:boolean;sources:boolean}
+export interface BidPackageDocument{documentId:string;documentName:string;included:boolean}
+export interface BidPackageReviewState{tradeScope:boolean;exclusions:boolean;bidDeadline:boolean;documentList:boolean;submissionInstructions:boolean}
+export interface BidPackage{id:string;projectId:string;tradeId:string;status:BidPackageStatus;requirements:string[];submissionInstructions:string[];documents:BidPackageDocument[]}
