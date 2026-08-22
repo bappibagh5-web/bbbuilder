@@ -1,0 +1,1 @@
+import{BrainCircuit}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={BrainCircuit} title="AI Review" description="Document review findings and estimator approvals will be organized here."/>}

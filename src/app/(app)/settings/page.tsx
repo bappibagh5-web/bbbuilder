@@ -1,0 +1,1 @@
+import{Settings}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Settings" description="Configure company and workflow preferences in a future task." icon={Settings}/>}

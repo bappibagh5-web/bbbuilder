@@ -1,0 +1,1 @@
+import{Activity}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={Activity} title="Activity" description="A complete project-specific audit trail will be available here."/>}

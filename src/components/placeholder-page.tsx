@@ -1,0 +1,2 @@
+import type{LucideIcon}from"lucide-react";import{EmptyState}from"./empty-state";import{PageHeader}from"./page-header";
+export function PlaceholderPage({title,description,icon}:{title:string;description:string;icon:LucideIcon}){return <div className="mx-auto max-w-[1500px]"><PageHeader title={title} description={description}/><div className="mt-7"><EmptyState icon={icon} title={`${title} workspace`} description="This area is prepared for a future task. Navigation and the shared application shell are fully functional in this demo."/></div></div>}

@@ -1,0 +1,1 @@
+import{FileCheck2}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={FileCheck2} title="Proposal" description="Client proposal preparation, review, and approval will happen here."/>}

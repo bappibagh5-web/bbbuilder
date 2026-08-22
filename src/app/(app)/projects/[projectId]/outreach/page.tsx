@@ -1,0 +1,1 @@
+import{Send}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={Send} title="Outreach" description="Bid invitation campaigns and subcontractor responses will be coordinated here."/>}

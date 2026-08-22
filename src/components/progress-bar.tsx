@@ -1,0 +1,2 @@
+import{formatPercentage}from"@/lib/utils";
+export function ProgressBar({value}:{value:number}){return <div className="flex min-w-28 items-center gap-2"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label={`${value}% complete`}><div className="h-full rounded-full bg-[#2f658f]" style={{width:`${value}%`}}/></div><span className="w-8 text-right text-xs font-medium text-slate-600">{formatPercentage(value)}</span></div>}

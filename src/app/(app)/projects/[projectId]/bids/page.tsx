@@ -1,0 +1,1 @@
+import{ReceiptText}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={ReceiptText} title="Bids" description="Submitted quotes, scope coverage, and bid status will be reviewed here."/>}

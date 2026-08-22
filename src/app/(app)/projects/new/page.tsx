@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{ProjectWizard}from"@/components/projects/project-wizard";export const metadata:Metadata={title:"New Project"};export default function Page(){return <ProjectWizard/>}

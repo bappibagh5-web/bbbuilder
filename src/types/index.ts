@@ -1,0 +1,15 @@
+export type ProjectStatus="document-review"|"scope-review"|"trade-outreach"|"bid-collection"|"proposal-review"|"awarded";
+export interface Project{id:string;projectNumber:string;name:string;client:string;address:string;city:string;province:string;postalCode:string;projectType:string;squareFootage:number;bidDeadline:string;questionsDeadline:string;status:ProjectStatus;progress:number;requiredTrades:number;documentsCount:number;invitedContractors:number;bidsReceived:number;createdAt:string;updatedAt:string}
+export interface ProjectDocument{id:string;projectId:string;name:string;type:"drawing"|"specification"|"addendum"|"other";sizeBytes:number;status:"uploaded"|"processing"|"reviewed";uploadedAt:string}
+export interface TradeScope{id:string;projectId:string;trade:string;division:string;description:string;status:"draft"|"ai-review"|"approved";itemCount:number}
+export interface Subcontractor{id:string;name:string;trades:string[];city:string;province:string;contactName:string;email:string;phone:string;status:"active"|"inactive"|"pending";isDemo:true}
+export interface BidInvitation{id:string;projectId:string;tradeId:string;subcontractorId:string;sentAt:string;viewedAt?:string;respondedAt?:string;status:"queued"|"sent"|"viewed"|"responded"|"declined"}
+export interface Bid{id:string;projectId:string;tradeId:string;subcontractorId:string;total:number;laborIncluded:boolean;materialsIncluded:boolean;permitsIncluded:boolean;schedule:string;inclusions:string[];exclusions:string[];missingItems:string[];scopeCoverage:number;aiConfidence:number;recommendationStatus:"unreviewed"|"recommended"|"alternate"|"excluded"}
+export interface ActivityEvent{id:string;type:"bid"|"ai"|"scope"|"campaign"|"project";title:string;projectName:string;createdAt:string}
+export interface AttentionItem{id:string;projectName:string;message:string;severity:"warning"|"critical"|"ai"|"info"}
+export type WorkflowStageStatus="complete"|"current"|"upcoming"|"attention";
+export interface ProjectWorkflowStage{id:string;label:string;status:WorkflowStageStatus}
+export type TradeCoverageStatus="ready"|"collecting"|"needs-coverage"|"not-started";
+export interface TradeBidStatus{id:string;trade:string;bidsReceived:number;status:TradeCoverageStatus}
+export interface ProjectAttentionItem{id:string;title:string;message:string;severity:"warning"|"critical"|"info"}
+export interface ProjectDetails{projectId:string;workflow:ProjectWorkflowStage[];trades:TradeBidStatus[];attention:ProjectAttentionItem[];activity:ActivityEvent[]}

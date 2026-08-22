@@ -1,0 +1,1 @@
+import{ClipboardList}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Bid Opportunities" description="Review incoming opportunities and qualification details." icon={ClipboardList}/>}

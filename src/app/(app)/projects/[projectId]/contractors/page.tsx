@@ -1,0 +1,1 @@
+import{HardHat}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={HardHat} title="Contractors" description="Qualified subcontractors associated with this project will be managed here."/>}

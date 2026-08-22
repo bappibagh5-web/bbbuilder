@@ -1,0 +1,1 @@
+import{Gavel}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Awarded Projects" description="Track awarded work as it transitions from preconstruction." icon={Gavel}/>}

@@ -1,0 +1,1 @@
+import{Activity}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Activity" description="Review an audit-friendly history of demo workspace events." icon={Activity}/>}

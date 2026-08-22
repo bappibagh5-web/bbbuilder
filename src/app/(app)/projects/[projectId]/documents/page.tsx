@@ -1,0 +1,1 @@
+import{Files}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={Files} title="Documents" description="Project documents, drawings, specifications and addenda will be managed here."/>}
