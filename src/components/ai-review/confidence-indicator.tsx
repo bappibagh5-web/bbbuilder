@@ -1,0 +1,1 @@
+export function ConfidenceIndicator({value}:{value:number}){return <span className="whitespace-nowrap text-xs font-medium text-slate-500" aria-label={`Estimated AI confidence ${value}%`}>{value}% confidence</span>}
