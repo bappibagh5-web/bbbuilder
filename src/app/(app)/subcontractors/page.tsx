@@ -1,1 +1,10 @@
-import{Users}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Subcontractors" description="Maintain a qualified network of trade partners." icon={Users}/>}
+import { SubcontractorDirectory } from "@/components/subcontractors/subcontractor-directory";
+import { subcontractors, subcontractorSummary } from "@/data";
+export default function Page() {
+  return (
+    <SubcontractorDirectory
+      initialRecords={subcontractors}
+      summary={subcontractorSummary}
+    />
+  );
+}
