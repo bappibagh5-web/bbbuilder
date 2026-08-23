@@ -36,12 +36,12 @@ const groups = [
   {
     label: "Preconstruction",
     items: [
-      { label: "Projects", href: "/projects", icon: FolderKanban },
       {
         label: "Bid Opportunities",
         href: "/bid-opportunities",
         icon: ClipboardList,
       },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
       { label: "Subcontractors", href: "/subcontractors", icon: Users },
     ],
   },
@@ -67,24 +67,25 @@ const groups = [
 ];
 
 const guideSteps = [
-  ["1", "Open Project", "/projects/retail-store-coquitlam"],
-  ["2", "Review Documents", "/projects/retail-store-coquitlam/documents"],
-  ["3", "Review AI Findings", "/projects/retail-store-coquitlam/ai-review"],
-  ["4", "Review Trade Scopes", "/projects/retail-store-coquitlam/scopes"],
+  ["1", "Bid Opportunities", "/bid-opportunities"],
+  ["2", "Open Project", "/projects/retail-store-coquitlam"],
+  ["3", "Review Documents", "/projects/retail-store-coquitlam/documents"],
+  ["4", "Review AI Findings", "/projects/retail-store-coquitlam/ai-review"],
+  ["5", "Review Trade Scopes", "/projects/retail-store-coquitlam/scopes"],
   [
-    "5",
+    "6",
     "View Subcontractor Discovery",
     "/projects/retail-store-coquitlam/contractors",
   ],
-  ["6", "View Outreach", "/projects/retail-store-coquitlam/outreach"],
-  ["7", "Open Bid Inbox", "/projects/retail-store-coquitlam/bids"],
+  ["7", "View Outreach", "/projects/retail-store-coquitlam/outreach"],
+  ["8", "Open Bid Inbox", "/projects/retail-store-coquitlam/bids"],
   [
-    "8",
+    "9",
     "Compare Electrical Bids",
     "/projects/retail-store-coquitlam/comparisons",
   ],
-  ["9", "Review Client Proposal", "/projects/retail-store-coquitlam/proposal"],
-  ["10", "View Award Handoff", "/awarded"],
+  ["10", "Review Client Proposal", "/projects/retail-store-coquitlam/proposal"],
+  ["11", "View Award Handoff", "/awarded"],
 ] as const;
 
 function Sidebar({

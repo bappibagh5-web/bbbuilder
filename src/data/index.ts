@@ -13,6 +13,7 @@ export {
 export {
   electricalCandidates,
   procurementStatuses,
+  contractorDiscoverySummary,
   discoveryTrades,
   getContractorCandidates,
 } from "./contractor-discovery";
@@ -31,3 +32,4 @@ export {
 } from "./bid-comparisons";
 export { proposals, primaryProposal, proposalSummary } from "./proposals";
 export { awardedProjects, awardedSummary } from "./awarded-projects";
+export { bidOpportunities, bidOpportunityMetrics } from "./bid-opportunities";

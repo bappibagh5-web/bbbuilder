@@ -111,6 +111,18 @@ export const procurementStatuses: TradeProcurementStatus[] = [
   }),
 );
 
+export const contractorDiscoverySummary = {
+  candidatesIdentified: 86,
+  shortlisted: 46,
+  approvedForOutreach: 38,
+  tradesRequired: procurementStatuses.length,
+  tradesReady: procurementStatuses.filter((item) => item.status === "Ready")
+    .length,
+  tradesNeedingMoreCandidates: procurementStatuses.filter(
+    (item) => item.status === "Needs More Candidates",
+  ).length,
+};
+
 export const discoveryTrades = procurementStatuses.map((item) => item.trade);
 export function getContractorCandidates(projectId: string, trade: string) {
   return projectId === "retail-store-coquitlam" && trade === "Electrical"

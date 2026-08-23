@@ -682,3 +682,69 @@ export interface BidPackage {
   submissionInstructions: string[];
   documents: BidPackageDocument[];
 }
+
+export type BidOpportunityStatus =
+  "New" | "Reviewing" | "Pursue" | "Declined" | "Converted to Project";
+export type OpportunityDecision = "Pending" | "Approved to Pursue" | "No-Go";
+export type OpportunityDecisionReason =
+  | "Not enough bidding time"
+  | "Outside service area"
+  | "Project type not a fit"
+  | "Insufficient capacity"
+  | "Insufficient information"
+  | "Commercial risk"
+  | "Client / relationship decision"
+  | "Other";
+export interface OpportunityDocument {
+  id: string;
+  name: string;
+  category: string;
+}
+export interface OpportunityRisk {
+  id: string;
+  title: string;
+  detail: string;
+}
+export interface OpportunityTradeFinding {
+  trade: string;
+  confidence: "High" | "Medium";
+}
+export interface OpportunityFit {
+  label: "Strong Fit" | "Good Fit" | "Needs Review" | "Low Fit";
+  reasons: string[];
+  concern: string;
+}
+export interface BidOpportunity {
+  id: string;
+  name: string;
+  client: string;
+  address: string;
+  city: string;
+  province: string;
+  projectType: string;
+  estimatedSquareFootage: number;
+  bidDeadline: string;
+  questionsDeadline: string;
+  receivedAt: string;
+  invitationSource: string;
+  contactName: string;
+  contactEmail: string;
+  documentCount: number;
+  documents: OpportunityDocument[];
+  likelyTrades: OpportunityTradeFinding[];
+  summary: string;
+  risks: OpportunityRisk[];
+  status: BidOpportunityStatus;
+  decision: OpportunityDecision;
+  convertedProjectId?: string;
+  convertedProjectNumber?: string;
+  complexity: "Low" | "Moderate" | "High";
+  fit: OpportunityFit;
+}
+export interface OpportunityReviewChecklist {
+  details: boolean;
+  deadline: boolean;
+  documents: boolean;
+  risks: boolean;
+  capacity: boolean;
+}

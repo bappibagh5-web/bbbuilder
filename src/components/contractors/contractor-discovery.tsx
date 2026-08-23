@@ -16,6 +16,7 @@ import type {
 } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { contractorDiscoverySummary } from "@/data/contractor-discovery";
 
 const simulationSteps = [
   "Searching trade database",
@@ -155,10 +156,13 @@ export function ContractorDiscovery({
       </header>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Trades Requiring Bids", 10],
-          ["Candidates Found", 86],
-          ["Shortlisted", 46],
-          ["Approved for Outreach", 38],
+          ["Trades Requiring Bids", contractorDiscoverySummary.tradesRequired],
+          ["Candidates Found", contractorDiscoverySummary.candidatesIdentified],
+          ["Shortlisted", contractorDiscoverySummary.shortlisted],
+          [
+            "Approved for Outreach",
+            contractorDiscoverySummary.approvedForOutreach,
+          ],
         ].map(([label, value]) => (
           <Card key={label as string} className="p-4">
             <p className="text-2xl font-semibold">{value}</p>
