@@ -1,1 +1,5 @@
-import{Gavel}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Awarded Projects" description="Track awarded work as it transitions from preconstruction." icon={Gavel}/>}
+import { AwardedDirectory } from "@/components/awarded/awarded-directory";
+import { awardedProjects, awardedSummary } from "@/data";
+export default function Page() {
+  return <AwardedDirectory items={awardedProjects} summary={awardedSummary} />;
+}

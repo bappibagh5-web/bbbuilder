@@ -1,1 +1,7 @@
-import{BarChart3}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Bid Comparisons" description="Compare coverage, pricing, and qualifications across bids." icon={BarChart3}/>}
+import { ComparisonDirectory } from "@/components/comparisons/comparison-directory";
+import { comparisonQueue, comparisonSummary } from "@/data";
+export default function Page() {
+  return (
+    <ComparisonDirectory items={comparisonQueue} summary={comparisonSummary} />
+  );
+}

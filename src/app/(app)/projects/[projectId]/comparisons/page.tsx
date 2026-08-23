@@ -1,10 +1,11 @@
 import {
   getProject,
+  comparisonTrades,
+  electricalLeveledBids,
   bidSubmissions,
-  bidInboxSummary,
   subcontractors,
 } from "@/data";
-import { BidInbox } from "@/components/bids/bid-inbox";
+import { BidComparison } from "@/components/comparisons/bid-comparison";
 export default async function Page({
   params,
 }: {
@@ -12,11 +13,14 @@ export default async function Page({
 }) {
   const { projectId } = await params;
   return (
-    <BidInbox
+    <BidComparison
       project={getProject(projectId)!}
-      initialBids={projectId === "retail-store-coquitlam" ? bidSubmissions : []}
+      tradeNames={comparisonTrades}
+      initialLevels={
+        projectId === "retail-store-coquitlam" ? electricalLeveledBids : []
+      }
+      bids={bidSubmissions}
       companies={subcontractors}
-      summary={bidInboxSummary}
     />
   );
 }

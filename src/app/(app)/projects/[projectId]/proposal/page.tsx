@@ -1,1 +1,15 @@
-import{FileCheck2}from"lucide-react";import{ProjectModulePlaceholder}from"@/components/projects/project-module-placeholder";export default function Page(){return <ProjectModulePlaceholder icon={FileCheck2} title="Proposal" description="Client proposal preparation, review, and approval will happen here."/>}
+import { getProject, primaryProposal } from "@/data";
+import { ProposalBuilder } from "@/components/proposals/proposal-builder";
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ projectId: string }>;
+}) {
+  const { projectId } = await params;
+  return (
+    <ProposalBuilder
+      project={getProject(projectId)!}
+      initial={primaryProposal}
+    />
+  );
+}

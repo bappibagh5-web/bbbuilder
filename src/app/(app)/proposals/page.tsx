@@ -1,1 +1,5 @@
-import{FileChartColumn}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Proposals" description="Prepare and review client-ready construction proposals." icon={FileChartColumn}/>}
+import { ProposalDirectory } from "@/components/proposals/proposal-directory";
+import { proposals, proposalSummary } from "@/data";
+export default function Page() {
+  return <ProposalDirectory items={proposals} summary={proposalSummary} />;
+}

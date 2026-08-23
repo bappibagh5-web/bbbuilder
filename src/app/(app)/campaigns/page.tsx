@@ -1,1 +1,10 @@
-import{Send}from"lucide-react";import{PlaceholderPage}from"@/components/placeholder-page";export default function Page(){return <PlaceholderPage title="Outreach Campaigns" description="Coordinate bid invitations and subcontractor follow-up." icon={Send}/>}
+import { CampaignDirectory } from "@/components/campaigns/campaign-directory";
+import { outreachCampaigns, campaignSummary } from "@/data";
+export default function Page() {
+  return (
+    <CampaignDirectory
+      campaigns={outreachCampaigns}
+      summary={campaignSummary}
+    />
+  );
+}

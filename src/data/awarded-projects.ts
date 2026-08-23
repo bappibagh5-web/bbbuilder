@@ -1,0 +1,45 @@
+import type { AwardedProject } from "@/types";
+export const awardedProjects: AwardedProject[] = [
+  {
+    id: "award-office",
+    projectId: "office-renovation-richmond",
+    projectName: "Commercial Office Renovation",
+    client: "Demo Commercial Holdings",
+    contractValue: 194600,
+    awardedAt: "Aug 17, 2026",
+    tradeAwards: "6 / 7 complete",
+    compliance: "3 pending",
+    schedule: "In Progress",
+    status: "Awarded",
+  },
+  {
+    id: "award-retail",
+    projectId: "retail-renovation-surrey",
+    projectName: "Retail Renovation Phase 2",
+    client: "Demo Commerce Properties",
+    contractValue: 418200,
+    awardedAt: "Aug 12, 2026",
+    tradeAwards: "8 / 9 complete",
+    compliance: "2 pending",
+    schedule: "Complete",
+    status: "Mobilization",
+  },
+  {
+    id: "award-cafe",
+    projectId: "restaurant-vancouver",
+    projectName: "Demo Café Fit-Out",
+    client: "Demo Hospitality Group",
+    contractValue: 287450,
+    awardedAt: "Aug 8, 2026",
+    tradeAwards: "7 / 8 complete",
+    compliance: "Attention Required",
+    schedule: "Pending",
+    status: "Preconstruction",
+  },
+];
+export const awardedSummary = {
+  active: 7,
+  tradeAwards: 3,
+  compliance: 12,
+  schedules: 2,
+};

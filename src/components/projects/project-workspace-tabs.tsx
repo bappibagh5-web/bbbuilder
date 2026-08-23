@@ -1,1 +1,45 @@
-"use client";import Link from"next/link";import{usePathname}from"next/navigation";import{cn}from"@/lib/utils";const tabs=[{label:"Overview",slug:""},{label:"Documents",slug:"documents"},{label:"AI Review",slug:"ai-review"},{label:"Scopes",slug:"scopes"},{label:"Contractors",slug:"contractors"},{label:"Outreach",slug:"outreach"},{label:"Bids",slug:"bids"},{label:"Proposal",slug:"proposal"},{label:"Activity",slug:"activity"}];export function ProjectWorkspaceTabs({projectId}:{projectId:string}){const path=usePathname();const base=`/projects/${projectId}`;return <nav aria-label="Project workspace" className="overflow-x-auto border-b"><div className="flex min-w-max">{tabs.map(tab=>{const href=tab.slug?`${base}/${tab.slug}`:base;const active=path===href;return <Link key={tab.label} href={href} aria-current={active?"page":undefined} className={cn("border-b-2 px-4 py-3 text-sm font-medium",active?"border-primary text-primary":"border-transparent text-slate-500 hover:text-slate-800")}>{tab.label}</Link>})}</div></nav>}
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
+const tabs = [
+  { label: "Overview", slug: "" },
+  { label: "Documents", slug: "documents" },
+  { label: "AI Review", slug: "ai-review" },
+  { label: "Scopes", slug: "scopes" },
+  { label: "Contractors", slug: "contractors" },
+  { label: "Outreach", slug: "outreach" },
+  { label: "Bids", slug: "bids" },
+  { label: "Comparisons", slug: "comparisons" },
+  { label: "Proposal", slug: "proposal" },
+  { label: "Activity", slug: "activity" },
+];
+export function ProjectWorkspaceTabs({ projectId }: { projectId: string }) {
+  const path = usePathname();
+  const base = `/projects/${projectId}`;
+  return (
+    <nav aria-label="Project workspace" className="overflow-x-auto border-b">
+      <div className="flex min-w-max">
+        {tabs.map((tab) => {
+          const href = tab.slug ? `${base}/${tab.slug}` : base;
+          const active = path === href;
+          return (
+            <Link
+              key={tab.label}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "border-b-2 px-4 py-3 text-sm font-medium",
+                active
+                  ? "border-primary text-primary"
+                  : "border-transparent text-slate-500 hover:text-slate-800",
+              )}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
