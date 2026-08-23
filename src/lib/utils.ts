@@ -18,6 +18,15 @@ export function formatDate(value: string) {
     timeZone: "UTC",
   }).format(new Date(value));
 }
+export function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Vancouver",
+  }).format(new Date(value));
+}
 export function formatPercentage(value: number) {
   return new Intl.NumberFormat("en-CA", {
     style: "percent",
