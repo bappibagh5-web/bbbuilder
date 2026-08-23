@@ -1,4 +1,6 @@
 import type { ComparisonQueueItem, LeveledBid } from "@/types";
+import { getSubcontractor } from "./subcontractors";
+const primaryElectrical = getSubcontractor("demo-pacific-electrical-ltd")!;
 export const comparisonQueue: ComparisonQueueItem[] = [
   [
     "electrical",
@@ -9,7 +11,7 @@ export const comparisonQueue: ComparisonQueueItem[] = [
     "$39,200 – $45,600",
     "74% – 96%",
     4,
-    "Demo Pacific Electrical",
+    primaryElectrical.companyName,
     "Ready for Review",
   ],
   [

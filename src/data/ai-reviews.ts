@@ -1,4 +1,6 @@
 import type { AIReviewData, DocumentSourceReference } from "@/types";
+import { getProject } from "./projects";
+const primaryProject = getProject("retail-store-coquitlam")!;
 const src = (
   documentId: string,
   documentName: string,
@@ -22,7 +24,7 @@ export const primaryAIReview: AIReviewData = {
     {
       id: "project-name",
       label: "Project Name",
-      value: "Retail Store Tenant Improvement",
+      value: primaryProject.name,
       confidence: 98,
       editable: false,
       source: src(
@@ -35,7 +37,7 @@ export const primaryAIReview: AIReviewData = {
     {
       id: "project-type",
       label: "Project Type",
-      value: "Retail Tenant Improvement",
+      value: primaryProject.projectType,
       confidence: 94,
       editable: true,
       source: src(
@@ -48,7 +50,7 @@ export const primaryAIReview: AIReviewData = {
     {
       id: "location",
       label: "Location",
-      value: "Coquitlam, BC",
+      value: `${primaryProject.city}, ${primaryProject.province}`,
       confidence: 98,
       editable: false,
       source: src(
@@ -61,7 +63,7 @@ export const primaryAIReview: AIReviewData = {
     {
       id: "area",
       label: "Approximate Area",
-      value: "8,450 SF",
+      value: `${primaryProject.squareFootage.toLocaleString("en-CA")} SF`,
       confidence: 96,
       editable: true,
       source: src(

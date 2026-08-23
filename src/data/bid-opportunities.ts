@@ -1,4 +1,7 @@
 import type { BidOpportunity } from "@/types";
+import { getProject } from "./projects";
+
+const primaryProject = getProject("retail-store-coquitlam")!;
 
 const documents = [
   ["invitation", "Invitation to Bid.pdf", "Invitation"],
@@ -136,18 +139,20 @@ export const bidOpportunities: BidOpportunity[] = [
   {
     ...base,
     id: "retail-coquitlam",
-    name: "Retail Store Tenant Improvement – Coquitlam",
-    client: "Demo Retail Group",
-    city: "Coquitlam",
-    projectType: "Retail Tenant Improvement",
-    estimatedSquareFootage: 12400,
-    bidDeadline: "2026-09-14",
-    questionsDeadline: "2026-09-08",
-    documentCount: 34,
+    name: `${primaryProject.name} – ${primaryProject.city}`,
+    client: primaryProject.client,
+    address: primaryProject.address,
+    city: primaryProject.city,
+    province: primaryProject.province,
+    projectType: primaryProject.projectType,
+    estimatedSquareFootage: primaryProject.squareFootage,
+    bidDeadline: primaryProject.bidDeadline,
+    questionsDeadline: primaryProject.questionsDeadline,
+    documentCount: primaryProject.documentsCount,
     status: "Converted to Project",
     decision: "Approved to Pursue",
     convertedProjectId: "retail-store-coquitlam",
-    convertedProjectNumber: "BB-2026-041",
+    convertedProjectNumber: primaryProject.projectNumber,
   },
   {
     ...base,
