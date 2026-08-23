@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BB Builders Preconstruction & Bid Management Demo
 
-## Getting Started
+This repository contains a frontend-only interactive demonstration of the proposed BB Builders bid automation platform.
 
-First, run the development server:
+## Demo workflow
+
+Project Intake → Documents → AI Review → Trade Scopes → Bid Packages → Contractor Discovery → Outreach → Bid Intake → Bid Comparison → Client Proposal → Awarded Project
+
+The primary walkthrough follows project **BB-2026-041 — Retail Store Tenant Improvement**. After starting the application, open the dashboard and use **Demo Guide** for quick navigation through the recommended presentation sequence.
+
+## Technology
+
+- Next.js
+- TypeScript
+- Tailwind CSS
+- shadcn/ui-style component primitives
+
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`. The root route redirects to the dashboard.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Validation and production build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm start
+```
 
-## Learn More
+The project uses standard Next.js conventions and requires no environment variables or custom server configuration for deployment to Vercel.
 
-To learn more about Next.js, take a look at the following resources:
+## Important demo disclosure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+All project data, subcontractors, bids, AI findings, communication activity, pricing, and client activity are fictional demonstration data.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No backend, AI service, email system, file processing service, authentication system, persistent storage, or database is connected. Temporary interactions reset when the application reloads.

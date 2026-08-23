@@ -1,4 +1,31 @@
 import type { Metadata } from "next";
 import "./globals.css";
-export const metadata:Metadata={ title:{default:"BB Builders Bid Management",template:"%s | BB Builders"},description:"Preconstruction and bid management demonstration for BB Builders." };
-export default function RootLayout({children}:LayoutProps<"/">){return <html lang="en"><body>{children}</body></html>}
+
+const title = "BB Builders | Preconstruction & Bid Management Demo";
+const description =
+  "Interactive demonstration of BB Builders' proposed preconstruction, subcontractor procurement, bid comparison, and proposal workflow.";
+
+export const metadata: Metadata = {
+  applicationName: "BB Builders Bid Management Demo",
+  title: { default: title, template: "%s | BB Builders" },
+  description,
+  openGraph: {
+    title,
+    description,
+    siteName: "BB Builders",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title,
+    description,
+  },
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
