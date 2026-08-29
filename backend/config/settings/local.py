@@ -21,8 +21,8 @@ os.environ.setdefault("S3_BUCKET", "bb-builders-local")
 os.environ.setdefault("S3_ACCESS_KEY", "bb-builders-local")
 os.environ.setdefault("S3_SECRET_KEY", "bb-builders-local")
 os.environ.setdefault("S3_REGION", "us-east-1")
-os.environ.setdefault("FRONTEND_ORIGIN", "http://localhost:3000")
-os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-os.environ.setdefault("CSRF_TRUSTED_ORIGINS", "http://localhost:3000")
+os.environ.setdefault("FRONTEND_ORIGIN", "http://127.0.0.1:3000")
+os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://127.0.0.1:3000")
+os.environ.setdefault("CSRF_TRUSTED_ORIGINS", "http://127.0.0.1:3000")
 
 from .base import *  # noqa: E402,F403

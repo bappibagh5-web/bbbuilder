@@ -8,12 +8,12 @@ import {
   BarChart3,
   Bell,
   Building2,
-  ChevronDown,
   ClipboardList,
   FileChartColumn,
   FolderKanban,
   Gavel,
   LayoutDashboard,
+  LogOut,
   Menu,
   MonitorPlay,
   PanelLeftClose,
@@ -25,6 +25,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { roleLabel } from "@/lib/auth";
+import { useAuth } from "@/components/auth/auth-provider";
 import { DemoNotice } from "./demo-notice";
 import { Button } from "./ui/button";
 
@@ -197,11 +199,18 @@ function Sidebar({
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const { user, logout } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [presentation, setPresentation] = useState(false);
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Member";
+  const initials = displayName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
   return (
     <div className="min-h-screen">
       <Sidebar
@@ -290,15 +299,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
             <div className="ml-1 hidden items-center gap-2 border-l pl-3 sm:flex">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-[#dce8f0] text-xs font-bold text-[#163451]">
-                AM
+                {initials}
               </span>
               <div className="hidden lg:block">
                 <p className="text-xs font-semibold text-slate-800">
-                  Alex Morgan
+                  {displayName}
                 </p>
-                <p className="text-[11px] text-slate-500">Estimator</p>
+                <p className="text-[11px] text-slate-500">
+                  {roleLabel(user?.memberships[0]?.role)}
+                </p>
               </div>
-              <ChevronDown className="hidden h-3.5 w-3.5 text-slate-400 lg:block" />
+              <button
+                type="button"
+                onClick={() => void logout()}
+                title="Sign out"
+                aria-label="Sign out"
+                className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
         </header>

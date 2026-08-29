@@ -13,6 +13,12 @@ if SECRET_KEY.startswith("unsafe-"):  # noqa: F405
 if not ALLOWED_HOSTS:  # noqa: F405
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS is required in production.")
 
+if not CORS_ALLOWED_ORIGINS or "*" in CORS_ALLOWED_ORIGINS:  # noqa: F405
+    raise ImproperlyConfigured("CORS_ALLOWED_ORIGINS must contain exact production origins.")
+
+if not CSRF_TRUSTED_ORIGINS or "*" in CSRF_TRUSTED_ORIGINS:  # noqa: F405
+    raise ImproperlyConfigured("CSRF_TRUSTED_ORIGINS must contain exact production origins.")
+
 required_environment = (
     "FRONTEND_ORIGIN",
     "S3_ACCESS_KEY",

@@ -66,11 +66,11 @@ Statuses:
 **Decision:** Begin with one organization, BB Builders Ltd., while scoping production data and authorization by organization. Initial roles are Admin, Estimator / Operator, and Viewer. External users are future scope.
 **Consequence:** Organization ownership and membership checks are foundational, even without initial multi-tenant sales behavior.
 
-### D-010 — Django-managed secure browser authentication
+### D-010 — Django session authentication for the browser
 
-**Status:** Decided in principle
-**Decision:** Django manages authentication. Sensitive authentication tokens must not be stored in `localStorage`.
-**Consequence:** The exact cookie/session/token pattern remains an ADR prerequisite before authentication implementation.
+**Status:** Decided
+**Decision:** Django authenticates the browser with its server-side session framework and an HttpOnly session cookie. State-changing requests use Django CSRF protection and a readable CSRF cookie; the Next.js frontend sends credentials and the `X-CSRFToken` header. Authentication credentials or bearer tokens are not stored in browser storage. Local development uses exact `127.0.0.1` frontend and backend origins. Production requires HTTPS, secure cookies, explicit trusted origins, and narrowly configured credentialed CORS.
+**Consequence:** Django remains the authentication and authorization authority. The frontend session gate improves UX but never replaces API permission checks. Password reset, MFA, and final production domain topology remain later security decisions.
 
 ### D-011 — Time handling
 
@@ -159,10 +159,6 @@ Define the frontend host, Django runtime, worker runtime, managed PostgreSQL, Re
 ### U-002 — DigitalOcean Spaces configuration
 
 Select region, bucket separation by environment, object-key convention, encryption settings, CORS, access policy, lifecycle policy, and backup/replication expectations.
-
-### U-003 — Exact secure authentication mechanism
-
-Choose and document an ADR for same-site Django sessions versus another secure cookie-based pattern, including CSRF, CORS, session expiry, password reset, MFA expectations, and frontend/backend domain topology.
 
 ### U-004 — Upload limits and behavior
 

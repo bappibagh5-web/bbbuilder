@@ -29,21 +29,23 @@ MinIO is for local development only. Production object-storage topology remains 
 
 ## Environment setup
 
-Copy the safe example file and replace its local placeholder passwords. Keep `backend/.env` untracked.
+Copy the safe example files and replace backend local placeholder passwords. Keep `backend/.env` and `.env.local` untracked.
 
 PowerShell:
 
 ```powershell
 Copy-Item backend/.env.example backend/.env
+Copy-Item .env.example .env.local
 ```
 
 POSIX shell:
 
 ```bash
 cp backend/.env.example backend/.env
+cp .env.example .env.local
 ```
 
-The same file supplies local Django configuration and Docker Compose service credentials. Ensure `DATABASE_URL`, the `POSTGRES_*` values, and the MinIO/S3 credentials agree.
+The backend file supplies Django configuration and Docker Compose service credentials. Ensure `DATABASE_URL`, the `POSTGRES_*` values, and the MinIO/S3 credentials agree. The root frontend file sets `NEXT_PUBLIC_API_BASE_URL`; use the same hostname (`127.0.0.1`) for both applications so session and CSRF cookies behave consistently.
 
 ## Start local infrastructure
 
@@ -80,6 +82,8 @@ PowerShell:
 
 ```powershell
 backend/.venv/Scripts/python backend/manage.py migrate
+backend/.venv/Scripts/python backend/manage.py createsuperuser
+backend/.venv/Scripts/python backend/manage.py bootstrap_organization --email admin@example.com --name "BB Builders Ltd." --legal-name "BB Builders Ltd." --slug bb-builders --role admin
 backend/.venv/Scripts/python backend/manage.py runserver 127.0.0.1:8000
 ```
 
@@ -87,6 +91,8 @@ POSIX shell:
 
 ```bash
 backend/.venv/bin/python backend/manage.py migrate
+backend/.venv/bin/python backend/manage.py createsuperuser
+backend/.venv/bin/python backend/manage.py bootstrap_organization --email admin@example.com --name "BB Builders Ltd." --legal-name "BB Builders Ltd." --slug bb-builders --role admin
 backend/.venv/bin/python backend/manage.py runserver 127.0.0.1:8000
 ```
 
@@ -101,6 +107,24 @@ PowerShell verification:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/health/
 ```
+
+Choose your own email and password when running `createsuperuser`; no credentials are included in the repository. The idempotent `bootstrap_organization` command creates or updates the organization and active membership for that existing user. Initial user, organization, and membership administration is also available at `http://127.0.0.1:8000/admin/`.
+
+### Required one-time M1-02 local database reset
+
+M1-01 applied Django's built-in authentication migrations before the custom user model was introduced. Django requires a custom user model to exist in the initial migration history. Existing M1-01 local development databases must therefore be recreated once before applying M1-02 migrations. This is a development-only destructive action; back up anything you need first. The current M1-01 volume contains no production domain data.
+
+From the repository root, after confirming `backend/.env` points only to the disposable local Compose services:
+
+```bash
+docker compose --env-file backend/.env -f infra/compose.yaml down -v
+docker compose --env-file backend/.env -f infra/compose.yaml up -d
+backend/.venv/Scripts/python backend/manage.py migrate
+backend/.venv/Scripts/python backend/manage.py createsuperuser
+backend/.venv/Scripts/python backend/manage.py bootstrap_organization --email admin@example.com --name "BB Builders Ltd." --legal-name "BB Builders Ltd." --slug bb-builders --role admin
+```
+
+`down -v` removes the Compose project's local PostgreSQL, Redis, and MinIO volumes. Never run this procedure against shared or production infrastructure. The application does not perform this reset automatically.
 
 ## Start Celery
 
@@ -127,7 +151,20 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The root route redirects to the dashboard. M1-01 does not replace the frontend fixtures or connect its screens to backend APIs.
+Open `http://127.0.0.1:3000`. The root route redirects to the dashboard. Sign in with the user created above. M1-02 authenticates the application shell, but it does not replace frontend project fixtures or connect project screens to backend APIs.
+
+## Browser authentication
+
+The frontend uses Django session authentication. The session identifier is held in an HttpOnly cookie and state-changing requests require a Django CSRF token. API requests include browser credentials; there are no JWTs or authentication tokens in `localStorage` or `sessionStorage`.
+
+The local frontend and API origins must match `FRONTEND_ORIGIN`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS` in `backend/.env`. CORS is credentialed and exact-origin only. Production settings require HTTPS secure cookies and reject wildcard CORS/trusted-origin configuration.
+
+Auth endpoints:
+
+- `GET /api/v1/auth/csrf/`
+- `POST /api/v1/auth/login/`
+- `POST /api/v1/auth/logout/`
+- `GET /api/v1/auth/me/`
 
 ## Local ports
 

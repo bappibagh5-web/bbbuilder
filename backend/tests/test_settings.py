@@ -19,6 +19,23 @@ def run_django_with_environment(environment: dict[str, str]) -> subprocess.Compl
     )
 
 
+def read_production_security_settings(environment: dict[str, str]):
+    script = (
+        "import django; django.setup(); "
+        "from django.conf import settings; "
+        "print(settings.SESSION_COOKIE_SECURE, settings.CSRF_COOKIE_SECURE, "
+        "settings.SESSION_COOKIE_HTTPONLY, settings.CORS_ALLOW_ALL_ORIGINS)"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=BACKEND_DIR,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
 def production_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(
@@ -51,6 +68,19 @@ def test_production_configuration_loads_with_explicit_secure_values():
     assert result.returncode == 0, result.stderr
 
 
+def test_session_and_cors_security_defaults():
+    assert settings.SESSION_COOKIE_HTTPONLY is True
+    assert settings.CORS_ALLOW_CREDENTIALS is True
+    assert settings.CORS_ALLOW_ALL_ORIGINS is False
+
+
+def test_production_uses_secure_session_and_csrf_cookies():
+    result = read_production_security_settings(production_environment())
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True True True False"
+
+
 def test_production_configuration_rejects_debug():
     environment = production_environment()
     environment["DJANGO_DEBUG"] = "true"
@@ -59,6 +89,16 @@ def test_production_configuration_rejects_debug():
 
     assert result.returncode != 0
     assert "DJANGO_DEBUG must be false in production" in result.stderr
+
+
+def test_production_configuration_rejects_wildcard_cors():
+    environment = production_environment()
+    environment["CORS_ALLOWED_ORIGINS"] = "*"
+
+    result = run_django_with_environment(environment)
+
+    assert result.returncode != 0
+    assert "exact production origins" in result.stderr
 
 
 def test_production_configuration_requires_secret_key():

@@ -14,7 +14,9 @@ The approved frontend demo already exists.
 
 Permanent project documentation exists under `/docs`.
 
-M1-01 — Backend & Local Development Foundation has been implemented.
+M1-01 — Backend & Local Development Foundation is **complete**.
+
+M1-02 — Organization, Users, Authentication & Permissions is **complete**. Automated and manual local authentication validation passed on August 29, 2026.
 
 M1-01 currently includes:
 
@@ -50,7 +52,21 @@ Docker infrastructure was manually verified on August 29, 2026:
 - Django migrations successfully applied
 - Django local server successfully started using `config.settings.local`
 
-The existing Next.js frontend still uses demo fixture data. No production project or domain functionality has been connected yet.
+M1-02 currently includes:
+
+- Custom email-based Django user model
+- Organization and organization-specific membership models
+- Admin, Estimator / Operator, and Viewer role codes
+- Active/effective membership enforcement helpers
+- Reusable DRF organization permission classes
+- CSRF-protected Django session login and logout
+- `/api/v1/auth/csrf/`, `/login/`, `/logout/`, and `/me/` endpoints
+- Django Admin registration for users, organizations, and memberships
+- Idempotent organization-membership bootstrap command
+- Minimal Next.js login page, authenticated route gate, session-expiry handling, and logout
+- Backend identity, session, CSRF, membership, role, and cross-organization tests
+
+The existing Next.js workflow screens continue to use deterministic demo fixture data. No production project or domain functionality has been connected yet.
 
 ## Completed implementation tasks
 
@@ -61,11 +77,17 @@ The existing Next.js frontend still uses demo fixture data. No production projec
 - Branch at commit: `master`
 - GitHub push status: pushed to `origin/master`
 
+### M1-02 — Organization, Users, Authentication & Permissions
+
+- Status: complete
+- Automated validation: passed
+- Manual local authentication validation: passed using `http://127.0.0.1:3000` and `http://127.0.0.1:8000`
+- M1-03 status: next / not started
+- Important local migration note: the M1-01 PostgreSQL volume contains migrations from before the custom user model existed. It must be reset once using the documented development reset procedure before applying M1-02 migrations. The repository does not reset it automatically.
+
 ## Next implementation task
 
-M1-02 — Organization, Users, Authentication, Roles & Permissions
-
-M1-02 has **not** started.
+M1-03 — Project Production Data Model & API. M1-03 is next and has not started; begin it only after explicit approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -172,7 +194,7 @@ Authenticated user
 
 #### M1-02 — Organization, Users, Authentication & Permissions
 
-**Status:** Next
+**Status:** Complete
 
 **Purpose:** Create the organization-aware BB Builders identity and access foundation.
 
@@ -191,7 +213,7 @@ Do not build custom user-management UI unless required.
 
 #### M1-03 — Project Production Data Model & API
 
-**Status:** Planned
+**Status:** Next / Not started
 
 **Purpose:** Replace project fixture concepts with persistent organization-owned project data.
 

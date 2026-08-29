@@ -36,7 +36,7 @@ addopts = "--strict-config --strict-markers"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = [".venv"]
+exclude = [".venv", "*/migrations/*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
