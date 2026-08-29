@@ -59,7 +59,7 @@ The existing Next.js frontend still uses demo fixture data. No production projec
 - Git commit: `2023d74264a65594eb751e1e40f23a13edfc0c7f`
 - Commit message: `feat: establish milestone 1 backend development foundation`
 - Branch at commit: `master`
-- GitHub push status: not confirmed as part of M1-01
+- GitHub push status: pushed to `origin/master`
 
 ## Next implementation task
 
@@ -133,3 +133,431 @@ After every implementation task:
 6. Only then begin the next task.
 
 Do not implement multiple Milestone 1 tasks in one uncontrolled change.
+
+# Forward Development Roadmap
+
+The purpose of this roadmap is to let a future engineer or AI session understand not only where development stopped, but also the intended implementation sequence and boundaries ahead.
+
+## Milestone 1 — Current active milestone
+
+**Production Foundation, Project Intake & AI Drawing/Document Review**
+
+**Status:** In progress
+
+### Primary acceptance journey
+
+```text
+Authenticated user
+  → create persistent project
+  → upload real tender documents
+  → preserve immutable originals
+  → process documents
+  → index PDF pages/sheets
+  → structured AI analysis
+  → source provenance
+  → human review
+  → conflict resolution
+  → immutable intelligence snapshot
+  → approval
+  → persistent state after logout/reload
+```
+
+### Planned task sequence
+
+#### M1-01 — Backend & Local Development Foundation
+
+**Status:** Complete
+
+**Purpose:** Establish Django/DRF, PostgreSQL, Redis, the Celery foundation, S3-compatible storage foundation, local MinIO, environment configuration, a health endpoint, testing, and local infrastructure.
+
+#### M1-02 — Organization, Users, Authentication & Permissions
+
+**Status:** Next
+
+**Purpose:** Create the organization-aware BB Builders identity and access foundation.
+
+Expected scope:
+
+- Organization
+- Django user and authentication foundation
+- Membership
+- Roles: Admin, Estimator / Operator, and Viewer
+- Secure browser authentication
+- Authenticated API boundary
+- Server-enforced permissions
+- Initial administration through Django Admin where practical
+
+Do not build custom user-management UI unless required.
+
+#### M1-03 — Project Production Data Model & API
+
+**Status:** Planned
+
+**Purpose:** Replace project fixture concepts with persistent organization-owned project data.
+
+Expected scope:
+
+- Project
+- ProjectContact
+- Project timezone
+- Deadlines
+- Project number
+- Client and location metadata
+- Project status
+- Audit events
+- DRF project APIs
+- Permission enforcement
+
+#### M1-04 — Connect Projects UI to Backend
+
+**Status:** Planned
+
+**Purpose:** Connect the approved Next.js project workflow to real APIs.
+
+Expected scope:
+
+- Project directory
+- Project creation
+- Project detail and overview
+- Persistent edit state
+- Loading, error, and permission states
+- Remove the Milestone 1 dependency on project fixture data
+
+Do not redesign the approved frontend unnecessarily.
+
+#### M1-05 — File & Document Domain Foundation
+
+**Status:** Planned
+
+**Purpose:** Create the persistent file, document, and revision architecture.
+
+Expected scope:
+
+- FileAsset
+- Document
+- DocumentRevision
+- Explicit current revision
+- Immutable originals
+- Checksums and metadata
+- Processing eligibility
+- Revision history
+- Basic source-document access controls
+
+#### M1-06 — Production Upload Workflow
+
+**Status:** Planned
+
+**Purpose:** Replace simulated browser file selection with real secure uploads.
+
+Expected scope:
+
+- Upload intents
+- Private S3-compatible storage
+- MinIO local implementation
+- Upload verification
+- MIME and size validation
+- Checksums
+- Durable upload state
+- Revision creation
+- Retry and error behavior
+
+#### M1-07 — Document Processing Pipeline
+
+**Status:** Planned
+
+**Purpose:** Establish durable asynchronous processing.
+
+Expected scope:
+
+- ProcessingJob
+- Celery execution
+- Redis broker
+- Idempotency
+- Retries and failure states
+- File classification
+- Format-specific extraction foundation
+- PDF, DOCX, XLSX, and image processing adapters
+
+PDF remains the highest priority.
+
+#### M1-08 — PDF Page & Drawing Sheet Indexing
+
+**Status:** Planned
+
+**Purpose:** Create source-addressable construction-document structure.
+
+Expected scope:
+
+- DocumentPage / DrawingSheet
+- PDF page extraction
+- Rendering
+- Page labels
+- Sheet number and title detection
+- Discipline classification
+- Source preview and navigation support
+- Processing provenance
+
+#### M1-09 — Structured AI Analysis
+
+**Status:** Planned
+
+**Purpose:** Turn processed tender packages into structured proposed project intelligence.
+
+Expected categories:
+
+- Project facts
+- Drawing disciplines
+- Required trades
+- Scope observations
+- Responsibility assignments
+- Owner-supplied items
+- Third-party scope
+- Permits and inspections
+- Landlord requirements
+- Key dates
+- Bid conditions
+- Exclusions and clarifications
+- Discovered submittal requirements
+- Discovered closeout requirements
+
+Architecture:
+
+```text
+AnalysisRun
+  → AnalysisTaskRun
+  → structured findings
+```
+
+AI must use narrow, schema-validated services.
+
+#### M1-10 — Provenance, Findings, Conflict & Human Review
+
+**Status:** Planned
+
+**Purpose:** Make AI results reviewable and auditable.
+
+Expected scope:
+
+- ExtractedFinding
+- FindingSource / provenance
+- Confidence and risk display
+- IntelligenceConflict
+- Accepted
+- Edited / Accepted
+- Rejected
+- Needs Clarification
+- Historical FindingReview records
+- Human conflict resolution
+
+Original AI values must never be overwritten by human edits.
+
+#### M1-11 — Intelligence Snapshot, Approval & Audit
+
+**Status:** Planned
+
+**Purpose:** Create the controlled output of Milestone 1.
+
+Expected scope:
+
+- ProjectIntelligenceSnapshot
+- Deterministic readiness rules
+- ProjectIntelligenceApproval
+- Append-oriented audit events
+- Re-review behavior after material revision
+- Preservation of previous approved snapshots
+
+Only approved intelligence becomes eligible for later bidding workflows.
+
+#### M1-12 — Real BB Builders Project Validation & Milestone Polish
+
+**Status:** Planned
+
+**Purpose:** Validate the completed milestone using representative BB Builders historical material.
+
+Expected validation:
+
+- Real or sanitized tender-package upload
+- Mixed documents
+- Large construction PDF
+- Page and sheet indexing
+- Structured findings
+- Source provenance
+- Deliberate conflict
+- Human review
+- Approval
+- Persistence after reload
+- Permissions
+- Error and retry handling
+
+Use the historical BB Builders / JD Sports material as workflow evidence, subject to access and privacy requirements.
+
+Milestone 1 ends after successful validation and a client-ready demonstration.
+
+## Milestone 2 — Future
+
+**Trade Scope Builder, RFQ Packages & Contractor Discovery**
+
+High-level goals only:
+
+```text
+Approved project intelligence
+  → structured trade scopes
+  → human scope approval
+  → RFQ/trade packages
+  → BB Builders subcontractor database
+  → existing-network search first
+  → external contractor discovery for coverage gaps
+  → qualification and deduplication
+  → approved outreach recipient lists
+```
+
+Important future concepts:
+
+- Trade
+- ScopeItem
+- TradePackage
+- Subcontractor
+- Contact
+- TradeCapability
+- Project-specific contractor relationship
+
+Do not implement during Milestone 1.
+
+## Milestone 3 — Future
+
+**Outreach, Bid Intake, Qualification & Bid Leveling**
+
+High-level goals only:
+
+```text
+Approved RFQ
+  → subcontractor invitations
+  → campaign tracking
+  → inbound quote association
+  → QuoteVersion
+  → AI-assisted quote extraction
+  → exclusions, alternates, and allowances
+  → scope coverage
+  → normalization
+  → intelligence and clarification flags
+  → human bid selection
+```
+
+Important principle: Lowest submitted price is not automatically the best commercial bid.
+
+Historical BB Builders data proves the system must support:
+
+- Quote revisions
+- Alternate materials
+- Added options
+- Permits
+- Taxes
+- Scope differences
+- Awarded values different from initial quote values
+
+Do not implement during Milestone 1.
+
+## Milestone 4 — Future
+
+**Final Client Proposal & Award Workflow**
+
+High-level goals only:
+
+```text
+Approved trade selections
+  → deterministic pricing and markup
+  → Proposal
+  → ProposalVersion
+  → human approval
+  → client-facing output
+  → award
+  → subcontractor purchase orders
+  → compliance and document requests
+```
+
+Important principles:
+
+- Pricing arithmetic is deterministic application logic.
+- Proposal revisions are immutable and versioned.
+- Commercial history is never silently overwritten.
+- Awards are human decisions.
+
+Do not implement during Milestone 1.
+
+## Milestone 5 — Future
+
+**Smartsheet / Project Management Integration**
+
+High-level goals only:
+
+```text
+Awarded project
+  → approved schedule/template
+  → construction activities
+  → trade dates
+  → milestones
+  → inspections
+  → delivery dates
+  → Smartsheet synchronization
+```
+
+Historical BB Builders schedules show:
+
+- One trade may have multiple separate schedule tasks.
+- Overlapping activities are normal.
+- Schedule task and trade are separate concepts.
+
+Do not build a full standalone construction-management platform as part of the current approved scope.
+
+## Future expansion — Not current contract scope
+
+Historical BB Builders documents reveal possible future modules:
+
+- Submittal management
+- Submittal revision and review workflow
+- Compliance tracking
+- Change orders
+- Subcontractor invoices and progress claims
+- Contract-value tracking
+- Closeout requirements
+- Warranties
+- O&M manuals
+- As-built collection
+- Client closeout packages
+- Subcontractor performance and history
+
+These are future opportunities only.
+
+They must **not** be silently included in the current $5,000 core project unless separately agreed.
+
+## Development control rule
+
+For every task:
+
+1. Read the permanent documentation.
+2. Confirm the current task and its boundaries.
+3. Implement only that task.
+4. Run tests and validation.
+5. Review the diff.
+6. Do not proceed automatically.
+7. Commit approved work.
+8. Push to GitHub.
+9. Update `CURRENT_STATUS.md` when status materially changes.
+10. Begin the next task only after explicit approval.
+
+Never implement multiple roadmap tasks in one uncontrolled Codex request.
+
+## Recovery instruction
+
+If all previous ChatGPT or Codex conversations are lost, a new session should:
+
+1. Open the repository.
+2. Read every file under `/docs`.
+3. Read `docs/CURRENT_STATUS.md`.
+4. Read `README.md`.
+5. Inspect recent Git history.
+6. Identify the last completed task.
+7. Report its understanding.
+8. Ask for approval before changing code.
+
+The repository, documentation, and Git history are the authoritative project memory.
