@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Non-frontend workspaces use their own linters.
+    "backend/**",
+    "infra/**",
   ]),
 ]);
 

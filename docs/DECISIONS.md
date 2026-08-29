@@ -138,6 +138,18 @@ Statuses:
 **Decision:** Automate critical invariant tests for permissions, immutable revisions, job idempotency, provenance, review history, conflict resolution, snapshot approval, and material-revision re-review. The key acceptance demonstration is one representative real or sanitized BB Builders tender package completing the full Milestone 1 journey.
 **Consequence:** Broad test coverage is valuable, but milestone acceptance must prove the integrated construction-document workflow rather than only isolated technical components.
 
+### D-022 — M1-01 backend runtime and dependency baseline
+
+**Status:** Decided
+**Decision:** Use Python 3.12 or newer with the Django 5.2 LTS line, Django REST Framework 3.18, Celery 5.6, PostgreSQL 17, Redis 7.4, and `django-storages` backed by an S3-compatible service. Pin exact Python package versions in `backend/pyproject.toml` and update them deliberately through tested dependency changes.
+**Consequence:** The foundation favors the supported Django LTS line and a small dependency set. OpenAI and document-parsing packages are intentionally deferred until the task that needs them.
+
+### D-023 — Local development service topology
+
+**Status:** Decided
+**Decision:** Run PostgreSQL, Redis, and MinIO through Docker Compose while running Next.js, Django, and Celery as local developer processes. MinIO is local-only and its bucket is private by default.
+**Consequence:** Local setup remains inspectable and lightweight without committing to a production hosting topology or containerizing the approved frontend.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology
