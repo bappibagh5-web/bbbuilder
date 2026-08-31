@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "storages",
     "apps.accounts",
     "apps.organizations",
+    "apps.projects",
 ]
 
 MIDDLEWARE = [

@@ -150,6 +150,30 @@ Statuses:
 **Decision:** Run PostgreSQL, Redis, and MinIO through Docker Compose while running Next.js, Django, and Celery as local developer processes. MinIO is local-only and its bucket is private by default.
 **Consequence:** Local setup remains inspectable and lightweight without committing to a production hosting topology or containerizing the approved frontend.
 
+### D-024 — Explicit organization context for project APIs
+
+**Status:** Decided
+**Decision:** Project APIs identify organization context through `/api/v1/organizations/{organization_slug}/...`. Django validates the requested organization against the authenticated user's active membership. The backend never selects a user's first membership and never trusts organization or project ownership supplied in a request payload.
+**Consequence:** A user with several memberships has an explicit tenant boundary on every request. Project querysets and nested contact querysets remain scoped to that validated organization and project.
+
+### D-025 — Project identity, archive, and lifecycle policy
+
+**Status:** Decided
+**Decision:** Project numbers are case-insensitively unique within an organization while preserving the entered display value. Projects are archived and reactivated through `is_active`; destructive project deletion is not exposed. Archived projects remain listable and retrievable. Only Admin members may change project archive state. Estimator / Operator members may edit ordinary project fields but not `is_active`. Project contacts also use `is_active`, and both Admin and Estimator / Operator members may deactivate or reactivate them. M1-03 validates the controlled project status vocabulary but does not enforce a workflow transition state machine.
+**Consequence:** Project history remains recoverable, tenant-specific identifiers cannot differ only by case, and future workflow services may add transition rules without treating the current status field as arbitrary text.
+
+### D-026 — M1-03 project audit boundary
+
+**Status:** Decided
+**Decision:** Use a small append-oriented `AuditEvent` for project and project-contact creation, material updates, archive/reactivation, and contact activation changes. API and Django Admin mutations record the authenticated actor, organization, project, target, UTC occurrence time, changed fields, and safely serialized before/after context. Audit records have no product mutation endpoint and are read-only in Django Admin.
+**Consequence:** M1-03 provides a reusable minimum business audit trail without event sourcing, signals with hidden request state, middleware-based actor injection, or an Activity UI.
+
+### D-027 — Project deadline and date representation
+
+**Status:** Decided
+**Decision:** Project and audit instants are timezone-aware and stored in UTC. Bid and question deadline API inputs require an explicit ISO 8601 UTC offset or `Z`. The project timezone records the local interpretation context. Site visit, planned start, substantial completion, and opening/handover obligations remain date-only fields.
+**Consequence:** API clients cannot silently submit ambiguous naive deadlines, and date-only obligations do not shift when rendered in another timezone.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology
