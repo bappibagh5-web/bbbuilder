@@ -1,1 +1,7 @@
-import{getAIReview}from"@/data";import{AIReviewModule}from"@/components/ai-review/ai-review-module";export default async function Page({params}:{params:Promise<{projectId:string}>}){const{projectId}=await params;return <AIReviewModule review={getAIReview(projectId)}/>}
+import { getAIReview, getProject } from "@/data";
+import { AIReviewModule } from "@/components/ai-review/ai-review-module";
+
+export default async function Page({ params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  return getProject(projectId) ? <AIReviewModule review={getAIReview(projectId)} /> : null;
+}

@@ -1,1 +1,6 @@
-import Link from"next/link";import{FolderX}from"lucide-react";export default function NotFound(){return <div className="mx-auto flex min-h-[60vh] max-w-2xl flex-col items-center justify-center text-center"><div className="rounded-xl bg-slate-100 p-4 text-slate-500"><FolderX className="h-7 w-7"/></div><h1 className="mt-5 text-2xl font-semibold">Project not found</h1><p className="mt-2 text-sm text-slate-500">The project may not exist in this demo workspace.</p><Link href="/projects" className="mt-5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white">Back to Projects</Link></div>}
+import Link from "next/link";
+import { FolderX } from "lucide-react";
+
+export default function NotFound() {
+  return <div className="mx-auto flex min-h-[60vh] max-w-2xl flex-col items-center justify-center text-center"><div className="rounded-xl bg-slate-100 p-4 text-slate-500"><FolderX className="h-7 w-7" /></div><h1 className="mt-5 text-2xl font-semibold">Project not found</h1><p className="mt-2 text-sm text-slate-500">The project may not exist or may not be available in the selected organization.</p><Link href="/projects" className="mt-5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white">Back to Projects</Link></div>;
+}

@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { roleLabel } from "@/lib/auth";
 import { useAuth } from "@/components/auth/auth-provider";
+import { useOrganization } from "@/components/organizations/organization-provider";
 import { DemoNotice } from "./demo-notice";
 import { Button } from "./ui/button";
 
@@ -189,7 +190,7 @@ function Sidebar({
               {presentation ? "Presentation Mode" : "Demo Environment"}
             </p>
             <p className="mt-1 text-[11px] leading-4 text-sidebar-muted">
-              All project, company, AI, and communication data is simulated.
+              Project records are persistent. Later workflow data remains simulated.
             </p>
           </div>
         </div>
@@ -200,6 +201,7 @@ function Sidebar({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const { memberships, activeMembership, selectOrganization } = useOrganization();
   const [navOpen, setNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
@@ -306,7 +308,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {displayName}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {roleLabel(user?.memberships[0]?.role)}
+                  {roleLabel(activeMembership?.role)}
                 </p>
               </div>
               <button
@@ -323,7 +325,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         {presentation && (
           <div className="border-b bg-blue-50 px-4 py-2 text-center text-xs font-medium text-blue-900">
-            Presentation Mode · This remains a simulated demo environment.
+            Presentation Mode · Project records are persistent; later workflows remain demo data.
+          </div>
+        )}
+        {memberships.length > 1 && (
+          <div className="border-b bg-white px-4 py-2 sm:px-6 lg:px-8">
+            <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600">
+              Organization
+              <select
+                value={activeMembership?.organization.slug ?? ""}
+                onChange={(event) => selectOrganization(event.target.value)}
+                className="h-8 rounded-md border bg-white px-2 text-xs text-slate-800"
+              >
+                <option value="" disabled>Select an organization</option>
+                {memberships.map((membership) => (
+                  <option key={membership.id} value={membership.organization.slug}>
+                    {membership.organization.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
         <main className="min-w-0 overflow-x-clip px-4 py-7 sm:px-6 lg:px-8 lg:py-8">

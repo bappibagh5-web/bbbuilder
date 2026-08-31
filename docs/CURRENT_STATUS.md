@@ -20,6 +20,8 @@ M1-02 — Organization, Users, Authentication & Permissions is **complete**. Aut
 
 M1-03 — Project Production Data Model & API is **complete**. Automated validation and manual validation against the local PostgreSQL database passed on September 1, 2026.
 
+M1-04 — Connect Projects UI to Backend is **complete**. Automated validation and authenticated manual production validation passed on September 1, 2026.
+
 M1-01 currently includes:
 
 - Django 5.2 backend
@@ -68,7 +70,7 @@ M1-02 currently includes:
 - Minimal Next.js login page, authenticated route gate, session-expiry handling, and logout
 - Backend identity, session, CSRF, membership, role, and cross-organization tests
 
-The existing Next.js workflow screens continue to use deterministic demo fixture data. Production project persistence and APIs now exist, but the frontend has not been connected to them.
+The Next.js Projects directory, creation form, and production project workspace now use persistent Django API data. Later workflow screens continue to use isolated deterministic demo fixtures only for explicit historical demo project IDs.
 
 M1-03 currently includes:
 
@@ -85,7 +87,22 @@ M1-03 currently includes:
 - Forward and fresh database migrations
 - Focused model, API, permission, isolation, timezone, archive, and audit tests
 
-The Next.js project screens remain fixture-driven. M1-04 frontend integration has not started.
+M1-04 currently includes:
+
+- Authenticated membership-derived organization context
+- Explicit organization selection when a user has multiple memberships
+- Safe zero-membership access states
+- Typed organization-scoped Project API helpers using the existing session/CSRF client
+- Persistent project list with loading, error, empty, filtering, archive indication, and lightweight pagination states
+- Persistent project creation and metadata editing
+- Project-local timezone conversion to offset-aware API deadlines
+- Read-only Viewer UI and role-appropriate Admin / Estimator controls
+- Admin archive/reactivation controls without destructive deletion
+- Production project detail and normal future-workflow empty states
+- Exact fixture-ID isolation so production projects never inherit demo workflow records
+- Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
+
+M1-04 is complete. M1-05 has not started.
 
 ## Completed implementation tasks
 
@@ -110,11 +127,20 @@ The Next.js project screens remain fixture-driven. M1-04 frontend integration ha
 - Automated validation: passed
 - Manual local PostgreSQL validation: passed on September 1, 2026
 - Verified project and contact persistence, project archive/reactivation, and append-oriented audit events through the production API and Django Admin
-- M1-04 status: next / not started
+- M1-04 status: complete
+
+### M1-04 — Connect Projects UI to Backend
+
+- Status: complete
+- Automated validation: passed
+- Authenticated manual production validation: passed on September 1, 2026
+- Verified persistent list/create/detail/edit/archive/reactivate behavior and project-timezone display
+- Verified numeric production projects do not receive historical fixture workflow data
+- M1-05 status: next / not started
 
 ## Next implementation task
 
-M1-04 — Connect Projects UI to Backend is next / not started and requires explicit approval.
+M1-05 — File & Document Domain Foundation is next / not started and requires explicit approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -259,7 +285,7 @@ Expected scope:
 
 #### M1-04 — Connect Projects UI to Backend
 
-**Status:** Next / Not started
+**Status:** Complete
 
 **Purpose:** Connect the approved Next.js project workflow to real APIs.
 
@@ -276,7 +302,7 @@ Do not redesign the approved frontend unnecessarily.
 
 #### M1-05 — File & Document Domain Foundation
 
-**Status:** Planned
+**Status:** Next / Not started
 
 **Purpose:** Create the persistent file, document, and revision architecture.
 

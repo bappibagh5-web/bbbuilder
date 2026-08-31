@@ -174,6 +174,18 @@ Statuses:
 **Decision:** Project and audit instants are timezone-aware and stored in UTC. Bid and question deadline API inputs require an explicit ISO 8601 UTC offset or `Z`. The project timezone records the local interpretation context. Site visit, planned start, substantial completion, and opening/handover obligations remain date-only fields.
 **Consequence:** API clients cannot silently submit ambiguous naive deadlines, and date-only obligations do not shift when rendered in another timezone.
 
+### D-028 — Frontend organization context and production project identity
+
+**Status:** Decided
+**Decision:** The Next.js product derives available organization contexts only from active memberships returned by `/api/v1/auth/me/`. One active membership is selected automatically. More than one requires an explicit in-memory user selection; no first-membership fallback is allowed. Zero memberships produces an access state. The selected slug determines API routing but is never authorization proof. `/projects`, project creation, and numeric production-project workspaces use the organization-scoped Django API as their canonical source.
+**Consequence:** Frontend navigation remains convenient without duplicating backend authorization or assuming BB Builders ownership. Membership and cross-organization enforcement remain server responsibilities.
+
+### D-029 — Production-project separation and project-local datetime conversion
+
+**Status:** Decided
+**Decision:** Historical demo projects remain reachable only through exact fixture IDs. Any other project route is treated as a production identity and must load through the selected organization's API; it never falls back to fixture data. Until later workflow domains exist, production-project tabs show normal empty states rather than demo documents, scopes, bids, or proposals. `datetime-local` form values are interpreted with the project's selected IANA timezone using `Intl.DateTimeFormat`, validated for nonexistent local times, and serialized with an explicit numeric UTC offset. Date-only fields remain unchanged `YYYY-MM-DD` values. Status is displayed but not editable in M1-04 because exposing later lifecycle states would imply workflows that are not production-backed.
+**Consequence:** Real projects cannot inherit another project's prototype workflow, and deadline instants do not accidentally use the browser timezone. Archive/reactivate controls are shown only to Admin members; ordinary metadata editing is shown to Admin and Estimator / Operator members, while Viewer UI is read-only. Django remains authoritative for every mutation.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

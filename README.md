@@ -168,7 +168,7 @@ Auth endpoints:
 
 ## Project API
 
-M1-03 adds persistent organization-scoped projects and project contacts. The existing Next.js project screens remain fixture-driven until M1-04.
+M1-03 provides persistent organization-scoped projects and project contacts. M1-04 connects `/projects`, project creation, and production project workspaces to these endpoints. Historical fixture projects remain available only through their explicit demo IDs for the later prototype workflows.
 
 Authenticated project endpoints use an explicit organization slug:
 
@@ -184,6 +184,8 @@ Project ownership and nested contact ownership are assigned from the validated U
 Bid and question deadlines require an explicit ISO 8601 offset, for example `2026-09-15T14:30:00-04:00` or `2026-09-15T18:30:00Z`. Date-only project milestones use `YYYY-MM-DD`.
 
 Project and contact collections use page-number pagination with 50 records by default and a maximum requested page size of 100.
+
+The frontend derives organization context from the active memberships returned by `/api/v1/auth/me/`. A single membership is selected automatically; users with several memberships must explicitly choose one. Project-local deadline inputs are converted with the selected IANA project timezone and sent with an explicit UTC offset. Production project workflow tabs show honest empty states until their corresponding backend domains are implemented; they never fall back to another project's fixture records.
 
 ## Local ports
 

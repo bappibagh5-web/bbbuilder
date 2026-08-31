@@ -1,1 +1,8 @@
-import{notFound}from"next/navigation";import{getProject,getProjectDetails}from"@/data";import{ProjectOverview}from"@/components/projects/project-overview";export default async function Page({params}:{params:Promise<{projectId:string}>}){const{projectId}=await params;const project=getProject(projectId);if(!project)notFound();return <ProjectOverview project={project} details={getProjectDetails(projectId)}/>}
+import { getProject, getProjectDetails } from "@/data";
+import { ProjectOverview } from "@/components/projects/project-overview";
+
+export default async function Page({ params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const demoProject = getProject(projectId);
+  return demoProject ? <ProjectOverview project={demoProject} details={getProjectDetails(projectId)} /> : null;
+}

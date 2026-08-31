@@ -11,9 +11,11 @@ export default async function Page({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  const demoProject = getProject(projectId);
+  if (!demoProject) return null;
   return (
     <OutreachModule
-      project={getProject(projectId)!}
+      project={demoProject}
       trades={outreachTradeSummary}
       initialRecipients={
         projectId === "retail-store-coquitlam" ? electricalRecipients : []

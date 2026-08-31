@@ -12,9 +12,11 @@ export default async function Page({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  const demoProject = getProject(projectId);
+  if (!demoProject) return null;
   return (
     <ContractorDiscovery
-      project={getProject(projectId)!}
+      project={demoProject}
       trades={discoveryTrades}
       initialCandidates={
         projectId === "retail-store-coquitlam" ? electricalCandidates : []
