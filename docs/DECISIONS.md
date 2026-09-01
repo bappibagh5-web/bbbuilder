@@ -186,6 +186,12 @@ Statuses:
 **Decision:** Historical demo projects remain reachable only through exact fixture IDs. Any other project route is treated as a production identity and must load through the selected organization's API; it never falls back to fixture data. Until later workflow domains exist, production-project tabs show normal empty states rather than demo documents, scopes, bids, or proposals. `datetime-local` form values are interpreted with the project's selected IANA timezone using `Intl.DateTimeFormat`, validated for nonexistent local times, and serialized with an explicit numeric UTC offset. Date-only fields remain unchanged `YYYY-MM-DD` values. Status is displayed but not editable in M1-04 because exposing later lifecycle states would imply workflows that are not production-backed.
 **Consequence:** Real projects cannot inherit another project's prototype workflow, and deadline instants do not accidentally use the browser timezone. Archive/reactivate controls are shown only to Admin members; ordinary metadata editing is shown to Admin and Estimator / Operator members, while Viewer UI is read-only. Django remains authoritative for every mutation.
 
+### D-030 — File, project-file, document, and revision separation
+
+**Status:** Decided
+**Decision:** Represent a stored binary as an organization-owned immutable `FileAsset`, bind it to exactly one project through `ProjectFile`, represent its logical business identity with `Document`, and preserve every source version as an immutable `DocumentRevision`. Storage keys are globally unique and remain private backend metadata. A revision file must belong to the same project as its document. `Document.current_revision` remains nullable and may change only through the validated, audited `set_current_revision` domain service; creating a revision never selects it implicitly.
+**Consequence:** M1-05 can establish durable ownership and history without implementing uploads. Its organization/project-scoped document and revision APIs are read-only metadata views. Upload intents, object writes and verification, upload/validation/malware states, document mutation APIs, and revision-creation workflows remain M1-06 scope. Processing jobs, page/sheet records, and AI behavior remain later tasks.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

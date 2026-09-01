@@ -22,6 +22,10 @@ M1-03 — Project Production Data Model & API is **complete**. Automated validat
 
 M1-04 — Connect Projects UI to Backend is **complete**. Automated validation and authenticated manual production validation passed on September 1, 2026.
 
+M1-05 — File / Document Storage Model is **complete**. Automated and manual local PostgreSQL validation passed on September 1, 2026.
+
+M1-06 — Production Upload Workflow is **next / not started**.
+
 M1-01 currently includes:
 
 - Django 5.2 backend
@@ -102,7 +106,19 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 is complete. M1-05 has not started.
+M1-04 is complete. M1-05 — File / Document Storage Model is **complete**. Automated validation and manual validation against the local PostgreSQL database passed on September 1, 2026. M1-06 is next / not started.
+
+M1-05 currently includes:
+
+- Organization-owned immutable FileAsset storage metadata
+- Explicit ProjectFile ownership bindings
+- Logical Document records with broad controlled categories and optional disciplines
+- Immutable DocumentRevision history with explicit same-document supersession
+- Nullable explicit current revision selected only through a validated, audited domain service
+- Read-only organization/project-scoped document and revision metadata APIs
+- Django Admin inspection with immutable fields and destructive deletion protected
+- Focused ownership, immutability, revision, permission, isolation, API, and audit tests
+- No upload intents, object-storage writes, processing jobs, page/sheet indexing, or AI behavior
 
 ## Completed implementation tasks
 
@@ -136,11 +152,19 @@ M1-04 is complete. M1-05 has not started.
 - Authenticated manual production validation: passed on September 1, 2026
 - Verified persistent list/create/detail/edit/archive/reactivate behavior and project-timezone display
 - Verified numeric production projects do not receive historical fixture workflow data
-- M1-05 status: next / not started
+- M1-05 status: complete
+
+### M1-05 — File / Document Storage Model
+
+- Status: complete
+- Automated validation: passed
+- Manual local PostgreSQL validation: passed on September 1, 2026
+- Verified immutable FileAsset and DocumentRevision metadata, ProjectFile ownership, preserved revision history, explicit current-revision selection, safe read-only APIs, and append-oriented audit events
+- M1-06 status: next / not started
 
 ## Next implementation task
 
-M1-05 — File & Document Domain Foundation is next / not started and requires explicit approval.
+M1-06 — Production Upload Workflow is next / not started and requires explicit approval after M1-05 validation and approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -302,7 +326,7 @@ Do not redesign the approved frontend unnecessarily.
 
 #### M1-05 — File & Document Domain Foundation
 
-**Status:** Next / Not started
+**Status:** Complete
 
 **Purpose:** Create the persistent file, document, and revision architecture.
 
