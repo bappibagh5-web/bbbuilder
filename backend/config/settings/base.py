@@ -94,6 +94,7 @@ AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = True
 AWS_S3_FILE_OVERWRITE = False
 AWS_S3_ADDRESSING_STYLE = env("S3_ADDRESSING_STYLE", default="path")
+DOCUMENT_UPLOAD_MAX_BYTES = env.int("DOCUMENT_UPLOAD_MAX_BYTES", default=250 * 1024 * 1024)
 
 STORAGES = {
     "default": {"BACKEND": "storages.backends.s3.S3Storage"},

@@ -35,16 +35,20 @@ function errorMessage(payload: unknown) {
   if (typeof detail === "string") return detail;
   const nonField = (payload as { non_field_errors?: unknown }).non_field_errors;
   if (Array.isArray(nonField) && typeof nonField[0] === "string") return nonField[0];
+  for (const value of Object.values(payload)) {
+    if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+    if (typeof value === "string") return value;
+  }
   return undefined;
 }
 
-export async function apiRequest<T>(
+export async function apiResponse(
   path: string,
   options: RequestInit & { csrfToken?: string; notifyUnauthorized?: boolean } = {},
 ) {
   const { csrfToken, notifyUnauthorized = true, ...requestOptions } = options;
   const headers = new Headers(requestOptions.headers);
-  if (requestOptions.body) headers.set("Content-Type", "application/json");
+  if (typeof requestOptions.body === "string") headers.set("Content-Type", "application/json");
   const method = requestOptions.method?.toUpperCase() ?? "GET";
   if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
     const token = csrfToken ?? cookie("csrftoken");
@@ -73,5 +77,13 @@ export async function apiRequest<T>(
       payload,
     );
   }
+  return response;
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit & { csrfToken?: string; notifyUnauthorized?: boolean } = {},
+) {
+  const response = await apiResponse(path, options);
   return (await response.json()) as T;
 }

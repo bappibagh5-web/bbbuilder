@@ -47,6 +47,8 @@ cp .env.example .env.local
 
 The backend file supplies Django configuration and Docker Compose service credentials. Ensure `DATABASE_URL`, the `POSTGRES_*` values, and the MinIO/S3 credentials agree. The root frontend file sets `NEXT_PUBLIC_API_BASE_URL`; use the same hostname (`127.0.0.1`) for both applications so session and CSRF cookies behave consistently.
 
+`DOCUMENT_UPLOAD_MAX_BYTES` controls the maximum accepted source-document size. The tracked local example uses 262,144,000 bytes (250 MiB), which is large enough for typical commercial drawing packages while remaining bounded.
+
 ## Start local infrastructure
 
 From the repository root:
@@ -186,6 +188,19 @@ Bid and question deadlines require an explicit ISO 8601 offset, for example `202
 Project and contact collections use page-number pagination with 50 records by default and a maximum requested page size of 100.
 
 The frontend derives organization context from the active memberships returned by `/api/v1/auth/me/`. A single membership is selected automatically; users with several memberships must explicitly choose one. Project-local deadline inputs are converted with the selected IANA project timezone and sent with an explicit UTC offset. Production project workflow tabs show honest empty states until their corresponding backend domains are implemented; they never fall back to another project's fixture records.
+
+## Project document upload API
+
+M1-06 connects numeric production-project Documents tabs to authenticated private object storage. Django receives multipart uploads, computes SHA-256 using uploaded-file chunks, validates the centralized extension/MIME/signature policy, generates a UUID-based immutable object key, stores the source in the configured S3-compatible bucket, and creates the file/document/revision records transactionally. Uploaded bytes are not parsed or sent to any processing or AI service in M1-06.
+
+```text
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/upload/
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/upload/
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/set-current/
+GET   /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/download/
+```
+
+Supported upload extensions are PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, and JPEG. The backend remains authoritative; the browser `accept` attribute is only a convenience. Downloads are authorized and streamed through Django without exposing the bucket, object key, credentials, or a permanent public URL. Malware scanning, resumable/direct-to-storage uploads, advanced file identification, and retention automation remain future production-hardening decisions.
 
 ## Local ports
 

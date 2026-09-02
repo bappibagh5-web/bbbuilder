@@ -24,7 +24,9 @@ M1-04 — Connect Projects UI to Backend is **complete**. Automated validation a
 
 M1-05 — File / Document Storage Model is **complete**. Automated and manual local PostgreSQL validation passed on September 1, 2026.
 
-M1-06 — Production Upload Workflow is **next / not started**.
+M1-06 — Production Upload Workflow is **complete**. Automated validation and authenticated manual PostgreSQL/MinIO validation passed on September 2, 2026.
+
+M1-07 — Document Processing Pipeline is **next / not started**.
 
 M1-01 currently includes:
 
@@ -106,7 +108,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 is complete. M1-05 — File / Document Storage Model is **complete**. Automated validation and manual validation against the local PostgreSQL database passed on September 1, 2026. M1-06 is next / not started.
+M1-04, M1-05, and M1-06 are complete. M1-07 is next / not started.
 
 M1-05 currently includes:
 
@@ -160,11 +162,30 @@ M1-05 currently includes:
 - Automated validation: passed
 - Manual local PostgreSQL validation: passed on September 1, 2026
 - Verified immutable FileAsset and DocumentRevision metadata, ProjectFile ownership, preserved revision history, explicit current-revision selection, safe read-only APIs, and append-oriented audit events
-- M1-06 status: next / not started
+- M1-06 status: complete
+
+### M1-06 — Production Upload Workflow
+
+- Status: complete
+- Automated validation: passed
+- Authenticated manual PostgreSQL and private MinIO validation: passed on September 2, 2026
+- Verified real upload persistence, UUID organization/project object keys, secure downloads, immutable revision history, explicit current-revision changes, project status transition, and audit events
+- Backend-mediated authenticated multipart uploads to private S3-compatible storage
+- Configurable 250 MiB limit and centralized mixed tender-file allowlist
+- Chunked SHA-256 calculation and best-effort deterministic signature checks
+- UUID-based organization/project object keys that never overwrite filename-based objects
+- Transactional FileAsset, ProjectFile, Document, and DocumentRevision creation with storage compensation
+- Explicit first-current behavior and opt-in current selection for later revisions
+- Explicit set-current action and narrowly audited Draft to Documents Uploaded transition
+- Secure authenticated streaming downloads with graceful missing-object behavior
+- Real numeric-project Documents UI with upload, revision history, download, archive, and role states
+- Historical fixture document experiences remain unchanged
+- No ProcessingJob, PDF extraction, page/sheet indexing, OCR, Celery document task, or AI behavior
+- M1-07 status: next / not started
 
 ## Next implementation task
 
-M1-06 — Production Upload Workflow is next / not started and requires explicit approval after M1-05 validation and approval.
+M1-07 — Document Processing Pipeline is next / not started and requires explicit approval after M1-06 validation, commit, and push.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -344,7 +365,7 @@ Expected scope:
 
 #### M1-06 — Production Upload Workflow
 
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Replace simulated browser file selection with real secure uploads.
 
@@ -362,7 +383,7 @@ Expected scope:
 
 #### M1-07 — Document Processing Pipeline
 
-**Status:** Planned
+**Status:** Next / Not started
 
 **Purpose:** Establish durable asynchronous processing.
 

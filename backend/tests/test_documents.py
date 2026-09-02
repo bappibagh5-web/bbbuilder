@@ -367,19 +367,39 @@ def test_active_members_can_read_document_and_revision_metadata(user, membership
     assert "storage_key" not in detail.data["project_file"]["file_asset"]
 
 
-def test_document_apis_are_read_only(user, membership, project):
+def test_revision_apis_remain_read_only_and_document_delete_is_unavailable(
+    user, membership, project
+):
     revision = create_revision(project, user)
     client = authenticated_client(user)
 
     assert client.post(documents_url(project), {"title": "No"}, format="json").status_code == 405
-    assert (
-        client.patch(document_url(revision.document), {"title": "No"}, format="json").status_code
-        == 405
-    )
     assert client.delete(document_url(revision.document)).status_code == 405
     assert client.post(revisions_url(revision.document), {}, format="json").status_code == 405
     assert client.patch(revision_url(revision), {}, format="json").status_code == 405
     assert client.delete(revision_url(revision)).status_code == 405
+
+
+def test_document_metadata_patch_is_narrow_and_cannot_forge_current_revision(
+    user, membership, project
+):
+    revision = create_revision(project, user)
+    response = authenticated_client(user).patch(
+        document_url(revision.document),
+        {
+            "title": "Updated title",
+            "description": "Reviewed metadata",
+            "current_revision": revision.pk,
+            "project": 999999,
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    revision.document.refresh_from_db()
+    assert revision.document.title == "Updated title"
+    assert revision.document.description == "Reviewed metadata"
+    assert revision.document.current_revision is None
+    assert revision.document.project == project
 
 
 def test_unauthenticated_and_inactive_members_are_denied(user, membership, project):
