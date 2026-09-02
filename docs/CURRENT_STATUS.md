@@ -26,7 +26,9 @@ M1-05 — File / Document Storage Model is **complete**. Automated and manual lo
 
 M1-06 — Production Upload Workflow is **complete**. Automated validation and authenticated manual PostgreSQL/MinIO validation passed on September 2, 2026.
 
-M1-07 — Document Processing Pipeline is **next / not started**.
+M1-07 — Document Processing Pipeline is **complete**. Automated validation and manual validation against the real PostgreSQL, Redis, Celery, and MinIO environment passed on September 2, 2026.
+
+M1-08 — PDF Page / Sheet Indexing is **next / not started**.
 
 M1-01 currently includes:
 
@@ -108,7 +110,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04, M1-05, and M1-06 are complete. M1-07 is next / not started.
+M1-04, M1-05, M1-06, and M1-07 are complete. M1-08 is next / not started.
 
 M1-05 currently includes:
 
@@ -181,11 +183,28 @@ M1-05 currently includes:
 - Real numeric-project Documents UI with upload, revision history, download, archive, and role states
 - Historical fixture document experiences remain unchanged
 - No ProcessingJob, PDF extraction, page/sheet indexing, OCR, Celery document task, or AI behavior
-- M1-07 status: next / not started
+- M1-07 status: complete
+
+### M1-07 — Document Processing Pipeline
+
+- Status: complete
+- Durable DocumentRevision-targeted ProcessingJob records with no GenericForeignKey
+- PostgreSQL-authoritative queued/running/succeeded/failed lifecycle
+- Transaction-on-commit Celery publication and broker-failure-safe queued intent
+- Partial active-job uniqueness, row-locked claims, bounded transient retries, leases, heartbeats, and stale-worker recovery
+- Real source-object streaming with immutable byte-size and SHA-256 verification
+- Safe source-missing, storage-unavailable, size-mismatch, checksum-mismatch, and processing-error outcomes
+- Automatic jobs for newly uploaded revisions and explicit request/retry for existing revisions
+- Organization/project/revision-scoped APIs and Admin/Estimator/Viewer permissions
+- Production Documents processing states with bounded five-second polling
+- Real Windows Celery solo-worker validation against PostgreSQL, Redis, and private MinIO
+- Worker-down queued-intent persistence and restart processing validated
+- No PDF parsing, page/sheet indexing, OCR, AI, findings, or later-workflow behavior
+- M1-08 status: next / not started
 
 ## Next implementation task
 
-M1-07 — Document Processing Pipeline is next / not started and requires explicit approval after M1-06 validation, commit, and push.
+M1-08 — PDF Page / Sheet Indexing is next / not started and requires explicit approval after the M1-07 commit and push.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -383,7 +402,7 @@ Expected scope:
 
 #### M1-07 — Document Processing Pipeline
 
-**Status:** Next / Not started
+**Status:** Complete
 
 **Purpose:** Establish durable asynchronous processing.
 
@@ -401,6 +420,8 @@ Expected scope:
 PDF remains the highest priority.
 
 #### M1-08 — PDF Page & Drawing Sheet Indexing
+
+**Status:** Next / Not started
 
 **Status:** Planned
 

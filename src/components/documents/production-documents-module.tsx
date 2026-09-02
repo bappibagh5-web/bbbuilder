@@ -22,6 +22,7 @@ import {
   type DocumentDisciplineCode,
   type ProductionDocument,
   type ProductionDocumentRevision,
+  type SourceVerificationJob,
 } from "@/lib/documents";
 import type { ProductionProject } from "@/lib/projects";
 import { Card } from "@/components/ui/card";
@@ -424,11 +425,165 @@ function RevisionHistory({
                     )}
                   </div>
                 </div>
+                <RevisionProcessingState
+                  revision={revision}
+                  documentId={document.id}
+                  projectId={project.id}
+                  slug={slug}
+                  canWrite={canWrite && document.is_active}
+                />
               </li>
             );
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+const processingLabels: Record<SourceVerificationJob["status"], string> = {
+  queued: "Queued",
+  running: "Verifying source",
+  succeeded: "Source verified",
+  failed: "Verification failed",
+};
+
+function RevisionProcessingState({
+  revision,
+  documentId,
+  projectId,
+  slug,
+  canWrite,
+}: {
+  revision: ProductionDocumentRevision;
+  documentId: number;
+  projectId: number;
+  slug: string;
+  canWrite: boolean;
+}) {
+  const [jobs, setJobs] = useState<SourceVerificationJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pollGeneration, setPollGeneration] = useState(0);
+  const pollCount = useRef(0);
+  const latest = jobs[0] ?? null;
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const result = await documentsApi.processingJobs(
+        slug,
+        projectId,
+        documentId,
+        revision.id,
+        signal,
+      );
+      setJobs(result);
+      setError(null);
+      return result[0] ?? null;
+    },
+    [documentId, projectId, revision.id, slug],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let active = true;
+
+    async function check() {
+      try {
+        const current = await load(controller.signal);
+        if (
+          active &&
+          current &&
+          (current.status === "queued" || current.status === "running") &&
+          pollCount.current < 24
+        ) {
+          pollCount.current += 1;
+          timer = window.setTimeout(() => void check(), 5_000);
+        }
+      } catch (reason) {
+        if (active && !controller.signal.aborted) {
+          setError(reason instanceof Error ? reason.message : "Processing state is unavailable.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void check();
+    return () => {
+      active = false;
+      controller.abort();
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [load, pollGeneration]);
+
+  async function act(action: () => Promise<SourceVerificationJob>) {
+    if (acting) return;
+    setActing(true);
+    setError(null);
+    try {
+      await action();
+      pollCount.current = 0;
+      await load();
+      setPollGeneration((value) => value + 1);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The request could not be completed.");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  if (loading) return <p className="mt-3 text-xs text-slate-500">Loading verification state…</p>;
+
+  return (
+    <div className="mt-3 rounded-lg border bg-white p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-semibold text-slate-800">
+            {latest ? processingLabels[latest.status] : "Source not yet verified"}
+          </p>
+          {latest?.status === "succeeded" && (
+            <p className="mt-1 text-emerald-700">
+              Size and SHA-256 match the immutable source metadata.
+            </p>
+          )}
+          {latest?.status === "failed" && (
+            <p className="mt-1 text-red-700">{latest.error_message || "Verification failed safely."}</p>
+          )}
+          {latest?.status === "queued" && (
+            <p className="mt-1 text-slate-500">Waiting for a processing worker.</p>
+          )}
+        </div>
+        {canWrite && !latest && (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() =>
+              void act(() =>
+                documentsApi.requestSourceVerification(slug, projectId, documentId, revision.id),
+              )
+            }
+            className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
+          >
+            {acting ? "Requesting…" : "Verify Source"}
+          </button>
+        )}
+        {canWrite && latest?.status === "failed" && (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() =>
+              void act(() => documentsApi.retryProcessingJob(slug, projectId, latest.id))
+            }
+            className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
+          >
+            {acting ? "Requesting…" : "Retry Verification"}
+          </button>
+        )}
+      </div>
+      {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
     </div>
   );
 }

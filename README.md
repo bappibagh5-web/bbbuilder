@@ -130,7 +130,7 @@ backend/.venv/Scripts/python backend/manage.py bootstrap_organization --email ad
 
 ## Start Celery
 
-No business or document-processing tasks exist yet. The worker only verifies that Django loads the Celery application and can connect to Redis.
+M1-07 adds durable source-verification jobs. PostgreSQL owns job intent and state; Redis transports Celery messages. The worker streams immutable source objects and verifies byte size and SHA-256 only. It does not parse PDFs, index pages, or run AI.
 
 Windows PowerShell:
 
@@ -145,6 +145,15 @@ macOS/Linux:
 cd backend
 .venv/bin/celery -A config worker --loglevel=INFO
 ```
+
+Queued work remains durable if the worker or broker is unavailable. Operational recovery commands from `backend/` are:
+
+```bash
+python manage.py dispatch_queued_processing_jobs
+python manage.py recover_stale_processing_jobs
+```
+
+The first republishes queued jobs that were not recently dispatched. The second re-queues expired running leases and dispatches them through the normal service. Both commands are idempotent and expose no storage credentials.
 
 ## Start the existing frontend
 
@@ -201,6 +210,18 @@ GET   /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/
 ```
 
 Supported upload extensions are PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, and JPEG. The backend remains authoritative; the browser `accept` attribute is only a convenience. Downloads are authorized and streamed through Django without exposing the bucket, object key, credentials, or a permanent public URL. Malware scanning, resumable/direct-to-storage uploads, advanced file identification, and retention automation remain future production-hardening decisions.
+
+## Source-verification processing API
+
+Every newly persisted document revision receives a durable queued source-verification job. Existing revisions can be explicitly requested. Admin and Estimator / Operator members may request or retry; Viewer members are read-only.
+
+```text
+GET   /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/processing-jobs/
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/process/
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/processing-jobs/{job_id}/retry/
+```
+
+User-facing states are Queued, Verifying source, Source verified, and Verification failed. Source verification never advances the project to AI Analysis and does not create pages, sheets, extracted text, or findings.
 
 ## Local ports
 

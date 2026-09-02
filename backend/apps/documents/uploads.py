@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from apps.processing.services import request_source_verification
 from apps.projects.audit import PROJECT_AUDIT_FIELDS, record_event, snapshot
 from apps.projects.models import Project
 
@@ -191,6 +192,7 @@ def upload_new_document(
                 created_by=user,
             )
             _record_revision_created(revision, user)
+            request_source_verification(revision=revision, requested_by=user)
             document = set_current_revision(document=document, revision=revision, actor=user)
             _advance_project_after_first_upload(project, user)
         return document, revision
@@ -237,6 +239,7 @@ def upload_document_revision(
                 created_by=user,
             )
             _record_revision_created(revision, user)
+            request_source_verification(revision=revision, requested_by=user)
             if make_current:
                 document = set_current_revision(document=document, revision=revision, actor=user)
         return document, revision

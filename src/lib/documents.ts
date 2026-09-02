@@ -89,6 +89,38 @@ export type PaginatedRevisions = {
   results: ProductionDocumentRevision[];
 };
 
+export type ProcessingJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type SourceVerificationJob = {
+  id: number;
+  document_revision: number;
+  job_type: "source_verification";
+  status: ProcessingJobStatus;
+  attempt_count: number;
+  max_attempts: number;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  error_code:
+    | ""
+    | "source_missing"
+    | "storage_unavailable"
+    | "size_mismatch"
+    | "checksum_mismatch"
+    | "processing_error"
+    | "worker_lost";
+  error_message: string;
+  result_metadata: {
+    verified_byte_size?: number;
+    verified_checksum_algorithm?: "sha256";
+    checksum_match?: boolean;
+    verified_at?: string;
+  };
+  created_at: string;
+  updated_at: string;
+};
+
 function projectPath(slug: string, projectId: string | number) {
   return `/organizations/${encodeURIComponent(slug)}/projects/${encodeURIComponent(String(projectId))}`;
 }
@@ -189,6 +221,35 @@ export const documentsApi = {
     return apiResponse(
       `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/download/`,
     ).then((response) => response.blob());
+  },
+  processingJobs(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    revisionId: number,
+    signal?: AbortSignal,
+  ) {
+    return apiRequest<SourceVerificationJob[]>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/processing-jobs/`,
+      { signal },
+    );
+  },
+  requestSourceVerification(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    revisionId: number,
+  ) {
+    return apiRequest<SourceVerificationJob>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/process/`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+  retryProcessingJob(slug: string, projectId: string | number, jobId: number) {
+    return apiRequest<SourceVerificationJob>(
+      `${projectPath(slug, projectId)}/processing-jobs/${jobId}/retry/`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   },
 };
 
