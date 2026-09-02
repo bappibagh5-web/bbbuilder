@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:frontend": "node --experimental-strip-types --test src/lib/pdf-processing-state.test.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

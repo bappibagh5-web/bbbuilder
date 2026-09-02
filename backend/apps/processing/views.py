@@ -4,13 +4,14 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.documents.models import Document, DocumentRevision
+from apps.documents.models import Document, DocumentPage, DocumentRevision
+from apps.documents.serializers import DocumentPageSerializer
 from apps.documents.views import ProjectDocumentContextMixin
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 
 from .models import ProcessingJob
 from .serializers import ProcessingJobSerializer
-from .services import request_source_verification, retry_processing_job
+from .services import request_pdf_indexing, request_source_verification, retry_processing_job
 
 
 def api_validation_error(error):
@@ -66,6 +67,44 @@ class RequestSourceVerificationView(RevisionProcessingContextMixin, APIView):
         return Response(ProcessingJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
 
+class RevisionPageListView(RevisionProcessingContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        pages = DocumentPage.objects.filter(document_revision=self.get_revision()).select_related(
+            "drawing_sheet"
+        )
+        return Response(DocumentPageSerializer(pages, many=True).data)
+
+
+class RevisionPageDetailView(RevisionProcessingContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        page = get_object_or_404(
+            DocumentPage.objects.select_related("drawing_sheet"),
+            pk=self.kwargs["page_pk"],
+            document_revision=self.get_revision(),
+        )
+        return Response(DocumentPageSerializer(page).data)
+
+
+class RequestPdfIndexingView(RevisionProcessingContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        revision = self.get_revision()
+        if not revision.document.project.is_active or not revision.document.is_active:
+            raise serializers.ValidationError(
+                {"detail": "Archived projects or documents cannot start PDF indexing."}
+            )
+        try:
+            job = request_pdf_indexing(revision=revision, requested_by=request.user)
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(ProcessingJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+
 class RetryProcessingJobView(ProjectDocumentContextMixin, APIView):
     permission_classes = (OrganizationOperator,)
 
@@ -78,7 +117,7 @@ class RetryProcessingJobView(ProjectDocumentContextMixin, APIView):
         )
         if not project.is_active or not job.document_revision.document.is_active:
             raise serializers.ValidationError(
-                {"detail": "Archived projects or documents cannot retry source verification."}
+                {"detail": "Archived projects or documents cannot retry processing."}
             )
         try:
             retry = retry_processing_job(job=job, requested_by=request.user)

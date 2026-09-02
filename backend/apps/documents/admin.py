@@ -2,7 +2,14 @@ from django.contrib import admin, messages
 
 from apps.projects.audit import record_event
 
-from .models import Document, DocumentRevision, FileAsset, ProjectFile
+from .models import (
+    Document,
+    DocumentPage,
+    DocumentRevision,
+    DrawingSheet,
+    FileAsset,
+    ProjectFile,
+)
 from .services import set_current_revision
 
 
@@ -160,3 +167,61 @@ class DocumentRevisionAdmin(NoDeleteAdmin):
             set_current_revision(document=revision.document, revision=revision, actor=request.user)
             count += 1
         self.message_user(request, f"Updated {count} document(s).", messages.SUCCESS)
+
+
+@admin.register(DocumentPage)
+class DocumentPageAdmin(NoDeleteAdmin):
+    list_display = (
+        "document_revision",
+        "page_number",
+        "page_label",
+        "width_points",
+        "height_points",
+        "rotation_degrees",
+        "has_native_text",
+        "native_text_char_count",
+        "indexed_at",
+    )
+    list_filter = (
+        "document_revision__document__project__organization",
+        "has_native_text",
+        "rotation_degrees",
+        "parser_name",
+    )
+    search_fields = (
+        "document_revision__document__project__project_number",
+        "document_revision__document__title",
+        "document_revision__revision_label",
+        "page_label",
+    )
+    readonly_fields = tuple(field.name for field in DocumentPage._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(DrawingSheet)
+class DrawingSheetAdmin(NoDeleteAdmin):
+    list_display = (
+        "sheet_number",
+        "sheet_title",
+        "page",
+        "extraction_method",
+        "quality",
+        "created_at",
+    )
+    list_filter = (
+        "page__document_revision__document__project__organization",
+        "extraction_method",
+        "quality",
+    )
+    search_fields = (
+        "sheet_number",
+        "sheet_title",
+        "page__document_revision__document__project__project_number",
+        "page__document_revision__document__title",
+    )
+    readonly_fields = tuple(field.name for field in DrawingSheet._meta.fields)
+
+    def has_add_permission(self, request):
+        return False

@@ -15,6 +15,7 @@ dependencies = [
     "django-storages[s3]==1.14.6",
     "djangorestframework==3.18.0",
     "psycopg[binary]==3.3.4",
+    "PyMuPDF==1.28.2",
 ]
 
 [project.optional-dependencies]

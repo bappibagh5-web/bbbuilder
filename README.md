@@ -223,6 +223,20 @@ POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/processing
 
 User-facing states are Queued, Verifying source, Source verified, and Verification failed. Source verification never advances the project to AI Analysis and does not create pages, sheets, extracted text, or findings.
 
+## PDF page and sheet indexing API
+
+After a PDF source passes source verification, the processing service automatically creates a durable `pdf_indexing` job. Admin and Estimator / Operator members may explicitly request or retry indexing; Viewer members may read processing and page metadata. Non-PDF revisions do not receive PDF-indexing jobs or controls.
+
+```text
+POST  /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/index-pdf/
+GET   /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/pages/
+GET   /api/v1/organizations/{organization_slug}/projects/{project_id}/documents/{document_id}/revisions/{revision_id}/pages/{page_id}/
+```
+
+The Celery worker command is unchanged. PyMuPDF 1.28.2 streams each private source to a temporary seekable PDF, records 1-based page numbers, normalized human-readable PDF labels, point dimensions, rotation, and native PDF text, then removes the temporary file. Strict `<FEFF...>` UTF-16BE labels are decoded before persistence; valid semantic labels are not silently truncated. Scanned/image-only pages index successfully with no native text; M1-08 does not run OCR, vision, or AI. Optional DrawingSheet candidates are created only when conservative structured page-label or native-text evidence supports a sheet number/title. Page API responses omit full native text and all private storage metadata. Indexing preserves every document revision and does not advance the project beyond Documents Uploaded.
+
+The production Documents UI polls queued/running jobs at five-second intervals. After source verification succeeds for an eligible PDF, a bounded 15-second `Preparing PDF indexing…` grace allows the automatically chained durable job to become visible before an explicit Index PDF action is offered. The browser never creates the automatic job. A fresh page load always refetches persisted processing state and page counts from Django.
+
 ## Local ports
 
 | Service | Port | Purpose |

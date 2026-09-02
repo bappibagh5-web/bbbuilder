@@ -268,3 +268,116 @@ class DocumentRevision(ImmutableFieldsMixin):
 
     def __str__(self):
         return f"{self.document.title} — {self.revision_label or self.pk or 'new revision'}"
+
+
+class DocumentPage(ImmutableFieldsMixin):
+    class Rotation(models.IntegerChoices):
+        DEGREES_0 = 0, "0 degrees"
+        DEGREES_90 = 90, "90 degrees"
+        DEGREES_180 = 180, "180 degrees"
+        DEGREES_270 = 270, "270 degrees"
+
+    document_revision = models.ForeignKey(
+        DocumentRevision,
+        on_delete=models.PROTECT,
+        related_name="pages",
+    )
+    page_number = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    page_label = models.TextField(blank=True)
+    width_points = models.FloatField(validators=[MinValueValidator(0.01)])
+    height_points = models.FloatField(validators=[MinValueValidator(0.01)])
+    rotation_degrees = models.PositiveSmallIntegerField(
+        choices=Rotation,
+        default=Rotation.DEGREES_0,
+    )
+    native_text = models.TextField(blank=True)
+    native_text_char_count = models.PositiveIntegerField(default=0)
+    has_native_text = models.BooleanField(default=False)
+    parser_name = models.CharField(max_length=100)
+    parser_version = models.CharField(max_length=100)
+    indexed_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "document_revision_id",
+        "page_number",
+        "page_label",
+        "width_points",
+        "height_points",
+        "rotation_degrees",
+        "native_text",
+        "native_text_char_count",
+        "has_native_text",
+        "parser_name",
+        "parser_version",
+        "indexed_at",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("document_revision_id", "page_number")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("document_revision", "page_number"),
+                name="documents_unique_revision_page_number",
+            )
+        ]
+        indexes = [models.Index(fields=("document_revision", "page_number"))]
+
+    def clean(self):
+        super().clean()
+        meaningful_text = bool(self.native_text.strip())
+        if self.native_text_char_count != len(self.native_text):
+            raise ValidationError(
+                {"native_text_char_count": "Character count must match the stored native text."}
+            )
+        if self.has_native_text != meaningful_text:
+            raise ValidationError(
+                {"has_native_text": "Native-text availability must match the stored native text."}
+            )
+
+    def __str__(self):
+        return f"{self.document_revision} — page {self.page_number}"
+
+
+class DrawingSheet(ImmutableFieldsMixin):
+    class ExtractionMethod(models.TextChoices):
+        PAGE_LABEL = "page_label", "PDF page label"
+        NATIVE_TEXT = "native_text", "Native PDF text"
+
+    class Quality(models.TextChoices):
+        HIGH = "high", "High"
+        MEDIUM = "medium", "Medium"
+
+    page = models.OneToOneField(
+        DocumentPage,
+        on_delete=models.PROTECT,
+        related_name="drawing_sheet",
+    )
+    sheet_number = models.CharField(max_length=50, blank=True)
+    sheet_title = models.CharField(max_length=255, blank=True)
+    extraction_method = models.CharField(max_length=30, choices=ExtractionMethod)
+    quality = models.CharField(max_length=20, choices=Quality)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "page_id",
+        "sheet_number",
+        "sheet_title",
+        "extraction_method",
+        "quality",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("page__document_revision_id", "page__page_number")
+
+    def clean(self):
+        super().clean()
+        if not self.sheet_number and not self.sheet_title:
+            raise ValidationError(
+                "A drawing-sheet candidate requires a sheet number or sheet title."
+            )
+
+    def __str__(self):
+        return self.sheet_number or self.sheet_title or f"Page {self.page.page_number}"

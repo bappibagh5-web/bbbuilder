@@ -13,6 +13,7 @@ from apps.documents.models import DocumentRevision, ImmutableFieldsMixin
 class ProcessingJob(ImmutableFieldsMixin):
     class JobType(models.TextChoices):
         SOURCE_VERIFICATION = "source_verification", "Source verification"
+        PDF_INDEXING = "pdf_indexing", "PDF indexing"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -27,6 +28,11 @@ class ProcessingJob(ImmutableFieldsMixin):
         CHECKSUM_MISMATCH = "checksum_mismatch", "Checksum mismatch"
         PROCESSING_ERROR = "processing_error", "Processing error"
         WORKER_LOST = "worker_lost", "Worker lost"
+        SOURCE_NOT_VERIFIED = "source_not_verified", "Source not verified"
+        NOT_PDF = "not_pdf", "Not a PDF"
+        PDF_ENCRYPTED = "pdf_encrypted", "PDF encrypted"
+        PDF_CORRUPT = "pdf_corrupt", "PDF corrupt"
+        INDEXING_ERROR = "indexing_error", "Indexing error"
 
     document_revision = models.ForeignKey(
         DocumentRevision, on_delete=models.PROTECT, related_name="processing_jobs"

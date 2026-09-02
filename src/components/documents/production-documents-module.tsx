@@ -20,11 +20,16 @@ import {
   documentsApi,
   type DocumentCategoryCode,
   type DocumentDisciplineCode,
+  type DocumentPageIndex,
+  type ProcessingJob,
   type ProductionDocument,
   type ProductionDocumentRevision,
-  type SourceVerificationJob,
 } from "@/lib/documents";
 import type { ProductionProject } from "@/lib/projects";
+import {
+  PDF_CHAINING_GRACE_OBSERVATIONS,
+  derivePdfProcessingDisplay,
+} from "@/lib/pdf-processing-state";
 import { Card } from "@/components/ui/card";
 
 const acceptedFiles = ".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.png,.jpg,.jpeg";
@@ -441,11 +446,18 @@ function RevisionHistory({
   );
 }
 
-const processingLabels: Record<SourceVerificationJob["status"], string> = {
+const sourceProcessingLabels: Record<ProcessingJob["status"], string> = {
   queued: "Queued",
   running: "Verifying source",
   succeeded: "Source verified",
   failed: "Verification failed",
+};
+
+const pdfProcessingLabels: Record<ProcessingJob["status"], string> = {
+  queued: "PDF indexing queued",
+  running: "Indexing PDF",
+  succeeded: "PDF indexed",
+  failed: "PDF indexing failed",
 };
 
 function RevisionProcessingState({
@@ -461,13 +473,20 @@ function RevisionProcessingState({
   slug: string;
   canWrite: boolean;
 }) {
-  const [jobs, setJobs] = useState<SourceVerificationJob[]>([]);
+  const [jobs, setJobs] = useState<ProcessingJob[]>([]);
+  const [pages, setPages] = useState<DocumentPageIndex[]>([]);
+  const [showPages, setShowPages] = useState(false);
+  const [loadingPages, setLoadingPages] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missingPdfObservationCount, setMissingPdfObservationCount] = useState(0);
   const [pollGeneration, setPollGeneration] = useState(0);
   const pollCount = useRef(0);
-  const latest = jobs[0] ?? null;
+  const missingPdfObservationCountRef = useRef(0);
+  const latestSource = jobs.find((job) => job.job_type === "source_verification") ?? null;
+  const latestPdf = jobs.find((job) => job.job_type === "pdf_indexing") ?? null;
+  const isPdf = revision.project_file.file_asset.detected_mime_type === "application/pdf";
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -480,7 +499,7 @@ function RevisionProcessingState({
       );
       setJobs(result);
       setError(null);
-      return result[0] ?? null;
+      return result;
     },
     [documentId, projectId, revision.id, slug],
   );
@@ -493,11 +512,34 @@ function RevisionProcessingState({
     async function check() {
       try {
         const current = await load(controller.signal);
+        const currentSource =
+          current.find((job) => job.job_type === "source_verification") ?? null;
+        const currentPdf = current.find((job) => job.job_type === "pdf_indexing") ?? null;
+        const waitingForChainedPdf =
+          isPdf && currentSource?.status === "succeeded" && currentPdf === null;
+        const nextMissingPdfObservationCount = waitingForChainedPdf
+          ? Math.min(
+              missingPdfObservationCountRef.current + 1,
+              PDF_CHAINING_GRACE_OBSERVATIONS,
+            )
+          : 0;
+        missingPdfObservationCountRef.current = nextMissingPdfObservationCount;
+        setMissingPdfObservationCount(nextMissingPdfObservationCount);
+        const pdfDisplay = derivePdfProcessingDisplay({
+          isPdf,
+          sourceStatus: currentSource?.status,
+          pdfStatus: currentPdf?.status,
+          pdfPageCount: currentPdf?.result_metadata.page_count,
+          missingPdfObservationCount: nextMissingPdfObservationCount,
+          canWrite,
+        });
+        const hasActiveJob = current.some(
+          (job) => job.status === "queued" || job.status === "running",
+        );
         if (
           active &&
-          current &&
-          (current.status === "queued" || current.status === "running") &&
-          pollCount.current < 24
+          (pdfDisplay.kind === "preparing" ||
+            (hasActiveJob && pollCount.current < 24))
         ) {
           pollCount.current += 1;
           timer = window.setTimeout(() => void check(), 5_000);
@@ -517,15 +559,17 @@ function RevisionProcessingState({
       controller.abort();
       if (timer) window.clearTimeout(timer);
     };
-  }, [load, pollGeneration]);
+  }, [canWrite, isPdf, load, pollGeneration]);
 
-  async function act(action: () => Promise<SourceVerificationJob>) {
+  async function act(action: () => Promise<ProcessingJob>) {
     if (acting) return;
     setActing(true);
     setError(null);
     try {
       await action();
       pollCount.current = 0;
+      missingPdfObservationCountRef.current = 0;
+      setMissingPdfObservationCount(0);
       await load();
       setPollGeneration((value) => value + 1);
     } catch (reason) {
@@ -535,28 +579,54 @@ function RevisionProcessingState({
     }
   }
 
+  async function togglePages() {
+    if (showPages) {
+      setShowPages(false);
+      return;
+    }
+    setLoadingPages(true);
+    setError(null);
+    try {
+      setPages(await documentsApi.pages(slug, projectId, documentId, revision.id));
+      setShowPages(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The page index is unavailable.");
+    } finally {
+      setLoadingPages(false);
+    }
+  }
+
   if (loading) return <p className="mt-3 text-xs text-slate-500">Loading verification state…</p>;
 
+  const pdfDisplay = derivePdfProcessingDisplay({
+    isPdf,
+    sourceStatus: latestSource?.status,
+    pdfStatus: latestPdf?.status,
+    pdfPageCount: latestPdf?.result_metadata.page_count,
+    missingPdfObservationCount,
+    canWrite,
+  });
+
   return (
-    <div className="mt-3 rounded-lg border bg-white p-3 text-xs">
+    <div className="mt-3 space-y-3 rounded-lg border bg-white p-3 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="font-semibold text-slate-800">
-            {latest ? processingLabels[latest.status] : "Source not yet verified"}
+            {latestSource ? sourceProcessingLabels[latestSource.status] : "Source not yet verified"}
           </p>
-          {latest?.status === "succeeded" && (
+          {latestSource?.status === "succeeded" && (
             <p className="mt-1 text-emerald-700">
               Size and SHA-256 match the immutable source metadata.
             </p>
           )}
-          {latest?.status === "failed" && (
-            <p className="mt-1 text-red-700">{latest.error_message || "Verification failed safely."}</p>
+          {latestSource?.status === "failed" && (
+            <p className="mt-1 text-red-700">{latestSource.error_message || "Verification failed safely."}</p>
           )}
-          {latest?.status === "queued" && (
+          {latestSource?.status === "queued" && (
             <p className="mt-1 text-slate-500">Waiting for a processing worker.</p>
           )}
         </div>
-        {canWrite && !latest && (
+        {canWrite && !latestSource && (
           <button
             type="button"
             disabled={acting}
@@ -570,12 +640,12 @@ function RevisionProcessingState({
             {acting ? "Requesting…" : "Verify Source"}
           </button>
         )}
-        {canWrite && latest?.status === "failed" && (
+        {canWrite && latestSource?.status === "failed" && (
           <button
             type="button"
             disabled={acting}
             onClick={() =>
-              void act(() => documentsApi.retryProcessingJob(slug, projectId, latest.id))
+                void act(() => documentsApi.retryProcessingJob(slug, projectId, latestSource.id))
             }
             className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
           >
@@ -583,7 +653,119 @@ function RevisionProcessingState({
           </button>
         )}
       </div>
+      {isPdf && latestSource?.status === "succeeded" && (
+        <div className="border-t pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-semibold text-slate-800">
+                {pdfDisplay.kind === "preparing"
+                  ? "Preparing PDF indexing…"
+                  : pdfDisplay.kind === "not_indexed"
+                    ? "PDF not yet indexed"
+                    : latestPdf
+                      ? pdfProcessingLabels[latestPdf.status]
+                      : "PDF not yet indexed"}
+                {pdfDisplay.kind === "succeeded" && pdfDisplay.pageCount
+                  ? ` — ${pdfDisplay.pageCount} pages`
+                  : ""}
+              </p>
+              {latestPdf?.status === "queued" && (
+                <p className="mt-1 text-slate-500">Waiting for a processing worker.</p>
+              )}
+              {latestPdf?.status === "succeeded" && (
+                <p className="mt-1 text-emerald-700">
+                  Native page structure is indexed. No OCR or AI analysis has run.
+                </p>
+              )}
+              {latestPdf?.status === "failed" && (
+                <p className="mt-1 text-red-700">
+                  {latestPdf.error_message || "PDF indexing failed safely."}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pdfDisplay.showIndexAction && (
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() =>
+                    void act(() =>
+                      documentsApi.requestPdfIndexing(slug, projectId, documentId, revision.id),
+                    )
+                  }
+                  className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
+                >
+                  {acting ? "Requesting…" : "Index PDF"}
+                </button>
+              )}
+              {canWrite && latestPdf?.status === "failed" && (
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() =>
+                    void act(() => documentsApi.retryProcessingJob(slug, projectId, latestPdf.id))
+                  }
+                  className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
+                >
+                  {acting ? "Requesting…" : "Retry PDF Indexing"}
+                </button>
+              )}
+              {latestPdf?.status === "succeeded" && (
+                <button
+                  type="button"
+                  disabled={loadingPages}
+                  onClick={() => void togglePages()}
+                  className="h-8 rounded border bg-white px-2.5 font-semibold disabled:opacity-50"
+                >
+                  {loadingPages ? "Loading…" : showPages ? "Hide Page Index" : "Page / Sheet Index"}
+                </button>
+              )}
+            </div>
+          </div>
+          {showPages && <PageIndexTable pages={pages} />}
+        </div>
+      )}
       {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
+    </div>
+  );
+}
+
+function PageIndexTable({ pages }: { pages: DocumentPageIndex[] }) {
+  return (
+    <div className="mt-3 overflow-x-auto rounded-lg border">
+      <table className="min-w-full divide-y text-left text-xs">
+        <thead className="bg-slate-50 text-slate-600">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Page</th>
+            <th className="px-3 py-2 font-semibold">PDF label</th>
+            <th className="px-3 py-2 font-semibold">Sheet</th>
+            <th className="px-3 py-2 font-semibold">Title</th>
+            <th className="px-3 py-2 font-semibold">Native text</th>
+            <th className="px-3 py-2 font-semibold">Geometry</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y bg-white">
+          {pages.map((page) => (
+            <tr key={page.id}>
+              <td className="whitespace-nowrap px-3 py-2 font-semibold">{page.page_number}</td>
+              <td className="whitespace-nowrap px-3 py-2">{page.page_label || "—"}</td>
+              <td className="whitespace-nowrap px-3 py-2">
+                {page.drawing_sheet?.sheet_number || "—"}
+              </td>
+              <td className="min-w-40 px-3 py-2">{page.drawing_sheet?.sheet_title || "—"}</td>
+              <td className="whitespace-nowrap px-3 py-2">
+                {page.has_native_text ? `Yes (${page.native_text_char_count.toLocaleString()} chars)` : "No"}
+              </td>
+              <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                {Math.round(page.width_points)} × {Math.round(page.height_points)} pt · {page.rotation_degrees}°
+              </td>
+            </tr>
+          ))}
+          {pages.length === 0 && (
+            <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">No indexed pages were returned.</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Document, DocumentRevision, FileAsset, ProjectFile
+from .models import Document, DocumentPage, DocumentRevision, DrawingSheet, FileAsset, ProjectFile
 
 
 class FileAssetMetadataSerializer(serializers.ModelSerializer):
@@ -76,6 +76,41 @@ class DocumentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+
+class DrawingSheetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrawingSheet
+        fields = (
+            "sheet_number",
+            "sheet_title",
+            "extraction_method",
+            "quality",
+        )
+        read_only_fields = fields
+
+
+class DocumentPageSerializer(serializers.ModelSerializer):
+    drawing_sheet = DrawingSheetSerializer(read_only=True, allow_null=True)
+
+    class Meta:
+        model = DocumentPage
+        fields = (
+            "id",
+            "document_revision",
+            "page_number",
+            "page_label",
+            "width_points",
+            "height_points",
+            "rotation_degrees",
+            "native_text_char_count",
+            "has_native_text",
+            "parser_name",
+            "parser_version",
+            "indexed_at",
+            "drawing_sheet",
+        )
+        read_only_fields = fields
 
 
 class NewDocumentUploadSerializer(serializers.Serializer):

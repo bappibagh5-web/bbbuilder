@@ -91,10 +91,10 @@ export type PaginatedRevisions = {
 
 export type ProcessingJobStatus = "queued" | "running" | "succeeded" | "failed";
 
-export type SourceVerificationJob = {
+export type ProcessingJob = {
   id: number;
   document_revision: number;
-  job_type: "source_verification";
+  job_type: "source_verification" | "pdf_indexing";
   status: ProcessingJobStatus;
   attempt_count: number;
   max_attempts: number;
@@ -109,16 +109,49 @@ export type SourceVerificationJob = {
     | "size_mismatch"
     | "checksum_mismatch"
     | "processing_error"
-    | "worker_lost";
+    | "worker_lost"
+    | "source_not_verified"
+    | "not_pdf"
+    | "pdf_encrypted"
+    | "pdf_corrupt"
+    | "indexing_error";
   error_message: string;
   result_metadata: {
     verified_byte_size?: number;
     verified_checksum_algorithm?: "sha256";
     checksum_match?: boolean;
     verified_at?: string;
+    page_count?: number;
+    pages_with_native_text?: number;
+    pages_without_native_text?: number;
+    drawing_sheet_candidates?: number;
+    parser_name?: string;
+    parser_version?: string;
+    indexed_at?: string;
   };
   created_at: string;
   updated_at: string;
+};
+
+export type DocumentPageIndex = {
+  id: number;
+  document_revision: number;
+  page_number: number;
+  page_label: string;
+  width_points: number;
+  height_points: number;
+  rotation_degrees: 0 | 90 | 180 | 270;
+  native_text_char_count: number;
+  has_native_text: boolean;
+  parser_name: string;
+  parser_version: string;
+  indexed_at: string;
+  drawing_sheet: {
+    sheet_number: string;
+    sheet_title: string;
+    extraction_method: "page_label" | "native_text";
+    quality: "high" | "medium";
+  } | null;
 };
 
 function projectPath(slug: string, projectId: string | number) {
@@ -229,7 +262,7 @@ export const documentsApi = {
     revisionId: number,
     signal?: AbortSignal,
   ) {
-    return apiRequest<SourceVerificationJob[]>(
+    return apiRequest<ProcessingJob[]>(
       `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/processing-jobs/`,
       { signal },
     );
@@ -240,13 +273,36 @@ export const documentsApi = {
     documentId: number,
     revisionId: number,
   ) {
-    return apiRequest<SourceVerificationJob>(
+    return apiRequest<ProcessingJob>(
       `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/process/`,
       { method: "POST", body: JSON.stringify({}) },
     );
   },
+  requestPdfIndexing(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    revisionId: number,
+  ) {
+    return apiRequest<ProcessingJob>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/index-pdf/`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+  pages(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    revisionId: number,
+    signal?: AbortSignal,
+  ) {
+    return apiRequest<DocumentPageIndex[]>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/pages/`,
+      { signal },
+    );
+  },
   retryProcessingJob(slug: string, projectId: string | number, jobId: number) {
-    return apiRequest<SourceVerificationJob>(
+    return apiRequest<ProcessingJob>(
       `${projectPath(slug, projectId)}/processing-jobs/${jobId}/retry/`,
       { method: "POST", body: JSON.stringify({}) },
     );

@@ -28,7 +28,9 @@ M1-06 — Production Upload Workflow is **complete**. Automated validation and a
 
 M1-07 — Document Processing Pipeline is **complete**. Automated validation and manual validation against the real PostgreSQL, Redis, Celery, and MinIO environment passed on September 2, 2026.
 
-M1-08 — PDF Page / Sheet Indexing is **next / not started**.
+M1-08 — PDF Page / Sheet Indexing is **complete**. Automated validation and real PostgreSQL, Celery, MinIO, and browser validation passed on September 3, 2026.
+
+M1-09 — Structured AI Analysis is **next / not started**.
 
 M1-01 currently includes:
 
@@ -110,7 +112,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04, M1-05, M1-06, and M1-07 are complete. M1-08 is next / not started.
+M1-04 through M1-08 are complete. M1-09 is next / not started.
 
 M1-05 currently includes:
 
@@ -200,11 +202,27 @@ M1-05 currently includes:
 - Real Windows Celery solo-worker validation against PostgreSQL, Redis, and private MinIO
 - Worker-down queued-intent persistence and restart processing validated
 - No PDF parsing, page/sheet indexing, OCR, AI, findings, or later-workflow behavior
-- M1-08 status: next / not started
+- M1-08 status: complete
+
+### M1-08 — PDF Page / Sheet Indexing
+
+- Status: complete
+- Immutable revision-owned `DocumentPage` records with 1-based page numbers, PDF labels, point geometry, rotation, native text, parser identity, and indexing timestamps
+- Optional one-to-one `DrawingSheet` candidates created only from conservative PDF page-label or native-text evidence
+- PyMuPDF 1.28.2 native PDF parsing with no OCR, vision, or AI fallback
+- Source-verification prerequisite and automatic durable PDF-indexing job chaining for validated PDFs only
+- Atomic revision-scoped persistence, safe retry rebuilding, successful-delivery idempotency, and historical-revision isolation
+- Guaranteed best-effort temporary-file cleanup across successful parsing, corrupt PDFs, source read failures, and source close failures
+- Read-only organization/project/document/revision-scoped page APIs with bounded metadata exposure
+- Production Documents UI processing states, bounded polling, and backend-derived Page / Sheet Index table
+- Existing-database forward migration, isolated fresh migration, and automated backend/frontend validation passed
+- Real Mechanical IFC validation confirmed eight human-readable page labels and deterministic sheet identities: M00 Front Cover, D01 Demo Plan, M01 Ventilation, M02 Plumbing, M03 Sprinkler Drawing, M04 Schedule and Details, M05 Specifications, and M06 Specifications
+- Manual browser validation confirmed automatic source-verification chaining, persisted revision isolation, bounded frontend transition polling, and no project-status advancement
+- M1-09 status: next / not started
 
 ## Next implementation task
 
-M1-08 — PDF Page / Sheet Indexing is next / not started and requires explicit approval after the M1-07 commit and push.
+M1-09 — Structured AI Analysis is next / not started and requires separate explicit approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 

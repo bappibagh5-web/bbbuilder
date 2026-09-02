@@ -68,14 +68,15 @@ def dispatch_processing_job_safely(job_id):
     dispatch_processing_job(job_id)
 
 
-def request_source_verification(
-    *, revision, requested_by, audit_action="processing.requested", dispatch=True
+def _request_processing_job(
+    *, revision, requested_by, job_type, audit_action, dispatch=True, audit_metadata=None
 ):
     try:
         with transaction.atomic():
             job = ProcessingJob.objects.create(
                 document_revision=revision,
                 requested_by=requested_by,
+                job_type=job_type,
             )
             record_event(
                 organization=revision.document.project.organization,
@@ -87,20 +88,103 @@ def request_source_verification(
                     "document_id": revision.document_id,
                     "document_revision_id": revision.pk,
                     "job_type": job.job_type,
+                    **(audit_metadata or {}),
                 },
             )
             if dispatch and settings.PROCESSING_AUTO_DISPATCH:
                 transaction.on_commit(lambda: dispatch_processing_job_safely(job.pk))
     except IntegrityError as error:
         raise ValidationError(
-            "This revision already has queued or running source verification."
+            f"This revision already has queued or running {job_type.replace('_', ' ')}."
         ) from error
     return job
+
+
+def request_source_verification(
+    *, revision, requested_by, audit_action="processing.requested", dispatch=True
+):
+    return _request_processing_job(
+        revision=revision,
+        requested_by=requested_by,
+        job_type=ProcessingJob.JobType.SOURCE_VERIFICATION,
+        audit_action=audit_action,
+        dispatch=dispatch,
+    )
+
+
+def request_pdf_indexing(
+    *,
+    revision,
+    requested_by,
+    audit_action="pdf_indexing.requested",
+    dispatch=True,
+    audit_metadata=None,
+):
+    from apps.documents.pdf_indexing import is_pdf_asset
+
+    asset = revision.project_file.file_asset
+    if not is_pdf_asset(asset):
+        raise ValidationError("This revision is not an eligible validated PDF.")
+    if not ProcessingJob.objects.filter(
+        document_revision=revision,
+        job_type=ProcessingJob.JobType.SOURCE_VERIFICATION,
+        status=ProcessingJob.Status.SUCCEEDED,
+    ).exists():
+        raise ValidationError("Source verification must succeed before PDF indexing.")
+    if ProcessingJob.objects.filter(
+        document_revision=revision,
+        job_type=ProcessingJob.JobType.PDF_INDEXING,
+        status=ProcessingJob.Status.SUCCEEDED,
+    ).exists():
+        raise ValidationError("This revision already has a completed PDF page index.")
+    return _request_processing_job(
+        revision=revision,
+        requested_by=requested_by,
+        job_type=ProcessingJob.JobType.PDF_INDEXING,
+        audit_action=audit_action,
+        dispatch=dispatch,
+        audit_metadata=audit_metadata,
+    )
+
+
+def chain_pdf_indexing_after_source_verification(job):
+    from apps.documents.pdf_indexing import is_pdf_asset
+
+    if not is_pdf_asset(job.document_revision.project_file.file_asset):
+        return None
+    if ProcessingJob.objects.filter(
+        document_revision=job.document_revision,
+        job_type=ProcessingJob.JobType.PDF_INDEXING,
+        status__in=(
+            ProcessingJob.Status.QUEUED,
+            ProcessingJob.Status.RUNNING,
+            ProcessingJob.Status.SUCCEEDED,
+        ),
+    ).exists():
+        return None
+    try:
+        return request_pdf_indexing(
+            revision=job.document_revision,
+            requested_by=job.requested_by,
+            audit_metadata={"triggered_by_processing_job_id": job.pk},
+        )
+    except ValidationError:
+        logger.info(
+            "PDF indexing chain was already satisfied or became ineligible.",
+            extra={"processing_job_id": job.pk},
+        )
+        return None
 
 
 def retry_processing_job(*, job, requested_by):
     if job.status != ProcessingJob.Status.FAILED:
         raise ValidationError("Only a failed processing job can be retried.")
+    if job.job_type == ProcessingJob.JobType.PDF_INDEXING:
+        return request_pdf_indexing(
+            revision=job.document_revision,
+            requested_by=requested_by,
+            audit_action="pdf_indexing.retry_requested",
+        )
     return request_source_verification(
         revision=job.document_revision,
         requested_by=requested_by,
@@ -240,7 +324,18 @@ def execute_processing_job(job_id):
     if job is None:
         return {"outcome": "noop"}
     try:
-        result = verify_source(job)
+        if job.job_type == ProcessingJob.JobType.SOURCE_VERIFICATION:
+            result = verify_source(job)
+        elif job.job_type == ProcessingJob.JobType.PDF_INDEXING:
+            from apps.documents.pdf_indexing import parse_pdf_job, persist_page_index
+
+            parsed_pages = parse_pdf_job(job, heartbeat_callback=heartbeat)
+            result = persist_page_index(job, parsed_pages)
+        else:
+            raise SourceVerificationFailure(
+                ProcessingJob.ErrorCode.PROCESSING_ERROR,
+                "This processing job type is not supported.",
+            )
     except SourceVerificationFailure as error:
         finish_job(
             job.pk,
@@ -250,36 +345,64 @@ def execute_processing_job(job_id):
         )
         _log("Processing job failed.", job, error_code=error.code)
         return {"outcome": "failed", "error_code": error.code}
-    except ObjectStorageError:
-        message = "Object storage is temporarily unavailable."
-        if job.attempt_count < job.max_attempts:
-            requeue_transient_failure(
-                job,
-                code=ProcessingJob.ErrorCode.STORAGE_UNAVAILABLE,
-                message=message,
+    except Exception as error:
+        from apps.documents.pdf_indexing import PdfIndexingFailure
+
+        if isinstance(error, PdfIndexingFailure):
+            finish_job(
+                job.pk,
+                status=ProcessingJob.Status.FAILED,
+                error_code=error.code,
+                error_message=error.safe_message,
             )
-            countdown = settings.PROCESSING_RETRY_BASE_SECONDS * (2 ** (job.attempt_count - 1))
-            _log("Processing job queued for retry.", job, error_code="storage_unavailable")
-            return {"outcome": "retry", "countdown": countdown}
-        finish_job(
-            job.pk,
-            status=ProcessingJob.Status.FAILED,
-            error_code=ProcessingJob.ErrorCode.STORAGE_UNAVAILABLE,
-            error_message=message,
-        )
-        _log("Processing job exhausted retries.", job, error_code="storage_unavailable")
-        return {"outcome": "failed", "error_code": "storage_unavailable"}
-    except Exception:
+            _log("Processing job failed.", job, error_code=error.code)
+            return {"outcome": "failed", "error_code": error.code}
+        if isinstance(error, ObjectStorageError):
+            message = "Object storage is temporarily unavailable."
+            if job.attempt_count < job.max_attempts:
+                requeue_transient_failure(
+                    job,
+                    code=ProcessingJob.ErrorCode.STORAGE_UNAVAILABLE,
+                    message=message,
+                )
+                countdown = settings.PROCESSING_RETRY_BASE_SECONDS * (2 ** (job.attempt_count - 1))
+                _log("Processing job queued for retry.", job, error_code="storage_unavailable")
+                return {"outcome": "retry", "countdown": countdown}
+            finish_job(
+                job.pk,
+                status=ProcessingJob.Status.FAILED,
+                error_code=ProcessingJob.ErrorCode.STORAGE_UNAVAILABLE,
+                error_message=message,
+            )
+            _log("Processing job exhausted retries.", job, error_code="storage_unavailable")
+            return {"outcome": "failed", "error_code": "storage_unavailable"}
         logger.exception("Unexpected processing failure.", extra={"processing_job_id": job.pk})
         finish_job(
             job.pk,
             status=ProcessingJob.Status.FAILED,
-            error_code=ProcessingJob.ErrorCode.PROCESSING_ERROR,
-            error_message="Source verification could not be completed safely.",
+            error_code=(
+                ProcessingJob.ErrorCode.INDEXING_ERROR
+                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                else ProcessingJob.ErrorCode.PROCESSING_ERROR
+            ),
+            error_message=(
+                "PDF indexing could not be completed safely."
+                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                else "Source verification could not be completed safely."
+            ),
         )
-        return {"outcome": "failed", "error_code": "processing_error"}
+        return {
+            "outcome": "failed",
+            "error_code": (
+                "indexing_error"
+                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                else "processing_error"
+            ),
+        }
     finish_job(job.pk, status=ProcessingJob.Status.SUCCEEDED, result_metadata=result)
     _log("Processing job succeeded.", job, status="succeeded")
+    if job.job_type == ProcessingJob.JobType.SOURCE_VERIFICATION:
+        chain_pdf_indexing_after_source_verification(job)
     return {"outcome": "succeeded"}
 
 
@@ -304,7 +427,7 @@ def recover_stale_jobs(*, job_ids=None, dispatch=True):
             job.celery_task_id = ""
             job.last_dispatched_at = None
             job.error_code = ProcessingJob.ErrorCode.WORKER_LOST
-            job.error_message = "A worker lease expired; verification was safely re-queued."
+            job.error_message = "A worker lease expired; processing was safely re-queued."
             job.save()
             recovered.append(job.pk)
         if dispatch:
