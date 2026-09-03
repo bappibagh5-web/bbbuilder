@@ -268,6 +268,18 @@ M1-11 exclusively owns `ProjectIntelligenceSnapshot`, readiness assembly, `Proje
 
 Authenticated browser validation confirmed the production review workspace for Admin/Estimator and read-only access for a disposable local Viewer. Machine values and exact page/sheet provenance remained unchanged, reviewed values remained separate, history survived refresh and reauthentication, redundant same-state actions were protected, and the project remained at `human_scope_review`. No provider call or API credit was used.
 
+### D-036 — Project-level intelligence snapshots and approval policy
+
+**Status:** Decided
+
+**Decision:** An M1-11 `ProjectIntelligenceSnapshot` is project-level and may combine one or more explicitly selected successful `AnalysisRun` records from different current document revisions in the same project. Selection is by run ID; the server includes each selected run's complete materialized finding set. Only one run per revision may participate, and each revision must be its document's explicit current revision when the snapshot is created. Normalized source and entry records freeze run, revision, finding, exact effective review, and provenance identities alongside a canonical structured manifest and SHA-256 fingerprint. Rejected findings remain frozen history but are excluded from approved values; unreviewed or needs-clarification findings, missing provenance, and applicable open conflicts block creation and approval.
+
+Admin and Estimator / Operator memberships may create and explicitly approve an exact immutable snapshot, including their own reviewed work. Viewer memberships remain read-only. Repeating an equivalent creation or approval is idempotent. An unapproved snapshot whose current reviewed/source state differs from its frozen fingerprint is stale and cannot be approved; approved historical records are never rewritten by later reviews or revisions.
+
+Approval remains represented by immutable snapshot/approval history and leaves the project at `human_scope_review`. M1-11 creates no trade packages and cannot move the project to `trade_packages_ready`; Milestone 2 owns that work and transition. M1-11 makes no AI/provider, OCR, vision, rendering, or financial-calculation call.
+
+**Consequence:** Approved project intelligence can cover several tender documents without arbitrary historical-run mixing or finding cherry-picking, while preserving exact evidence and maintaining the Milestone 2 boundary.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology
@@ -297,10 +309,6 @@ Determine calibration method and UI thresholds for low/medium/high presentation 
 ### U-008 — Derived-artifact retention
 
 Define retention and regeneration policy for page renders, thumbnails, OCR output, extracted text, embeddings if later approved, and temporary worker files.
-
-### U-009 — Approval readiness policy
-
-Define which finding categories are mandatory, which unresolved items block snapshot creation or final approval, which roles may approve, and whether self-approval is permitted.
 
 ### U-010 — Material-change and re-review rules
 

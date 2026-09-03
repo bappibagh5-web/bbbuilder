@@ -23,6 +23,8 @@ from apps.analysis.models import (
     FindingReview,
     FindingSource,
     IntelligenceConflict,
+    ProjectIntelligenceApproval,
+    ProjectIntelligenceSnapshotProvenance,
 )
 from apps.analysis.providers import (
     FakeAnalysisProvider,
@@ -34,6 +36,8 @@ from apps.analysis.rendering import PageRenderFailure, render_page_data_url
 from apps.analysis.schemas import validate_result
 from apps.analysis.services import (
     _claim_run,
+    approve_intelligence_snapshot,
+    create_intelligence_snapshot,
     detect_conflicts,
     dispatch_analysis_run,
     execute_analysis_run,
@@ -43,6 +47,7 @@ from apps.analysis.services import (
     resolve_conflict,
     retry_analysis_run,
     review_finding,
+    snapshot_readiness,
 )
 from apps.documents.models import (
     Document,
@@ -1116,3 +1121,294 @@ def test_review_api_permissions_scoping_and_read_only_boundaries(
     serialized = json.dumps(payload)
     assert "storage_key" not in serialized and '"native_text":' not in serialized
     assert "OPENAI_API_KEY" not in serialized and "normalized_machine_value" not in payload
+
+
+def snapshot_ready_run(revision, user):
+    Document.objects.filter(pk=revision.document_id).update(current_revision=revision)
+    Project.objects.filter(pk=revision.document.project_id).update(
+        status=Project.Status.HUMAN_SCOPE_REVIEW
+    )
+    revision.document.project.refresh_from_db()
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    for finding in findings:
+        review_finding(finding=finding, reviewer=user, decision=FindingReview.Decision.ACCEPTED)
+    run.refresh_from_db()
+    return run, findings
+
+
+def second_document_revision(revision, user):
+    project = revision.document.project
+    original = revision.project_file.file_asset
+    asset = FileAsset.objects.create(
+        organization=project.organization,
+        bucket=original.bucket,
+        storage_key="analysis/second-source.pdf",
+        original_filename="second-source.pdf",
+        declared_mime_type="application/pdf",
+        detected_mime_type="application/pdf",
+        byte_size=original.byte_size,
+        checksum=original.checksum,
+        created_by=user,
+    )
+    project_file = ProjectFile.objects.create(project=project, file_asset=asset, created_by=user)
+    document = Document.objects.create(
+        project=project,
+        title="Second Drawing Set",
+        category=Document.Category.DRAWINGS,
+        created_by=user,
+    )
+    other = DocumentRevision.objects.create(
+        document=document,
+        project_file=project_file,
+        revision_label="R1",
+        source_filename="second-source.pdf",
+        created_by=user,
+    )
+    page = DocumentPage.objects.create(
+        document_revision=other,
+        page_number=1,
+        page_label="A01",
+        width_points=612,
+        height_points=792,
+        native_text="A01 ARCHITECTURAL PLAN",
+        native_text_char_count=22,
+        has_native_text=True,
+        parser_name="PyMuPDF",
+        parser_version="1.28.2",
+    )
+    for job_type in (ProcessingJob.JobType.SOURCE_VERIFICATION, ProcessingJob.JobType.PDF_INDEXING):
+        ProcessingJob.objects.create(
+            document_revision=other,
+            job_type=job_type,
+            status=ProcessingJob.Status.SUCCEEDED,
+            requested_by=user,
+            finished_at=page.indexed_at,
+        )
+    Document.objects.filter(pk=document.pk).update(current_revision=other)
+    return other
+
+
+def test_snapshot_readiness_blocks_incomplete_reviews_and_open_conflicts(
+    revision, user, membership
+):
+    Document.objects.filter(pk=revision.document_id).update(current_revision=revision)
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    revision.document.project.refresh_from_db()
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert state["eligible"] is False
+    assert {item["code"] for item in state["blockers"]} == {"unreviewed"}
+    review_finding(
+        finding=findings[0],
+        reviewer=user,
+        decision=FindingReview.Decision.NEEDS_CLARIFICATION,
+    )
+    review_finding(finding=findings[1], reviewer=user, decision=FindingReview.Decision.REJECTED)
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert state["eligible"] is False
+    assert state["summary_counts"]["needs_clarification"] == 1
+    assert state["summary_counts"]["rejected"] == 1
+
+
+def test_snapshot_freezes_complete_review_and_provenance_manifest_idempotently(
+    revision, user, membership
+):
+    run, findings = snapshot_ready_run(revision, user)
+    machine_value = findings[0].machine_value
+    review_finding(
+        finding=findings[0],
+        reviewer=user,
+        decision=FindingReview.Decision.EDITED_ACCEPTED,
+        reviewed_value="Human reviewed value",
+    )
+    review_finding(finding=findings[1], reviewer=user, decision=FindingReview.Decision.REJECTED)
+    with patch("apps.analysis.services.get_analysis_provider") as provider:
+        snapshot, created = create_intelligence_snapshot(
+            project=revision.document.project, creator=user, run_ids=[run.pk]
+        )
+        repeated, repeated_created = create_intelligence_snapshot(
+            project=revision.document.project, creator=user, run_ids=[run.pk]
+        )
+        provider.assert_not_called()
+    assert created is True and repeated_created is False and repeated.pk == snapshot.pk
+    assert snapshot.entries.count() == len(findings)
+    assert snapshot.entries.filter(included_in_intelligence=True).count() == 1
+    assert snapshot.entries.get(finding=findings[0]).effective_value == "Human reviewed value"
+    assert snapshot.entries.get(finding=findings[1]).effective_value == ""
+    assert (
+        ProjectIntelligenceSnapshotProvenance.objects.filter(
+            snapshot_entry__snapshot=snapshot
+        ).count()
+        == FindingSource.objects.filter(finding__analysis_run=run).count()
+    )
+    assert snapshot.manifest["source_runs"][0]["analysis_run_id"] == run.pk
+    assert {item["finding_id"] for item in snapshot.manifest["source_runs"][0]["findings"]} == {
+        finding.pk for finding in findings
+    }
+    findings[0].refresh_from_db()
+    assert findings[0].machine_value == machine_value
+    snapshot.version = 99
+    with pytest.raises(ValidationError):
+        snapshot.save()
+
+
+def test_snapshot_multi_run_selection_and_same_revision_guard(revision, user, membership):
+    first_run, first_findings = snapshot_ready_run(revision, user)
+    other_revision = second_document_revision(revision, user)
+    second_run, second_findings = snapshot_ready_run(other_revision, user)
+    snapshot, created = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[second_run.pk, first_run.pk]
+    )
+    assert created and snapshot.sources.count() == 2
+    assert snapshot.entries.count() == len(first_findings) + len(second_findings)
+    another_run = completed_run(revision, user)
+    for finding in materialize_findings(analysis_run=another_run, actor=user):
+        review_finding(finding=finding, reviewer=user, decision=FindingReview.Decision.ACCEPTED)
+    state = snapshot_readiness(
+        project=revision.document.project, run_ids=[first_run.pk, another_run.pk]
+    )
+    assert state["eligible"] is False
+    assert "duplicate_revision_run" in {item["code"] for item in state["blockers"]}
+
+
+def test_historical_revision_cannot_create_new_snapshot(revision, user, membership):
+    run, _ = snapshot_ready_run(revision, user)
+    replacement = second_document_revision(revision, user)
+    Document.objects.filter(pk=revision.document_id).update(current_revision=None)
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert state["eligible"] is False
+    assert "revision_not_current" in {item["code"] for item in state["blockers"]}
+    assert replacement.document_id != revision.document_id
+
+
+def test_snapshot_approval_self_approval_idempotency_and_staleness(revision, user, membership):
+    run, findings = snapshot_ready_run(revision, user)
+    snapshot, _ = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    approval, created = approve_intelligence_snapshot(
+        snapshot=snapshot, approver=user, approval_note="Approved for M1 intelligence."
+    )
+    repeated, repeated_created = approve_intelligence_snapshot(snapshot=snapshot, approver=user)
+    assert created and not repeated_created and repeated.pk == approval.pk
+    assert ProjectIntelligenceApproval.objects.filter(snapshot=snapshot).count() == 1
+    assert AuditEvent.objects.filter(action_code="intelligence_snapshot.approved").count() == 1
+    assert (
+        Project.objects.get(pk=revision.document.project_id).status
+        == Project.Status.HUMAN_SCOPE_REVIEW
+    )
+    frozen = snapshot.manifest
+    review_finding(finding=findings[0], reviewer=user, decision=FindingReview.Decision.REJECTED)
+    snapshot.refresh_from_db()
+    approval.refresh_from_db()
+    assert snapshot.manifest == frozen and approval.snapshot_id == snapshot.pk
+
+
+def test_stale_unapproved_snapshot_is_blocked_and_new_version_created(revision, user, membership):
+    run, findings = snapshot_ready_run(revision, user)
+    first, _ = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    review_finding(finding=findings[0], reviewer=user, decision=FindingReview.Decision.REJECTED)
+    with pytest.raises(ValidationError, match="snapshot_stale"):
+        approve_intelligence_snapshot(snapshot=first, approver=user)
+    assert not ProjectIntelligenceApproval.objects.filter(snapshot=first).exists()
+    assert AuditEvent.objects.filter(
+        action_code="intelligence_snapshot.approval_blocked_stale"
+    ).exists()
+    second, created = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    assert created and second.version == 2 and second.fingerprint != first.fingerprint
+
+
+def test_snapshot_api_operator_viewer_and_no_cherry_pick(revision, user, membership, organization):
+    run, findings = snapshot_ready_run(revision, user)
+    list_endpoint = reverse(
+        "intelligence-snapshot-list",
+        kwargs={"organization_slug": organization.slug, "project_pk": revision.document.project_id},
+    )
+    response = client_for(user).post(
+        list_endpoint,
+        {"analysis_run_ids": [run.pk], "finding_ids": [findings[0].pk]},
+        format="json",
+    )
+    assert response.status_code == 201
+    assert sum(len(source["entries"]) for source in response.data["sources"]) == len(findings)
+    approval_endpoint = reverse(
+        "intelligence-snapshot-approval",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "snapshot_pk": response.data["id"],
+        },
+    )
+    assert (
+        client_for(user)
+        .post(approval_endpoint, {"approval_note": "Self-approved"}, format="json")
+        .status_code
+        == 201
+    )
+    viewer = get_user_model().objects.create_user(email="snapshot-viewer@example.com", password="x")
+    Membership.objects.create(organization=organization, user=viewer, role=Membership.Role.VIEWER)
+    viewer_client = client_for(viewer)
+    assert viewer_client.get(list_endpoint).status_code == 200
+    assert (
+        viewer_client.post(list_endpoint, {"analysis_run_ids": [run.pk]}, format="json").status_code
+        == 403
+    )
+    assert viewer_client.post(approval_endpoint, {}, format="json").status_code == 403
+    assert viewer_client.put(list_endpoint, {}, format="json").status_code == 405
+    assert viewer_client.delete(list_endpoint).status_code == 405
+    serialized = json.dumps(viewer_client.get(list_endpoint).data)
+    assert "native_text" not in serialized and "storage_key" not in serialized
+    assert "OPENAI_API_KEY" not in serialized
+
+
+def test_snapshot_readiness_blocks_open_conflict_and_missing_provenance(revision, user, membership):
+    run, findings = snapshot_ready_run(revision, user)
+    conflict = IntelligenceConflict.objects.create(
+        project=revision.document.project,
+        analysis_run=run,
+        semantic_key=findings[0].semantic_key,
+        participant_key="snapshot-open-conflict",
+        explanation="Conflicting reviewed evidence requires a human resolution.",
+    )
+    conflict.findings.add(findings[0])
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert "open_conflict" in {item["code"] for item in state["blockers"]}
+
+    conflict.delete()
+    findings[0].sources.all().delete()
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert "missing_provenance" in {item["code"] for item in state["blockers"]}
+
+
+def test_snapshot_api_admin_allowed_and_inactive_membership_denied(
+    revision, user, membership, organization
+):
+    run, _ = snapshot_ready_run(revision, user)
+    endpoint = reverse(
+        "intelligence-snapshot-list",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+        },
+    )
+    admin = get_user_model().objects.create_user(email="snapshot-admin@example.com", password="x")
+    Membership.objects.create(organization=organization, user=admin, role=Membership.Role.ADMIN)
+    response = client_for(admin).post(endpoint, {"analysis_run_ids": [run.pk]}, format="json")
+    assert response.status_code == 201
+    approval_endpoint = reverse(
+        "intelligence-snapshot-approval",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "snapshot_pk": response.data["id"],
+        },
+    )
+    assert client_for(admin).post(approval_endpoint, {}, format="json").status_code == 201
+
+    admin.memberships.update(is_active=False)
+    assert client_for(admin).get(endpoint).status_code == 403

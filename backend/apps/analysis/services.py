@@ -7,7 +7,7 @@ from collections import defaultdict
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q
+from django.db.models import F, Max, Q
 from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
 
@@ -25,6 +25,11 @@ from .models import (
     FindingReview,
     FindingSource,
     IntelligenceConflict,
+    ProjectIntelligenceApproval,
+    ProjectIntelligenceSnapshot,
+    ProjectIntelligenceSnapshotEntry,
+    ProjectIntelligenceSnapshotProvenance,
+    ProjectIntelligenceSnapshotSource,
 )
 from .prompts import (
     ANALYSIS_VERSION,
@@ -797,3 +802,367 @@ def resolve_conflict(*, conflict, actor, status, resolution_note=""):
             metadata={"supersedes_conflict_id": current.pk},
         )
     return replacement
+
+
+SNAPSHOT_SCHEMA_VERSION = "project-intelligence-v1"
+
+
+def _snapshot_block(code, message, count=1):
+    return {"code": code, "message": message, "count": count}
+
+
+def _snapshot_state(*, project, run_ids):
+    selected_ids = sorted({int(run_id) for run_id in run_ids})
+    blockers = []
+    if project.status != Project.Status.HUMAN_SCOPE_REVIEW:
+        blockers.append(
+            _snapshot_block(
+                "project_not_in_human_review",
+                "Project must be in Human Scope Review before creating intelligence snapshots.",
+            )
+        )
+    if not selected_ids:
+        blockers.append(
+            _snapshot_block("source_runs_required", "Select at least one reviewed analysis run.")
+        )
+        return {
+            "eligible": False,
+            "blockers": blockers,
+            "manifest": {},
+            "fingerprint": "",
+            "summary_counts": {},
+            "runs": [],
+        }
+    runs = list(
+        AnalysisRun.objects.filter(pk__in=selected_ids)
+        .select_related("document_revision__document__current_revision")
+        .prefetch_related(
+            "findings__reviews",
+            "findings__sources",
+            "intelligence_conflicts__findings",
+        )
+        .order_by("id")
+    )
+    if len(runs) != len(selected_ids) or any(run.project.pk != project.pk for run in runs):
+        blockers.append(
+            _snapshot_block("invalid_source_run", "Every selected run must belong to this project.")
+        )
+    if blockers:
+        return {
+            "eligible": False,
+            "blockers": blockers,
+            "manifest": {},
+            "fingerprint": "",
+            "summary_counts": {},
+            "runs": [],
+        }
+    revision_ids = [run.document_revision_id for run in runs]
+    if len(revision_ids) != len(set(revision_ids)):
+        blockers.append(
+            _snapshot_block(
+                "duplicate_revision_run", "Select only one analysis run for each document revision."
+            )
+        )
+    run_manifest = []
+    approved_entries = []
+    all_entries = []
+    counts = {
+        "runs": len(runs),
+        "findings": 0,
+        "accepted": 0,
+        "edited_accepted": 0,
+        "rejected": 0,
+        "needs_clarification": 0,
+        "unreviewed": 0,
+        "open_conflicts": 0,
+        "approved_entries": 0,
+    }
+    accepted_by_key = defaultdict(set)
+    for run in runs:
+        if run.status != AnalysisRun.Status.SUCCEEDED:
+            blockers.append(
+                _snapshot_block("run_not_succeeded", f"Analysis Run #{run.pk} has not succeeded.")
+            )
+        if run.document_revision.document.current_revision_id != run.document_revision_id:
+            blockers.append(
+                _snapshot_block(
+                    "revision_not_current",
+                    f"Analysis Run #{run.pk} targets a historical document revision.",
+                )
+            )
+        findings = list(run.findings.all().order_by("id"))
+        if not findings:
+            blockers.append(
+                _snapshot_block(
+                    "findings_not_materialized",
+                    f"Analysis Run #{run.pk} has no materialized findings.",
+                )
+            )
+        run_entries = []
+        for finding in findings:
+            counts["findings"] += 1
+            review = max(
+                finding.reviews.all(), key=lambda item: (item.created_at, item.pk), default=None
+            )
+            sources = sorted(finding.sources.all(), key=lambda source: source.pk)
+            if not sources:
+                blockers.append(
+                    _snapshot_block(
+                        "missing_provenance", f"Finding #{finding.pk} has no source provenance."
+                    )
+                )
+            if review is None:
+                counts["unreviewed"] += 1
+                blockers.append(
+                    _snapshot_block("unreviewed", f"Finding #{finding.pk} has not been reviewed.")
+                )
+                continue
+            counts[review.decision] += 1
+            if review.decision == FindingReview.Decision.NEEDS_CLARIFICATION:
+                blockers.append(
+                    _snapshot_block(
+                        "needs_clarification", f"Finding #{finding.pk} needs clarification."
+                    )
+                )
+            effective_value = (
+                review.reviewed_value
+                if review.decision == FindingReview.Decision.EDITED_ACCEPTED
+                else finding.machine_value
+                if review.decision == FindingReview.Decision.ACCEPTED
+                else ""
+            )
+            provenance = [
+                {
+                    "finding_source_id": source.pk,
+                    "document_revision_id": source.document_revision_id,
+                    "document_page_id": source.document_page_id,
+                    "drawing_sheet_id": source.drawing_sheet_id,
+                    "analysis_task_run_id": source.analysis_task_run_id,
+                    "relation": source.relation,
+                    "evidence_mode": source.evidence_mode,
+                    "evidence_excerpt": source.evidence_excerpt,
+                    "visual_evidence_description": source.visual_evidence_description,
+                }
+                for source in sources
+            ]
+            entry = {
+                "finding_id": finding.pk,
+                "finding_review_id": review.pk,
+                "decision": review.decision,
+                "effective_value": effective_value,
+                "semantic_key": finding.semantic_key,
+                "category": finding.category,
+                "subject": finding.subject,
+                "provenance": provenance,
+            }
+            run_entries.append(entry)
+            all_entries.append(entry)
+            if effective_value:
+                accepted_by_key[finding.semantic_key].add(
+                    _normalized_value(finding.category, effective_value)
+                )
+                approved_entries.append(entry)
+        open_conflicts = [
+            conflict
+            for conflict in run.intelligence_conflicts.all()
+            if not hasattr(conflict, "superseded_by")
+            and conflict.status == IntelligenceConflict.Status.OPEN
+        ]
+        if open_conflicts:
+            counts["open_conflicts"] += len(open_conflicts)
+            blockers.append(
+                _snapshot_block(
+                    "open_conflict",
+                    f"Analysis Run #{run.pk} has unresolved conflicts.",
+                    len(open_conflicts),
+                )
+            )
+        run_manifest.append(
+            {
+                "analysis_run_id": run.pk,
+                "document_revision_id": run.document_revision_id,
+                "document_id": run.document_revision.document_id,
+                "resolved_conflict_ids": sorted(
+                    conflict.pk
+                    for conflict in run.intelligence_conflicts.all()
+                    if not hasattr(conflict, "superseded_by")
+                    and conflict.status != IntelligenceConflict.Status.OPEN
+                ),
+                "findings": run_entries,
+            }
+        )
+    cross_run_conflicts = sorted(key for key, values in accepted_by_key.items() if len(values) > 1)
+    if cross_run_conflicts:
+        blockers.append(
+            _snapshot_block(
+                "cross_run_conflict",
+                "Selected runs contain materially different reviewed values "
+                "for the same semantic key.",
+                len(cross_run_conflicts),
+            )
+        )
+    counts["approved_entries"] = len(approved_entries)
+    manifest = {
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "project_id": project.pk,
+        "source_runs": run_manifest,
+        "approved_intelligence": approved_entries,
+    }
+    fingerprint = _stable_hash(manifest)
+    return {
+        "eligible": not blockers,
+        "blockers": blockers,
+        "manifest": manifest,
+        "fingerprint": fingerprint,
+        "summary_counts": counts,
+        "runs": runs,
+    }
+
+
+def snapshot_readiness(*, project, run_ids):
+    return _snapshot_state(project=project, run_ids=run_ids)
+
+
+def create_intelligence_snapshot(*, project, creator, run_ids):
+    _require_operator(creator, project.organization)
+    with transaction.atomic():
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+        state = _snapshot_state(project=locked_project, run_ids=run_ids)
+        if not state["eligible"]:
+            raise ValidationError(
+                {"snapshot": [blocker["message"] for blocker in state["blockers"]]}
+            )
+        existing = ProjectIntelligenceSnapshot.objects.filter(
+            project=locked_project, fingerprint=state["fingerprint"]
+        ).first()
+        if existing:
+            return existing, False
+        version = (
+            ProjectIntelligenceSnapshot.objects.filter(project=locked_project).aggregate(
+                value=Max("version")
+            )["value"]
+            or 0
+        ) + 1
+        snapshot = ProjectIntelligenceSnapshot(
+            project=locked_project,
+            version=version,
+            fingerprint=state["fingerprint"],
+            schema_version=SNAPSHOT_SCHEMA_VERSION,
+            manifest=state["manifest"],
+            summary_counts=state["summary_counts"],
+            created_by=creator,
+        )
+        snapshot.full_clean()
+        snapshot.save()
+        runs_by_id = {run.pk: run for run in state["runs"]}
+        for run_data in state["manifest"]["source_runs"]:
+            run = runs_by_id[run_data["analysis_run_id"]]
+            source = ProjectIntelligenceSnapshotSource(
+                snapshot=snapshot, analysis_run=run, document_revision=run.document_revision
+            )
+            source.full_clean()
+            source.save()
+            findings_by_id = {finding.pk: finding for finding in run.findings.all()}
+            for item in run_data["findings"]:
+                finding = findings_by_id[item["finding_id"]]
+                review = finding.reviews.get(pk=item["finding_review_id"])
+                entry = ProjectIntelligenceSnapshotEntry(
+                    snapshot=snapshot,
+                    snapshot_source=source,
+                    finding=finding,
+                    finding_review=review,
+                    decision=item["decision"],
+                    effective_value=item["effective_value"],
+                    semantic_key=item["semantic_key"],
+                    category=item["category"],
+                    included_in_intelligence=bool(item["effective_value"]),
+                )
+                entry.full_clean()
+                entry.save()
+                finding_sources = {value.pk: value for value in finding.sources.all()}
+                for frozen in item["provenance"]:
+                    finding_source = finding_sources[frozen["finding_source_id"]]
+                    provenance = ProjectIntelligenceSnapshotProvenance(
+                        snapshot_entry=entry,
+                        finding_source=finding_source,
+                        document_revision_id=frozen["document_revision_id"],
+                        document_page_id=frozen["document_page_id"],
+                        drawing_sheet_id=frozen["drawing_sheet_id"],
+                        analysis_task_run_id=frozen["analysis_task_run_id"],
+                    )
+                    provenance.full_clean()
+                    provenance.save()
+        record_event(
+            organization=locked_project.organization,
+            project=locked_project,
+            actor=creator,
+            action_code="intelligence_snapshot.created",
+            target=snapshot,
+            metadata={
+                "version": version,
+                "fingerprint": snapshot.fingerprint,
+                **snapshot.summary_counts,
+            },
+        )
+    return snapshot, True
+
+
+def approve_intelligence_snapshot(*, snapshot, approver, approval_note=""):
+    _require_operator(approver, snapshot.project.organization)
+    blocked_snapshot = None
+    with transaction.atomic():
+        current = (
+            ProjectIntelligenceSnapshot.objects.select_for_update()
+            .select_related("project")
+            .get(pk=snapshot.pk)
+        )
+        existing = ProjectIntelligenceApproval.objects.filter(snapshot=current).first()
+        if existing:
+            return existing, False
+        run_ids = list(current.sources.values_list("analysis_run_id", flat=True))
+        state = _snapshot_state(project=current.project, run_ids=run_ids)
+        if not state["eligible"] or state["fingerprint"] != current.fingerprint:
+            blocked_snapshot = current
+        else:
+            approval = ProjectIntelligenceApproval(
+                project=current.project,
+                snapshot=current,
+                approver=approver,
+                approval_note=(approval_note or "").strip(),
+                readiness_result={
+                    "eligible": True,
+                    "fingerprint": state["fingerprint"],
+                    "summary_counts": state["summary_counts"],
+                },
+            )
+            approval.full_clean()
+            approval.save()
+            record_event(
+                organization=current.project.organization,
+                project=current.project,
+                actor=approver,
+                action_code="intelligence_snapshot.approved",
+                target=approval,
+                metadata={
+                    "snapshot_id": current.pk,
+                    "version": current.version,
+                    "fingerprint": current.fingerprint,
+                    "approval_id": approval.pk,
+                },
+            )
+    if blocked_snapshot:
+        record_event(
+            organization=blocked_snapshot.project.organization,
+            project=blocked_snapshot.project,
+            actor=approver,
+            action_code="intelligence_snapshot.approval_blocked_stale",
+            target=blocked_snapshot,
+            metadata={
+                "version": blocked_snapshot.version,
+                "fingerprint": blocked_snapshot.fingerprint,
+            },
+        )
+        raise ValidationError(
+            {"snapshot": "snapshot_stale: Create a new snapshot from the current reviewed state."}
+        )
+    return approval, True

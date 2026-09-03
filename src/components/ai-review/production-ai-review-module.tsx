@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Bot, CheckCircle2, Clock3, FileSearch, LoaderCircle, RotateCcw } from "lucide-react";
 import type { OrganizationMembership } from "@/lib/auth";
-import { analysisApi, type AnalysisRun, type ExtractedFinding, type FindingDecision, type IntelligenceConflict, type MachineCandidate } from "@/lib/analysis";
+import { analysisApi, type AnalysisRun, type ExtractedFinding, type FindingDecision, type IntelligenceCandidateRun, type IntelligenceConflict, type IntelligenceReadiness, type IntelligenceSnapshot, type MachineCandidate } from "@/lib/analysis";
 import { analysisActions, deriveAnalysisState, MACHINE_REVIEW_WARNING, shouldPollAnalysis } from "@/lib/analysis-state";
 import { canSubmitFindingReview, findingReviewActions, REVIEWED_NOT_APPROVED_WARNING, reviewProgress } from "@/lib/finding-review-state";
+import { selectedRunsRespectRevisionBoundary, snapshotActions, snapshotStatus } from "@/lib/intelligence-snapshot-state";
 import { documentsApi, type ProcessingJob, type ProductionDocument, type ProductionDocumentRevision } from "@/lib/documents";
 import type { ProductionProject } from "@/lib/projects";
 import { Card } from "@/components/ui/card";
@@ -119,6 +120,7 @@ export function ProductionAIReviewModule({ project, membership }: { project: Pro
     <Card className="p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><StateIcon state={state} /><h3 className="font-semibold">{stateLabel(state)}</h3></div><p className="mt-1 text-sm text-slate-500">{stateDetail(state, canOperate)}</p></div><div className="flex gap-2">{(actions.canRun || actions.canRunAgain) && selected && <button type="button" disabled={acting} onClick={() => void act(() => analysisApi.request(slug, project.id, selected.document.id, selected.revision.id))} className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50"><Bot className="h-4 w-4" />{acting ? "Requesting…" : actions.canRunAgain ? "Run AI Analysis Again" : "Run AI Analysis"}</button>}{actions.canRetry && latestRun && <button type="button" disabled={acting} onClick={() => void act(() => analysisApi.retry(slug, project.id, latestRun.id))} className="inline-flex h-10 items-center gap-2 rounded-lg border bg-white px-4 text-sm font-semibold disabled:opacity-50"><RotateCcw className="h-4 w-4" />{acting ? "Requesting…" : "Retry Analysis"}</button>}</div></div>{state === "failed" && latestRun?.safe_failure_message && <p className="mt-3 text-sm text-red-700">{latestRun.safe_failure_message}</p>}</Card>
     {selectedRun?.status === "succeeded" && <MachineResult run={selectedRun} />}
     {selectedRun?.status === "succeeded" && <HumanReviewPanel run={selectedRun} findings={findings} conflicts={conflicts} canOperate={canOperate} actions={reviewActions} slug={slug} projectId={project.id} acting={acting} setActing={setActing} setError={setError} refresh={refreshReview} />}
+    <ProjectIntelligencePanel slug={slug} projectId={project.id} canOperate={canOperate} />
     <RunHistory runs={runs} selectedRunId={selectedRun?.id ?? null} onSelect={(id) => { setSelectedRunId(id); setFindings([]); setConflicts([]); }} />
   </div>;
 }
@@ -134,6 +136,71 @@ function HumanReviewPanel({ run, findings, conflicts, canOperate, actions, slug,
   }
   if (!findings.length) return <Card className="border-blue-200 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Human review</p><h3 className="mt-1 font-semibold">Prepare Run #{run.id} findings for review</h3><p className="mt-1 text-sm text-slate-600">Deterministically materialize persisted machine candidates. This makes no AI call and creates no approved intelligence.</p></div>{actions.canMaterialize && <button type="button" disabled={acting} onClick={() => void perform(() => analysisApi.materialize(slug, projectId, run.id))} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50">{acting ? "Preparing…" : "Prepare Findings for Review"}</button>}</div>{!canOperate && <p className="mt-3 text-sm text-slate-500">An Admin or Estimator / Operator may prepare this run.</p>}</Card>;
   return <section className="space-y-4"><div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">{REVIEWED_NOT_APPROVED_WARNING}</div><Card className="p-4"><div className="flex flex-wrap gap-x-6 gap-y-2 text-sm"><span><strong>{progress.total}</strong> findings</span><span><strong>{progress.reviewed}</strong> reviewed</span><span><strong>{progress.unreviewed}</strong> unreviewed</span><span><strong>{conflicts.filter((item) => item.status === "open").length}</strong> open conflicts</span></div></Card><div className="space-y-3">{findings.map((finding) => <FindingCard key={finding.id} finding={finding} canReview={actions.canReview} acting={acting} onReview={(decision, reviewedValue, reviewNote) => perform(() => analysisApi.review(slug, projectId, finding.id, { decision, reviewed_value: reviewedValue, review_note: reviewNote }))} />)}</div><ConflictPanel conflicts={conflicts} canResolve={actions.canResolveConflict} acting={acting} onResolve={(conflict, status, note) => perform(() => analysisApi.resolveConflict(slug, projectId, conflict.id, { status, resolution_note: note }))} /></section>;
+}
+
+function ProjectIntelligencePanel({ slug, projectId, canOperate }: { slug: string; projectId: number; canOperate: boolean }) {
+  const [candidates, setCandidates] = useState<IntelligenceCandidateRun[]>([]);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [readiness, setReadiness] = useState<IntelligenceReadiness | null>(null);
+  const [snapshots, setSnapshots] = useState<IntelligenceSnapshot[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const actions = snapshotActions(canOperate, readiness);
+  const load = useCallback(async () => {
+    const [candidatePayload, history] = await Promise.all([
+      analysisApi.intelligenceCandidates(slug, projectId),
+      analysisApi.snapshots(slug, projectId),
+    ]);
+    setCandidates(candidatePayload.candidate_runs);
+    setSnapshots(history);
+  }, [projectId, slug]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : "Project intelligence is unavailable."));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+  useEffect(() => {
+    if (!selected.length) return;
+    const controller = new AbortController();
+    void analysisApi.intelligenceReadiness(slug, projectId, selected, controller.signal)
+      .then(setReadiness)
+      .catch((reason) => { if (!controller.signal.aborted) setMessage(reason instanceof Error ? reason.message : "Readiness check failed."); });
+    return () => controller.abort();
+  }, [projectId, selected, slug]);
+  function toggle(candidate: IntelligenceCandidateRun) {
+    setMessage(null);
+    setReadiness(null);
+    setSelected((current) => current.includes(candidate.id)
+      ? current.filter((id) => id !== candidate.id)
+      : [...current.filter((id) => candidates.find((item) => item.id === id)?.document_revision_id !== candidate.document_revision_id), candidate.id]);
+  }
+  async function createSnapshot() {
+    if (!actions.canCreate || !selectedRunsRespectRevisionBoundary(selected, candidates)) return;
+    setBusy(true); setMessage(null);
+    try {
+      await analysisApi.createSnapshot(slug, projectId, selected);
+      await load(); setMessage("Immutable intelligence snapshot created.");
+    } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Snapshot creation failed."); }
+    finally { setBusy(false); }
+  }
+  async function approve(snapshot: IntelligenceSnapshot) {
+    if (!actions.canApprove(snapshot)) return;
+    const count = snapshot.summary_counts.approved_entries ?? 0;
+    if (!window.confirm(`Approve Intelligence Snapshot V${snapshot.version} with ${count} intelligence entries? Approval targets this exact immutable version. Future review changes require a new snapshot.`)) return;
+    setBusy(true); setMessage(null);
+    try {
+      await analysisApi.approveSnapshot(slug, projectId, snapshot.id);
+      await load(); setMessage(`Snapshot V${snapshot.version} approved.`);
+    } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Snapshot approval failed."); }
+    finally { setBusy(false); }
+  }
+  return <section className="space-y-4"><Card className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Project intelligence readiness</p><h3 className="mt-1 font-semibold">Select complete reviewed source runs</h3><p className="mt-1 text-sm text-slate-600">Select at most one successful AnalysisRun per current document revision. Every finding in each selected run is included automatically.</p></div><div className="flex gap-2"><button type="button" disabled={busy} onClick={() => void load()} className="h-10 rounded-lg border px-3 text-sm font-semibold disabled:opacity-50">Refresh readiness</button>{canOperate && <button type="button" disabled={busy || !actions.canCreate} onClick={() => void createSnapshot()} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Create Intelligence Snapshot</button>}</div></div>{message && <p className="mt-3 text-sm text-slate-700">{message}</p>}<div className="mt-4 space-y-2">{candidates.map((candidate) => <label key={candidate.id} className={`flex gap-3 rounded-lg border p-3 ${candidate.is_current_revision ? "bg-white" : "bg-slate-50 text-slate-500"}`}><input type="checkbox" checked={selected.includes(candidate.id)} disabled={!canOperate || !candidate.is_current_revision} onChange={() => toggle(candidate)} className="mt-1" /><span className="min-w-0"><span className="block text-sm font-semibold">{candidate.document_title} · {candidate.revision_label || `Revision #${candidate.document_revision_id}`} · Run #{candidate.id}</span><span className="mt-1 block text-xs">{candidate.finding_count} findings · {candidate.unreviewed_count} unreviewed · {candidate.needs_clarification_count} need clarification · {candidate.is_current_revision ? "Current revision" : "Historical revision"}</span></span></label>)}{!candidates.length && <p className="text-sm text-slate-500">No materialized successful analysis runs are available.</p>}</div>{selected.length > 0 && readiness && <div className={`mt-4 rounded-lg border p-3 text-sm ${readiness.eligible ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}><p className="font-semibold">{readiness.eligible ? "Eligible for immutable snapshot" : "Cannot create snapshot"}</p>{readiness.blockers.map((blocker) => <p key={`${blocker.code}-${blocker.message}`} className="mt-1">{blocker.message}</p>)}</div>}{!canOperate && <p className="mt-3 text-sm text-slate-500">Viewer access is read-only. An Admin or Estimator / Operator may create and approve snapshots.</p>}</Card><SnapshotHistory snapshots={snapshots} canOperate={canOperate} busy={busy} onApprove={approve} /></section>;
+}
+
+function SnapshotHistory({ snapshots, canOperate, busy, onApprove }: { snapshots: IntelligenceSnapshot[]; canOperate: boolean; busy: boolean; onApprove: (snapshot: IntelligenceSnapshot) => void }) {
+  const actions = snapshotActions(canOperate, null);
+  return <Card className="p-5"><h3 className="font-semibold">Intelligence snapshot history</h3><p className="mt-1 text-sm text-slate-500">Immutable snapshots of reviewed intelligence. Historical versions remain inspectable.</p><div className="mt-4 space-y-4">{snapshots.map((snapshot, index) => { const status = snapshotStatus(snapshot); return <details key={snapshot.id} className="rounded-lg border bg-white p-4" open={index === 0}><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">Snapshot V{snapshot.version} · {status.replaceAll("_", " ")}</p><p className="mt-1 text-xs text-slate-500">Created {new Date(snapshot.created_at).toLocaleString("en-CA")} by {snapshot.created_by} · {snapshot.summary_counts.approved_entries ?? 0} intelligence entries · {snapshot.fingerprint.slice(0, 12)}…</p></div>{actions.canApprove(snapshot) && <button type="button" disabled={busy} onClick={(event) => { event.preventDefault(); void onApprove(snapshot); }} className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-white disabled:opacity-50">Approve Intelligence Snapshot</button>}</div></summary>{snapshot.is_stale && <p className="mt-3 rounded bg-amber-50 p-2 text-sm text-amber-900">This snapshot is based on an older review or source state. Create a new snapshot before approval. Any prior approval remains historical.</p>}{snapshot.approval && <div className="mt-3 rounded bg-emerald-50 p-3 text-sm text-emerald-900"><p className="font-semibold">Approved project intelligence</p><p>Approved by {snapshot.approval.approver} on {new Date(snapshot.approval.approved_at).toLocaleString("en-CA")}</p>{snapshot.approval.approval_note && <p className="mt-1">{snapshot.approval.approval_note}</p>}</div>}<p className="mt-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Immutable snapshot of reviewed intelligence</p>{snapshot.sources.map((source) => <div key={source.id} className="mt-3 rounded-lg bg-slate-50 p-3"><p className="text-sm font-semibold">{source.document_title} · {source.revision_label || `Revision #${source.document_revision}`} · Analysis Run #{source.analysis_run}</p>{source.entries.map((entry) => <div key={entry.id} className="mt-2 border-t pt-2 text-sm"><p className="font-medium">{entry.subject} · {entry.decision.replaceAll("_", " ")}</p><p className="text-slate-700">{entry.included_in_intelligence ? entry.effective_value : "Rejected — preserved in manifest, excluded from approved intelligence."}</p><p className="mt-1 text-xs text-slate-500">Finding #{entry.finding} · Review #{entry.finding_review}{entry.provenance.map((item) => ` · Page ${item.page_number}${item.sheet_number ? ` / ${item.sheet_number}` : ""}`)}</p></div>)}</div>)}</details>; })}{!snapshots.length && <p className="text-sm text-slate-500">No intelligence snapshots have been created.</p>}</div></Card>;
 }
 
 function FindingCard({ finding, canReview, acting, onReview }: { finding: ExtractedFinding; canReview: boolean; acting: boolean; onReview: (decision: FindingDecision, value: string, note: string) => void }) {

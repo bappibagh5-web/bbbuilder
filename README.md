@@ -293,7 +293,20 @@ GET  /api/v1/organizations/{slug}/projects/{project_id}/conflicts/
 POST /api/v1/organizations/{slug}/projects/{project_id}/conflicts/{conflict_id}/resolve/
 ```
 
-Machine values and provenance remain immutable. Accept, Edited / Accepted, Reject, and Needs Clarification create append-only review records. An exact consecutive duplicate of the trimmed decision/value/note payload returns the current review without adding a review or audit row; meaningful changes append normally. Deterministic conflicts preserve every participant; resolution or dismissal creates a superseding conflict version. Preparing the first run may advance `ai_analysis` to `human_scope_review`, but reviewed findings remain **not yet approved project intelligence**. M1-11 will own immutable snapshots and final approval.
+Machine values and provenance remain immutable. Accept, Edited / Accepted, Reject, and Needs Clarification create append-only review records. An exact consecutive duplicate of the trimmed decision/value/note payload returns the current review without adding a review or audit row; meaningful changes append normally. Deterministic conflicts preserve every participant; resolution or dismissal creates a superseding conflict version. Preparing the first run may advance `ai_analysis` to `human_scope_review`, but reviewed findings remain **not yet approved project intelligence** until an exact M1-11 snapshot is explicitly approved.
+
+## Intelligence snapshots and approval
+
+M1-11 creates immutable project-level intelligence from explicitly selected, successful, materialized AnalysisRuns. A request supplies run IDs only: the server includes the complete finding set for each run and accepts at most one run per current DocumentRevision. Accepted values enter the intelligence payload, edited/accepted values use the human-reviewed value, rejected findings remain frozen in history but are excluded from intelligence, and unreviewed or needs-clarification findings block creation. Missing provenance, open conflicts, historical revisions, and contradictory selected review sets also block readiness. No AI/provider call occurs.
+
+```text
+GET/POST /api/v1/organizations/{slug}/projects/{project_id}/intelligence-readiness/
+GET/POST /api/v1/organizations/{slug}/projects/{project_id}/intelligence-snapshots/
+GET      /api/v1/organizations/{slug}/projects/{project_id}/intelligence-snapshots/{snapshot_id}/
+GET/POST /api/v1/organizations/{slug}/projects/{project_id}/intelligence-snapshots/{snapshot_id}/approval/
+```
+
+Snapshot manifests and normalized relational rows freeze the exact runs, revisions, findings, effective reviews, reviewed values, and bounded page/sheet/task provenance. A canonical, key-sorted compact JSON representation is hashed with SHA-256; equivalent source/review state is idempotent, while a meaningful change creates the next project snapshot version. Approval targets one exact snapshot, is explicit and immutable, and rechecks the current review/source fingerprint so stale drafts cannot be approved. Admin and Estimator / Operator members may create and self-approve; Viewer members are read-only. Approval leaves the project in `human_scope_review`; Milestone 2 owns trade-package readiness.
 
 ## Local ports
 

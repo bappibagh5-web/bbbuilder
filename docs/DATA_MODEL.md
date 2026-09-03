@@ -222,9 +222,9 @@ Recommended categories include project fact, required trade, scope observation, 
 
 **Purpose:** Immutable manifest of the effective reviewed project intelligence at a specific point after finding review and material-conflict resolution. It is the approval target; an analysis run alone cannot identify post-extraction human decisions.
 
-**Important fields:** ID, project, source analysis run, included finding IDs, effective finding-review IDs, relevant resolved intelligence-conflict IDs, manifest/schema version, canonical manifest or manifest reference, cryptographic hash, created by, and creation timestamp.
+**Important fields:** ID, project, explicit version, selected source analysis runs, included finding IDs, exact effective finding-review IDs, relevant resolved intelligence-conflict IDs, manifest/schema version, canonical manifest, cryptographic hash, summary counts, created by, and creation timestamp.
 
-**Relationships:** Belongs to a project and source analysis run; references the exact included findings, effective reviews, and conflict resolutions. Has zero or more project intelligence approval records.
+**Relationships:** Belongs to one project and references one or more explicitly selected successful analysis runs through immutable source records. Each selected run must belong to that project, target its document's current revision at snapshot creation, and be the only selected run for that revision. Immutable snapshot entries relationally freeze every finding from each selected run, its exact effective review, and its provenance sources. Rejected findings remain in the frozen manifest but not the approved-intelligence payload. Has zero or more project intelligence approval records.
 
 **Versioning:** Every materially different effective reviewed state creates a new immutable snapshot and version/hash. Snapshots are never edited in place.
 

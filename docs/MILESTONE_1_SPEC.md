@@ -82,10 +82,10 @@ Production security, backups, logging, and monitoring require a safe baseline. T
 ## User roles
 
 - **Admin:** Manages organization access and may perform all Milestone 1 project/review actions.
-- **Estimator / Operator:** Creates and edits projects, uploads documents, initiates processing as allowed, reviews findings, and may approve if the final approval policy permits.
+- **Estimator / Operator:** Creates and edits projects, uploads documents, initiates processing as allowed, reviews findings, and may create and approve intelligence snapshots.
 - **Viewer:** Reads authorized project, document, finding, and approval information without mutation rights.
 
-The exact approval permission and self-approval rule remain unresolved in [DECISIONS.md](./DECISIONS.md).
+Admin and Estimator / Operator memberships may create and approve intelligence snapshots. Self-approval is permitted because the contracted checkpoint requires explicit human intent but not segregation of duties. Viewer memberships remain read-only.
 
 ## User stories
 

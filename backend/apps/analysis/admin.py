@@ -7,6 +7,11 @@ from .models import (
     FindingReview,
     FindingSource,
     IntelligenceConflict,
+    ProjectIntelligenceApproval,
+    ProjectIntelligenceSnapshot,
+    ProjectIntelligenceSnapshotEntry,
+    ProjectIntelligenceSnapshotProvenance,
+    ProjectIntelligenceSnapshotSource,
 )
 
 
@@ -95,3 +100,38 @@ class IntelligenceConflictAdmin(ImmutableAnalysisAdmin):
     list_filter = ("status", "conflict_type", "created_at")
     search_fields = ("semantic_key", "explanation", "project__project_number")
     readonly_fields = tuple(field.name for field in IntelligenceConflict._meta.fields)
+
+
+@admin.register(ProjectIntelligenceSnapshot)
+class ProjectIntelligenceSnapshotAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "project", "version", "fingerprint", "created_by", "created_at")
+    search_fields = ("project__project_number", "fingerprint", "created_by__email")
+    readonly_fields = tuple(field.name for field in ProjectIntelligenceSnapshot._meta.fields)
+
+
+@admin.register(ProjectIntelligenceSnapshotSource)
+class ProjectIntelligenceSnapshotSourceAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "snapshot", "analysis_run", "document_revision")
+    readonly_fields = tuple(field.name for field in ProjectIntelligenceSnapshotSource._meta.fields)
+
+
+@admin.register(ProjectIntelligenceSnapshotEntry)
+class ProjectIntelligenceSnapshotEntryAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "snapshot", "finding", "decision", "included_in_intelligence")
+    list_filter = ("decision", "included_in_intelligence", "category")
+    readonly_fields = tuple(field.name for field in ProjectIntelligenceSnapshotEntry._meta.fields)
+
+
+@admin.register(ProjectIntelligenceSnapshotProvenance)
+class ProjectIntelligenceSnapshotProvenanceAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "snapshot_entry", "finding_source", "document_page")
+    readonly_fields = tuple(
+        field.name for field in ProjectIntelligenceSnapshotProvenance._meta.fields
+    )
+
+
+@admin.register(ProjectIntelligenceApproval)
+class ProjectIntelligenceApprovalAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "project", "snapshot", "approver", "approved_at")
+    search_fields = ("project__project_number", "approver__email", "snapshot__fingerprint")
+    readonly_fields = tuple(field.name for field in ProjectIntelligenceApproval._meta.fields)

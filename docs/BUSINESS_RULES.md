@@ -67,6 +67,10 @@ These rules are implementation invariants. Where a rule requires a technical cho
 10. A material new document revision or analysis produces new findings or a new intelligence version, identifies superseded/conflicting information, and triggers re-review where applicable.
 11. Only an approved intelligence snapshot may feed later scope, procurement, bid, or proposal workflows.
 12. Revocation or replacement of approval must be explicit and auditable.
+13. A project-intelligence snapshot is project-level and is assembled only from explicitly selected successful analysis runs belonging to that project. It includes each selected run's complete materialized finding set; individual findings cannot be cherry-picked.
+14. At most one selected analysis run may target a given document revision, and that revision must be its document's explicit current revision when a new snapshot is created.
+15. Admin and Estimator / Operator memberships may create and approve snapshots. Self-approval is permitted, but approval is always a separate explicit action. Viewers are read-only.
+16. Snapshot approval leaves `Project.status` at `human_scope_review`. Milestone 2 owns trade-package creation and any transition to `trade_packages_ready`.
 
 ## Responsibility mapping
 

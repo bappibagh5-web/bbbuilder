@@ -34,7 +34,9 @@ M1-09 — Structured AI Analysis is **complete**. Automated validation and authe
 
 M1-10 — Provenance, Findings & Human Review is **complete**. Automated validation and authenticated Admin/Estimator and Viewer browser validation against the real local PostgreSQL-backed workflow passed on September 3, 2026.
 
-M1-11 — Intelligence Snapshot, Approval & Audit is **next / not started**.
+M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated validation and authenticated Admin/Estimator and Viewer browser validation against the real local PostgreSQL-backed workflow passed on September 3, 2026.
+
+M1-12 — Real BB Builders Project Validation & Milestone Polish is **next / not started**.
 
 M1-01 currently includes:
 
@@ -116,7 +118,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-10 are complete. M1-11 has not started.
+M1-04 through M1-11 are complete. M1-12 has not started.
 
 M1-05 currently includes:
 
@@ -260,11 +262,26 @@ M1-10 currently includes:
 - Real local Run #4 validation: three findings with exact provenance, separately preserved machine/reviewed values, append-only review history, deterministic progress/conflict state, refresh and logout/login persistence, and zero AI calls
 - Exact consecutive duplicate review decision/value/note submissions are normalized and idempotent without duplicate review or audit rows; meaningful later decisions remain append-only
 - Authenticated Admin/Estimator review validation and disposable local Viewer read-only validation passed; Viewer mutation controls were absent and server permissions remained authoritative
-- M1-11 status: next / not started
+- M1-11 status: complete
+
+M1-11 currently includes:
+
+- Project-level immutable intelligence snapshots assembled from explicitly selected successful AnalysisRuns
+- At most one selected run per current DocumentRevision and the complete materialized finding set from every selected run
+- Frozen relational source, finding, effective review, and bounded provenance references alongside a canonical structured manifest
+- Deterministic SHA-256 fingerprints and per-project snapshot version history
+- Deterministic readiness blockers for unreviewed or clarification findings, missing provenance, non-current revisions, duplicate-revision runs, and open conflicts
+- Rejected findings preserved in frozen history but excluded from approved intelligence; edited/accepted human values replace machine values in approved intelligence
+- Stale unapproved snapshot protection without rewriting approved historical snapshots
+- Explicit, immutable, idempotent snapshot approval by Admin or Estimator / Operator members, including self-approval and business-level audit events
+- Viewer-safe read-only snapshot and approval history
+- Project remains `human_scope_review` after approval; Milestone 2 owns trade-package creation and readiness transitions
+- Zero AI, OpenAI, OCR, vision, or provider calls in snapshot creation, readiness, and approval
+- Manual validation confirmed explicit fake-provider Run #5 review, immutable Snapshot V1 creation and approval, refresh/login persistence, Viewer read-only history, append-only review/snapshot versions, duplicate-submit idempotency, and controlled stale-V2 approval rejection without changing project status
 
 ## Next implementation task
 
-M1-11 — Intelligence Snapshot, Approval & Audit is next / not started and requires separate explicit approval.
+M1-12 — Real BB Builders Project Validation & Milestone Polish is next / not started and requires separate explicit approval after M1-11 manual validation and finalization.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 

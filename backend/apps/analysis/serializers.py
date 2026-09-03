@@ -7,6 +7,11 @@ from .models import (
     FindingReview,
     FindingSource,
     IntelligenceConflict,
+    ProjectIntelligenceApproval,
+    ProjectIntelligenceSnapshot,
+    ProjectIntelligenceSnapshotEntry,
+    ProjectIntelligenceSnapshotProvenance,
+    ProjectIntelligenceSnapshotSource,
 )
 
 
@@ -242,5 +247,157 @@ class ConflictResolutionSerializer(serializers.Serializer):
         )
     )
     resolution_note = serializers.CharField(
+        required=False, allow_blank=True, max_length=1000, trim_whitespace=True
+    )
+
+
+class SnapshotProvenanceSerializer(serializers.ModelSerializer):
+    page_number = serializers.IntegerField(source="document_page.page_number", read_only=True)
+    sheet_number = serializers.CharField(
+        source="drawing_sheet.sheet_number", read_only=True, default=""
+    )
+    sheet_title = serializers.CharField(
+        source="drawing_sheet.sheet_title", read_only=True, default=""
+    )
+    evidence_excerpt = serializers.CharField(
+        source="finding_source.evidence_excerpt", read_only=True
+    )
+    visual_evidence_description = serializers.CharField(
+        source="finding_source.visual_evidence_description", read_only=True
+    )
+
+    class Meta:
+        model = ProjectIntelligenceSnapshotProvenance
+        fields = (
+            "id",
+            "finding_source",
+            "document_revision",
+            "document_page",
+            "page_number",
+            "drawing_sheet",
+            "sheet_number",
+            "sheet_title",
+            "analysis_task_run",
+            "evidence_excerpt",
+            "visual_evidence_description",
+        )
+        read_only_fields = fields
+
+
+class SnapshotEntrySerializer(serializers.ModelSerializer):
+    subject = serializers.CharField(source="finding.subject", read_only=True)
+    machine_value = serializers.CharField(source="finding.machine_value", read_only=True)
+    provenance = SnapshotProvenanceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProjectIntelligenceSnapshotEntry
+        fields = (
+            "id",
+            "finding",
+            "finding_review",
+            "decision",
+            "effective_value",
+            "semantic_key",
+            "category",
+            "subject",
+            "machine_value",
+            "included_in_intelligence",
+            "provenance",
+        )
+        read_only_fields = fields
+
+
+class SnapshotSourceSerializer(serializers.ModelSerializer):
+    document = serializers.IntegerField(source="document_revision.document_id", read_only=True)
+    document_title = serializers.CharField(
+        source="document_revision.document.title", read_only=True
+    )
+    revision_label = serializers.CharField(
+        source="document_revision.revision_label", read_only=True
+    )
+    entries = SnapshotEntrySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProjectIntelligenceSnapshotSource
+        fields = (
+            "id",
+            "analysis_run",
+            "document",
+            "document_title",
+            "document_revision",
+            "revision_label",
+            "entries",
+        )
+        read_only_fields = fields
+
+
+class IntelligenceApprovalSerializer(serializers.ModelSerializer):
+    approver = serializers.CharField(source="approver.email", read_only=True)
+
+    class Meta:
+        model = ProjectIntelligenceApproval
+        fields = (
+            "id",
+            "project",
+            "snapshot",
+            "approver",
+            "approved_at",
+            "approval_note",
+            "readiness_result",
+        )
+        read_only_fields = fields
+
+
+class IntelligenceSnapshotSerializer(serializers.ModelSerializer):
+    created_by = serializers.CharField(source="created_by.email", read_only=True)
+    sources = SnapshotSourceSerializer(many=True, read_only=True)
+    approval = serializers.SerializerMethodField()
+    is_stale = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectIntelligenceSnapshot
+        fields = (
+            "id",
+            "project",
+            "version",
+            "fingerprint",
+            "schema_version",
+            "summary_counts",
+            "created_by",
+            "created_at",
+            "sources",
+            "approval",
+            "is_stale",
+        )
+        read_only_fields = fields
+
+    def get_approval(self, obj):
+        try:
+            approval = obj.approval
+        except ProjectIntelligenceApproval.DoesNotExist:
+            return None
+        return IntelligenceApprovalSerializer(approval).data
+
+    def get_is_stale(self, obj):
+        return self.context.get("stale_by_id", {}).get(obj.pk, False)
+
+
+class IntelligenceSnapshotCreateSerializer(serializers.Serializer):
+    analysis_run_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=100
+    )
+
+    def validate_analysis_run_ids(self, values):
+        if len(values) != len(set(values)):
+            raise serializers.ValidationError("Analysis run IDs must be unique.")
+        return values
+
+
+class IntelligenceReadinessSerializer(IntelligenceSnapshotCreateSerializer):
+    pass
+
+
+class IntelligenceApprovalCreateSerializer(serializers.Serializer):
+    approval_note = serializers.CharField(
         required=False, allow_blank=True, max_length=1000, trim_whitespace=True
     )

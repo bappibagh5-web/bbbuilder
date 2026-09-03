@@ -8,6 +8,10 @@ from .views import (
     FindingDetailView,
     FindingReviewListView,
     FindingSourceListView,
+    IntelligenceReadinessView,
+    IntelligenceSnapshotApprovalView,
+    IntelligenceSnapshotDetailView,
+    IntelligenceSnapshotListView,
     MaterializeAnalysisRunView,
     ResolveConflictView,
     RetryAnalysisRunView,
@@ -15,6 +19,26 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/intelligence-readiness/",
+        IntelligenceReadinessView.as_view(),
+        name="intelligence-readiness",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/intelligence-snapshots/",
+        IntelligenceSnapshotListView.as_view(),
+        name="intelligence-snapshot-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/intelligence-snapshots/<int:snapshot_pk>/",
+        IntelligenceSnapshotDetailView.as_view(),
+        name="intelligence-snapshot-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/intelligence-snapshots/<int:snapshot_pk>/approval/",
+        IntelligenceSnapshotApprovalView.as_view(),
+        name="intelligence-snapshot-approval",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/revisions/<int:revision_pk>/analysis-runs/",
         RevisionAnalysisRunListView.as_view(),

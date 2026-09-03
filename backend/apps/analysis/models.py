@@ -516,3 +516,246 @@ class IntelligenceConflict(ImmutableFieldsMixin):
             or self.version != self.supersedes.version + 1
         ):
             raise ValidationError({"supersedes": "Conflict versions must form one chain."})
+
+
+class ProjectIntelligenceSnapshot(ImmutableFieldsMixin):
+    project = models.ForeignKey(
+        "projects.Project", on_delete=models.PROTECT, related_name="intelligence_snapshots"
+    )
+    version = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    fingerprint = models.CharField(max_length=64)
+    schema_version = models.CharField(max_length=80, default="project-intelligence-v1")
+    manifest = models.JSONField(default=dict)
+    summary_counts = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_intelligence_snapshots",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "project_id",
+        "version",
+        "fingerprint",
+        "schema_version",
+        "manifest",
+        "summary_counts",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-version", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("project", "version"), name="analysis_unique_snapshot_version"
+            ),
+            models.UniqueConstraint(
+                fields=("project", "fingerprint"), name="analysis_unique_snapshot_fingerprint"
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.manifest, dict):
+            raise ValidationError({"manifest": "Snapshot manifest must be an object."})
+        if not isinstance(self.summary_counts, dict):
+            raise ValidationError({"summary_counts": "Summary counts must be an object."})
+
+    def __str__(self):
+        return f"{self.project} — Intelligence V{self.version}"
+
+
+class ProjectIntelligenceSnapshotSource(ImmutableFieldsMixin):
+    snapshot = models.ForeignKey(
+        ProjectIntelligenceSnapshot, on_delete=models.PROTECT, related_name="sources"
+    )
+    analysis_run = models.ForeignKey(
+        AnalysisRun, on_delete=models.PROTECT, related_name="intelligence_snapshot_sources"
+    )
+    document_revision = models.ForeignKey(
+        DocumentRevision, on_delete=models.PROTECT, related_name="intelligence_snapshot_sources"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("snapshot_id", "analysis_run_id", "document_revision_id", "created_at")
+
+    class Meta:
+        ordering = ("snapshot_id", "analysis_run_id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("snapshot", "analysis_run"), name="analysis_unique_snapshot_run"
+            ),
+            models.UniqueConstraint(
+                fields=("snapshot", "document_revision"), name="analysis_unique_snapshot_revision"
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.analysis_run.document_revision_id != self.document_revision_id:
+            raise ValidationError({"document_revision": "Revision must match the analysis run."})
+        if self.analysis_run.project.pk != self.snapshot.project_id:
+            raise ValidationError(
+                {"analysis_run": "Analysis run must belong to the snapshot project."}
+            )
+
+
+class ProjectIntelligenceSnapshotEntry(ImmutableFieldsMixin):
+    snapshot = models.ForeignKey(
+        ProjectIntelligenceSnapshot, on_delete=models.PROTECT, related_name="entries"
+    )
+    snapshot_source = models.ForeignKey(
+        ProjectIntelligenceSnapshotSource, on_delete=models.PROTECT, related_name="entries"
+    )
+    finding = models.ForeignKey(
+        ExtractedFinding, on_delete=models.PROTECT, related_name="intelligence_snapshot_entries"
+    )
+    finding_review = models.ForeignKey(
+        FindingReview, on_delete=models.PROTECT, related_name="intelligence_snapshot_entries"
+    )
+    decision = models.CharField(max_length=30, choices=FindingReview.Decision)
+    effective_value = models.TextField(max_length=2000, blank=True)
+    semantic_key = models.CharField(max_length=255)
+    category = models.CharField(max_length=40, choices=ExtractedFinding.Category)
+    included_in_intelligence = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "snapshot_id",
+        "snapshot_source_id",
+        "finding_id",
+        "finding_review_id",
+        "decision",
+        "effective_value",
+        "semantic_key",
+        "category",
+        "included_in_intelligence",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("snapshot_id", "category", "semantic_key", "finding_id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("snapshot", "finding"), name="analysis_unique_snapshot_finding"
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.snapshot_source.snapshot_id != self.snapshot_id:
+            raise ValidationError({"snapshot_source": "Source must belong to the snapshot."})
+        if self.finding.analysis_run_id != self.snapshot_source.analysis_run_id:
+            raise ValidationError({"finding": "Finding must belong to the selected run."})
+        if self.finding_review.finding_id != self.finding_id:
+            raise ValidationError({"finding_review": "Review must belong to the finding."})
+        if self.decision != self.finding_review.decision:
+            raise ValidationError({"decision": "Decision must match the frozen review."})
+        included = self.decision in (
+            FindingReview.Decision.ACCEPTED,
+            FindingReview.Decision.EDITED_ACCEPTED,
+        )
+        if self.included_in_intelligence != included:
+            raise ValidationError(
+                {"included_in_intelligence": "Inclusion must follow the frozen decision."}
+            )
+        if included and not self.effective_value:
+            raise ValidationError({"effective_value": "Included entries require a value."})
+        if not included and self.effective_value:
+            raise ValidationError({"effective_value": "Rejected entries cannot expose a value."})
+
+
+class ProjectIntelligenceSnapshotProvenance(ImmutableFieldsMixin):
+    snapshot_entry = models.ForeignKey(
+        ProjectIntelligenceSnapshotEntry, on_delete=models.PROTECT, related_name="provenance"
+    )
+    finding_source = models.ForeignKey(
+        FindingSource, on_delete=models.PROTECT, related_name="intelligence_snapshot_provenance"
+    )
+    document_revision = models.ForeignKey(DocumentRevision, on_delete=models.PROTECT)
+    document_page = models.ForeignKey(DocumentPage, on_delete=models.PROTECT)
+    drawing_sheet = models.ForeignKey(
+        "documents.DrawingSheet", on_delete=models.PROTECT, null=True, blank=True
+    )
+    analysis_task_run = models.ForeignKey(AnalysisTaskRun, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "snapshot_entry_id",
+        "finding_source_id",
+        "document_revision_id",
+        "document_page_id",
+        "drawing_sheet_id",
+        "analysis_task_run_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("snapshot_entry_id", "document_page_id", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("snapshot_entry", "finding_source"),
+                name="analysis_unique_snapshot_entry_source",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        source = self.finding_source
+        if source.finding_id != self.snapshot_entry.finding_id:
+            raise ValidationError(
+                {"finding_source": "Provenance must belong to the entry finding."}
+            )
+        expected = (
+            source.document_revision_id,
+            source.document_page_id,
+            source.drawing_sheet_id,
+            source.analysis_task_run_id,
+        )
+        actual = (
+            self.document_revision_id,
+            self.document_page_id,
+            self.drawing_sheet_id,
+            self.analysis_task_run_id,
+        )
+        if actual != expected:
+            raise ValidationError("Frozen provenance must match the finding source exactly.")
+
+
+class ProjectIntelligenceApproval(ImmutableFieldsMixin):
+    project = models.ForeignKey(
+        "projects.Project", on_delete=models.PROTECT, related_name="intelligence_approvals"
+    )
+    snapshot = models.OneToOneField(
+        ProjectIntelligenceSnapshot, on_delete=models.PROTECT, related_name="approval"
+    )
+    approver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="intelligence_approvals"
+    )
+    approved_at = models.DateTimeField(default=timezone.now)
+    approval_note = models.CharField(max_length=1000, blank=True)
+    readiness_result = models.JSONField(default=dict)
+
+    immutable_fields = (
+        "project_id",
+        "snapshot_id",
+        "approver_id",
+        "approved_at",
+        "approval_note",
+        "readiness_result",
+    )
+
+    class Meta:
+        ordering = ("-approved_at", "-id")
+
+    def clean(self):
+        super().clean()
+        if self.snapshot.project_id != self.project_id:
+            raise ValidationError({"snapshot": "Approval snapshot must belong to the project."})
+        if not isinstance(self.readiness_result, dict):
+            raise ValidationError({"readiness_result": "Readiness result must be an object."})
+
+    def __str__(self):
+        return f"{self.snapshot} — Approved"

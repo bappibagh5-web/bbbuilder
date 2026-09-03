@@ -73,6 +73,39 @@ export type IntelligenceConflict = {
   resolved_by: string | null; resolution_note: string; resolved_at: string | null;
   supersedes: number | null; created_at: string;
 };
+export type IntelligenceBlocker = { code: string; message: string; count: number };
+export type IntelligenceCandidateRun = {
+  id: number; document_id: number; document_title: string; document_revision_id: number;
+  revision_label: string; is_current_revision: boolean; finding_count: number;
+  unreviewed_count: number; needs_clarification_count: number; created_at: string;
+};
+export type IntelligenceReadiness = {
+  eligible: boolean; blockers: IntelligenceBlocker[]; fingerprint: string;
+  summary_counts: Record<string, number>;
+};
+export type SnapshotProvenance = {
+  id: number; finding_source: number; document_revision: number; document_page: number;
+  page_number: number; drawing_sheet: number | null; sheet_number: string; sheet_title: string;
+  analysis_task_run: number; evidence_excerpt: string; visual_evidence_description: string;
+};
+export type SnapshotEntry = {
+  id: number; finding: number; finding_review: number; decision: FindingDecision;
+  effective_value: string; semantic_key: string; category: string; subject: string;
+  machine_value: string; included_in_intelligence: boolean; provenance: SnapshotProvenance[];
+};
+export type SnapshotSource = {
+  id: number; analysis_run: number; document: number; document_title: string;
+  document_revision: number; revision_label: string; entries: SnapshotEntry[];
+};
+export type IntelligenceApproval = {
+  id: number; project: number; snapshot: number; approver: string; approved_at: string;
+  approval_note: string; readiness_result: Record<string, unknown>;
+};
+export type IntelligenceSnapshot = {
+  id: number; project: number; version: number; fingerprint: string; schema_version: string;
+  summary_counts: Record<string, number>; created_by: string; created_at: string;
+  sources: SnapshotSource[]; approval: IntelligenceApproval | null; is_stale: boolean;
+};
 
 function projectPath(slug: string, projectId: string | number) {
   return `/organizations/${encodeURIComponent(slug)}/projects/${encodeURIComponent(String(projectId))}`;
@@ -105,5 +138,20 @@ export const analysisApi = {
   },
   resolveConflict(slug: string, projectId: string | number, conflictId: number, payload: { status: "resolved" | "dismissed"; resolution_note?: string }) {
     return apiRequest<IntelligenceConflict>(`${projectPath(slug, projectId)}/conflicts/${conflictId}/resolve/`, { method: "POST", body: JSON.stringify(payload) });
+  },
+  intelligenceCandidates(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<{ candidate_runs: IntelligenceCandidateRun[] }>(`${projectPath(slug, projectId)}/intelligence-readiness/`, { signal });
+  },
+  intelligenceReadiness(slug: string, projectId: string | number, analysisRunIds: number[], signal?: AbortSignal) {
+    return apiRequest<IntelligenceReadiness>(`${projectPath(slug, projectId)}/intelligence-readiness/`, { method: "POST", body: JSON.stringify({ analysis_run_ids: analysisRunIds }), signal });
+  },
+  snapshots(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<IntelligenceSnapshot[]>(`${projectPath(slug, projectId)}/intelligence-snapshots/`, { signal });
+  },
+  createSnapshot(slug: string, projectId: string | number, analysisRunIds: number[]) {
+    return apiRequest<IntelligenceSnapshot>(`${projectPath(slug, projectId)}/intelligence-snapshots/`, { method: "POST", body: JSON.stringify({ analysis_run_ids: analysisRunIds }) });
+  },
+  approveSnapshot(slug: string, projectId: string | number, snapshotId: number, approvalNote = "") {
+    return apiRequest<IntelligenceApproval>(`${projectPath(slug, projectId)}/intelligence-snapshots/${snapshotId}/approval/`, { method: "POST", body: JSON.stringify({ approval_note: approvalNote }) });
   },
 };
