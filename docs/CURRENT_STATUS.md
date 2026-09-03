@@ -32,7 +32,9 @@ M1-08 — PDF Page / Sheet Indexing is **complete**. Automated validation and re
 
 M1-09 — Structured AI Analysis is **complete**. Automated validation and authenticated browser validation against real PostgreSQL, Redis, Celery, and MinIO using the network-free fake provider passed on September 3, 2026.
 
-M1-10 — Provenance, Findings & Human Review is **next / not started**.
+M1-10 — Provenance, Findings & Human Review is **complete**. Automated validation and authenticated Admin/Estimator and Viewer browser validation against the real local PostgreSQL-backed workflow passed on September 3, 2026.
+
+M1-11 — Intelligence Snapshot, Approval & Audit is **next / not started**.
 
 M1-01 currently includes:
 
@@ -114,7 +116,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-09 are complete. M1-10 has not started.
+M1-04 through M1-10 are complete. M1-11 has not started.
 
 M1-05 currently includes:
 
@@ -242,11 +244,27 @@ M1-09 currently includes:
 - Authenticated browser validation of persisted results, exact-page evidence, usage, history selection, explicit re-analysis, Viewer-safe actions, and machine-generated warnings
 - Real worker-down validation proving browser-created Run #4 remained durably queued in PostgreSQL, survived refresh, and was consumed naturally by a restarted Celery worker without retry, redispatch, replacement, or history mutation
 - All manual validation used the deterministic fake provider; no live OpenAI request or API credit was used
-- M1-10 status: next / not started
+- M1-10 status: complete
+
+M1-10 currently includes:
+
+- Deterministic, explicit, repeat-safe materialization of successful `AnalysisRun` candidates into immutable `ExtractedFinding` records
+- First-class immutable `FindingSource` provenance tied to the exact revision, page, optional sheet, and page task
+- Append-only accepted, edited/accepted, rejected, and needs-clarification `FindingReview` decisions with supersession history
+- Conservative semantic keys, deterministic value normalization, and repeat-safe `IntelligenceConflict` detection
+- Append-only conflict resolution/dismissal versions that preserve participants and prior decisions
+- Organization/project/run/finding-scoped read APIs and operator-only materialize/review/resolve operations
+- Production human-review UI with machine value, evidence, reviewed value, progress, conflicts, and Viewer-safe read-only behavior
+- Explicit `Human reviewed — not yet approved project intelligence` boundary with no snapshot or approval controls
+- Controlled first-materialization transition from `ai_analysis` to `human_scope_review`, without regressing later states
+- Real local Run #4 validation: three findings with exact provenance, separately preserved machine/reviewed values, append-only review history, deterministic progress/conflict state, refresh and logout/login persistence, and zero AI calls
+- Exact consecutive duplicate review decision/value/note submissions are normalized and idempotent without duplicate review or audit rows; meaningful later decisions remain append-only
+- Authenticated Admin/Estimator review validation and disposable local Viewer read-only validation passed; Viewer mutation controls were absent and server permissions remained authoritative
+- M1-11 status: next / not started
 
 ## Next implementation task
 
-M1-10 — Provenance, Findings & Human Review is next / not started and requires separate explicit approval.
+M1-11 — Intelligence Snapshot, Approval & Audit is next / not started and requires separate explicit approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -513,7 +531,7 @@ AI must use narrow, schema-validated services.
 
 #### M1-10 — Provenance, Findings, Conflict & Human Review
 
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Make AI results reviewable and auditable.
 

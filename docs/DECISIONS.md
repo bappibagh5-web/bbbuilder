@@ -248,6 +248,26 @@ M1-10 owns promotion into first-class `ExtractedFinding` and `FindingSource` rec
 
 **Consequence:** M1-09 provides durable, inspectable machine interpretation with predictable paid-operation and evidence boundaries while leaving human review and downstream authority to the planned later tasks.
 
+### D-035 — Deterministic finding materialization and append-only human review
+
+**Status:** Decided
+
+**Decision:** M1-10 materializes only the schema-validated synthesis candidates already persisted on an explicitly selected successful `AnalysisRun`. The synchronous transaction makes no provider, OCR, rendering, storage, or document-parsing call. A SHA-256 key over canonical candidate JSON identifies each candidate within its run, and database uniqueness makes repeated or concurrent materialization repeat-safe. Findings from later runs form separate review sets and never overwrite earlier runs or reviews.
+
+`ExtractedFinding` preserves the original category, subject, machine value, support level, schema version, producing synthesis task, exact revision, and conservative semantic key. Human decisions never modify that machine value. `FindingSource` is immutable provenance for an exact page-analysis task, revision, page, optional sheet, and bounded native-text excerpt or visual description. Native excerpts must occur in the persisted indexed page text; visual evidence cannot pretend to be native text.
+
+`FindingReview` is append-only. Accepted uses the machine value, Edited / Accepted stores a separate bounded reviewed value, Rejected preserves the finding without an effective value, and Needs Clarification remains unresolved. Every materially different later decision explicitly supersedes the previous review while retaining the complete history and reviewer attribution. An exact consecutive duplicate of the normalized decision, reviewed value, and note is an idempotent no-op: surrounding whitespace is trimmed, blank and null text compare consistently, and meaningful internal text is preserved. The existing effective review is returned without another review or audit event.
+
+Conflict detection is deterministic and deliberately conservative. A semantic key combines the controlled finding category with a normalized subject key because M1-09 does not yet emit a separate semantic identifier. Only comparable categories participate. Whitespace/case normalization is safe for simple values; ISO-like dates retain canonical components; ambiguous prose is not aggressively typed or financially interpreted. Equivalent values are supporting duplicates, while materially different values sharing a semantic key create one participant-keyed conflict per run. Conflict resolution and dismissal create immutable superseding conflict versions instead of rewriting detection history or selecting a winning finding.
+
+Preparing the first successful run for review advances only `ai_analysis` to `human_scope_review` and records the transition. Unauthorized or failed materialization does not change status, and later states are never regressed. Materialization, review decisions, conflict detection, and conflict resolution use business-level audit events. M1-10 makes zero AI calls.
+
+M1-11 exclusively owns `ProjectIntelligenceSnapshot`, readiness assembly, `ProjectIntelligenceApproval`, and final approval. Reviewed findings are explicitly labelled **Human reviewed — not yet approved project intelligence** and cannot feed later bidding workflows yet.
+
+**Consequence:** Machine evidence, human judgment, and conflict history remain independently attributable and durable, while final project-intelligence authority remains outside M1-10.
+
+Authenticated browser validation confirmed the production review workspace for Admin/Estimator and read-only access for a disposable local Viewer. Machine values and exact page/sheet provenance remained unchanged, reviewed values remained separate, history survived refresh and reauthentication, redundant same-state actions were protected, and the project remained at `human_scope_review`. No provider call or API credit was used.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

@@ -8,9 +8,24 @@ from apps.documents.models import Document, DocumentRevision
 from apps.documents.views import ProjectDocumentContextMixin, api_validation_error
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 
-from .models import AnalysisRun
-from .serializers import AnalysisRunSerializer, AnalysisTaskRunSerializer
-from .services import request_analysis_run, retry_analysis_run
+from .models import AnalysisRun, ExtractedFinding, IntelligenceConflict
+from .serializers import (
+    AnalysisRunSerializer,
+    AnalysisTaskRunSerializer,
+    ConflictResolutionSerializer,
+    ExtractedFindingSerializer,
+    FindingReviewCreateSerializer,
+    FindingReviewSerializer,
+    FindingSourceSerializer,
+    IntelligenceConflictSerializer,
+)
+from .services import (
+    materialize_findings,
+    request_analysis_run,
+    resolve_conflict,
+    retry_analysis_run,
+    review_finding,
+)
 
 
 def run_queryset(project):
@@ -81,3 +96,116 @@ class RetryAnalysisRunView(AnalysisRunDetailView):
             raise api_validation_error(error) from error
         run = run_queryset(self.get_project()).get(pk=run.pk)
         return Response(AnalysisRunSerializer(run).data, status=status.HTTP_201_CREATED)
+
+
+def finding_queryset(project):
+    return (
+        ExtractedFinding.objects.filter(analysis_run__document_revision__document__project=project)
+        .select_related("analysis_run", "analysis_task_run", "document_revision__document")
+        .prefetch_related(
+            "sources__document_page__drawing_sheet",
+            "sources__document_revision__document",
+            "reviews__reviewer",
+        )
+    )
+
+
+class AnalysisRunFindingListView(AnalysisRunDetailView):
+    def get(self, request, *args, **kwargs):
+        findings = finding_queryset(self.get_project()).filter(analysis_run=self.get_run())
+        return Response(ExtractedFindingSerializer(findings, many=True).data)
+
+
+class MaterializeAnalysisRunView(AnalysisRunDetailView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        try:
+            findings = materialize_findings(analysis_run=self.get_run(), actor=request.user)
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        queryset = finding_queryset(self.get_project()).filter(
+            pk__in=findings.values_list("pk", flat=True)
+        )
+        return Response(ExtractedFindingSerializer(queryset, many=True).data)
+
+
+class FindingContextMixin(ProjectDocumentContextMixin):
+    def get_finding(self):
+        return get_object_or_404(finding_queryset(self.get_project()), pk=self.kwargs["finding_pk"])
+
+
+class FindingDetailView(FindingContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        return Response(ExtractedFindingSerializer(self.get_finding()).data)
+
+
+class FindingSourceListView(FindingDetailView):
+    def get(self, request, *args, **kwargs):
+        return Response(FindingSourceSerializer(self.get_finding().sources.all(), many=True).data)
+
+
+class FindingReviewListView(FindingDetailView):
+    def get(self, request, *args, **kwargs):
+        return Response(FindingReviewSerializer(self.get_finding().reviews.all(), many=True).data)
+
+    def post(self, request, *args, **kwargs):
+        if not OrganizationOperator().has_permission(request, self):
+            self.permission_denied(request)
+        serializer = FindingReviewCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            review, created = review_finding(
+                finding=self.get_finding(),
+                reviewer=request.user,
+                **serializer.validated_data,
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(FindingReviewSerializer(review).data, status=response_status)
+
+
+def conflict_queryset(project):
+    return (
+        IntelligenceConflict.objects.filter(project=project, superseded_by__isnull=True)
+        .select_related("analysis_run", "resolved_by", "supersedes")
+        .prefetch_related(
+            "findings__sources__document_page__drawing_sheet",
+            "findings__sources__document_revision__document",
+            "findings__reviews__reviewer",
+        )
+    )
+
+
+class ConflictListView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        return Response(
+            IntelligenceConflictSerializer(conflict_queryset(self.get_project()), many=True).data
+        )
+
+
+class ResolveConflictView(ConflictListView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        conflict = get_object_or_404(
+            conflict_queryset(self.get_project()), pk=self.kwargs["conflict_pk"]
+        )
+        serializer = ConflictResolutionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            replacement = resolve_conflict(
+                conflict=conflict, actor=request.user, **serializer.validated_data
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        replacement = conflict_queryset(self.get_project()).get(pk=replacement.pk)
+        return Response(
+            IntelligenceConflictSerializer(replacement).data,
+            status=status.HTTP_201_CREATED,
+        )

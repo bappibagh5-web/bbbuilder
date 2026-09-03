@@ -275,6 +275,22 @@ Queued analysis intent remains in PostgreSQL. Operational recovery commands from
 
 Analysis APIs are organization/project/document/revision scoped. Responses expose validated machine output, versions, safe usage metadata, and controlled failures, but no provider key, private storage location, full provider response, or chain-of-thought. Results are explicitly labelled **Machine generated — not yet human reviewed**. M1-10 owns formal findings, provenance records, conflicts, and human decisions.
 
+## Finding materialization and human review
+
+M1-10 adds a zero-AI-cost review layer over successful persisted analysis runs. Admin and Estimator / Operator members explicitly prepare one run for review; Viewer members are read-only. Repeating preparation is idempotent and never changes the original machine result.
+
+```text
+POST /api/v1/organizations/{slug}/projects/{project_id}/analysis-runs/{run_id}/findings/materialize/
+GET  /api/v1/organizations/{slug}/projects/{project_id}/analysis-runs/{run_id}/findings/
+GET  /api/v1/organizations/{slug}/projects/{project_id}/findings/{finding_id}/
+GET  /api/v1/organizations/{slug}/projects/{project_id}/findings/{finding_id}/sources/
+GET/POST /api/v1/organizations/{slug}/projects/{project_id}/findings/{finding_id}/reviews/
+GET  /api/v1/organizations/{slug}/projects/{project_id}/conflicts/
+POST /api/v1/organizations/{slug}/projects/{project_id}/conflicts/{conflict_id}/resolve/
+```
+
+Machine values and provenance remain immutable. Accept, Edited / Accepted, Reject, and Needs Clarification create append-only review records. An exact consecutive duplicate of the trimmed decision/value/note payload returns the current review without adding a review or audit row; meaningful changes append normally. Deterministic conflicts preserve every participant; resolution or dismissal creates a superseding conflict version. Preparing the first run may advance `ai_analysis` to `human_scope_review`, but reviewed findings remain **not yet approved project intelligence**. M1-11 will own immutable snapshots and final approval.
+
 ## Local ports
 
 | Service | Port | Purpose |

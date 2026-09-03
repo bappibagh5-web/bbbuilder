@@ -1,4 +1,7 @@
+import hashlib
+import json
 import logging
+import re
 from collections import defaultdict
 
 from django.conf import settings
@@ -9,11 +12,20 @@ from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
 
 from apps.documents.pdf_indexing import is_pdf_asset
+from apps.organizations.models import Membership
+from apps.organizations.services import active_membership
 from apps.processing.models import ProcessingJob
 from apps.projects.audit import record_event
 from apps.projects.models import Project
 
-from .models import AnalysisRun, AnalysisTaskRun
+from .models import (
+    AnalysisRun,
+    AnalysisTaskRun,
+    ExtractedFinding,
+    FindingReview,
+    FindingSource,
+    IntelligenceConflict,
+)
 from .prompts import (
     ANALYSIS_VERSION,
     DOCUMENT_PROMPT_VERSION,
@@ -26,6 +38,27 @@ from .rendering import PageRenderFailure, render_page_data_url
 from .schemas import DOCUMENT_SCHEMA_VERSION, PAGE_SCHEMA_VERSION, json_schema_for, validate_result
 
 logger = logging.getLogger(__name__)
+
+CONFLICT_CATEGORIES = {
+    "project_fact",
+    "date_deadline",
+    "bid_condition",
+    "responsibility",
+    "permit_inspection",
+    "landlord_requirement",
+    "owner_third_party_item",
+    "commercial",
+    "submittal_closeout",
+}
+
+
+def _require_operator(user, organization):
+    membership = active_membership(user, organization)
+    if membership is None or membership.role not in {
+        Membership.Role.ADMIN,
+        Membership.Role.ESTIMATOR_OPERATOR,
+    }:
+        raise ValidationError("An active Admin or Estimator / Operator membership is required.")
 
 
 def _input_mode(page):
@@ -509,3 +542,258 @@ def recover_stale_analysis_runs(*, run_ids=None, dispatch=True):
                     lambda run_id=run_id: dispatch_analysis_run(run_id, force=True)
                 )
     return recovered
+
+
+def _stable_hash(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _semantic_key(category, subject):
+    normalized_subject = re.sub(r"[^a-z0-9]+", ".", subject.casefold()).strip(".")
+    if not normalized_subject:
+        normalized_subject = _stable_hash(subject)[:16]
+    return f"{category}.{normalized_subject}"[:255]
+
+
+def _normalized_value(category, value):
+    normalized = " ".join(value.split()).casefold()
+    if category == ExtractedFinding.Category.DATE_DEADLINE:
+        # ISO-like values are comparable as written; ambiguous prose remains conservative text.
+        match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:[tT ](.+))?", normalized)
+        if match:
+            return match.group(1) + (f"t{match.group(2)}" if match.group(2) else "")
+    return normalized
+
+
+def _latest_conflicts(queryset):
+    return [conflict for conflict in queryset if not hasattr(conflict, "superseded_by")]
+
+
+def detect_conflicts(*, analysis_run, actor=None):
+    created = []
+    groups = defaultdict(list)
+    for finding in analysis_run.findings.all():
+        if finding.category in CONFLICT_CATEGORIES:
+            groups[finding.semantic_key].append(finding)
+    for semantic_key, findings in groups.items():
+        values = {finding.normalized_machine_value for finding in findings}
+        if len(findings) < 2 or len(values) < 2:
+            continue
+        participant_ids = sorted(finding.pk for finding in findings)
+        participant_key = _stable_hash(participant_ids)
+        conflict, was_created = IntelligenceConflict.objects.get_or_create(
+            analysis_run=analysis_run,
+            participant_key=participant_key,
+            version=1,
+            defaults={
+                "project": analysis_run.project,
+                "semantic_key": semantic_key,
+                "explanation": "Materially different values share the same semantic key.",
+            },
+        )
+        if was_created:
+            conflict.full_clean()
+            conflict.findings.set(findings)
+            created.append(conflict)
+            if actor:
+                record_event(
+                    organization=analysis_run.organization,
+                    project=analysis_run.project,
+                    actor=actor,
+                    action_code="conflict.detected",
+                    target=conflict,
+                    metadata={"analysis_run_id": analysis_run.pk},
+                )
+    return created
+
+
+def materialize_findings(*, analysis_run, actor):
+    _require_operator(actor, analysis_run.organization)
+    if analysis_run.status != AnalysisRun.Status.SUCCEEDED:
+        raise ValidationError("Only a successful analysis run can be prepared for review.")
+    validated = validate_result(
+        AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS, analysis_run.result_summary
+    )
+    with transaction.atomic():
+        run = (
+            AnalysisRun.objects.select_for_update()
+            .select_related("document_revision__document__project__organization")
+            .get(pk=analysis_run.pk)
+        )
+        synthesis = run.task_runs.get(
+            task_type=AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS,
+            status=AnalysisTaskRun.Status.SUCCEEDED,
+        )
+        page_tasks = {
+            task.document_page_id: task
+            for task in run.task_runs.filter(
+                task_type=AnalysisTaskRun.TaskType.PAGE_ANALYSIS,
+                status=AnalysisTaskRun.Status.SUCCEEDED,
+            ).select_related("document_page__drawing_sheet")
+        }
+        created_count = 0
+        for candidate in validated["candidates"]:
+            candidate_key = _stable_hash(candidate)
+            finding, created = ExtractedFinding.objects.get_or_create(
+                analysis_run=run,
+                source_candidate_key=candidate_key,
+                defaults={
+                    "analysis_task_run": synthesis,
+                    "document_revision": run.document_revision,
+                    "semantic_key": _semantic_key(candidate["category"], candidate["subject"]),
+                    "category": candidate["category"],
+                    "subject": candidate["subject"],
+                    "machine_value": candidate["value"],
+                    "normalized_machine_value": _normalized_value(
+                        candidate["category"], candidate["value"]
+                    ),
+                    "machine_support": candidate["support"],
+                    "schema_version": run.schema_version,
+                },
+            )
+            if created:
+                finding.full_clean()
+                created_count += 1
+            for evidence in candidate["evidence"]:
+                page_task = page_tasks.get(evidence["document_page_id"])
+                if not page_task or page_task.document_page.page_number != evidence["page_number"]:
+                    raise ValidationError("Finding evidence does not belong to the analysis run.")
+                page = page_task.document_page
+                sheet = getattr(page, "drawing_sheet", None)
+                if evidence.get("drawing_sheet_id") not in (None, sheet.pk if sheet else None):
+                    raise ValidationError("Finding evidence sheet does not belong to its page.")
+                excerpt = evidence["evidence_excerpt"]
+                mode = (
+                    FindingSource.EvidenceMode.NATIVE_TEXT
+                    if excerpt
+                    else FindingSource.EvidenceMode.VISUAL
+                )
+                source_values = {
+                    "document_page_id": page.pk,
+                    "drawing_sheet_id": sheet.pk if evidence.get("drawing_sheet_id") else None,
+                    "evidence_excerpt": excerpt,
+                    "visual_evidence_description": evidence["visual_evidence_description"],
+                    "evidence_mode": mode,
+                }
+                source, source_created = FindingSource.objects.get_or_create(
+                    finding=finding,
+                    source_key=_stable_hash(source_values),
+                    defaults={
+                        "document_revision": run.document_revision,
+                        "document_page": page,
+                        "drawing_sheet": sheet if evidence.get("drawing_sheet_id") else None,
+                        "analysis_task_run": page_task,
+                        "evidence_mode": mode,
+                        "evidence_excerpt": excerpt,
+                        "visual_evidence_description": evidence["visual_evidence_description"],
+                    },
+                )
+                if source_created:
+                    source.full_clean()
+        detect_conflicts(analysis_run=run, actor=actor)
+        project = Project.objects.select_for_update().get(pk=run.project.pk)
+        if project.status == Project.Status.AI_ANALYSIS:
+            project.status = Project.Status.HUMAN_SCOPE_REVIEW
+            project.save(update_fields=("status", "updated_at"))
+            record_event(
+                organization=project.organization,
+                project=project,
+                actor=actor,
+                action_code="project.status_changed",
+                target=project,
+                metadata={
+                    "before": Project.Status.AI_ANALYSIS,
+                    "after": Project.Status.HUMAN_SCOPE_REVIEW,
+                },
+            )
+        if created_count:
+            record_event(
+                organization=run.organization,
+                project=project,
+                actor=actor,
+                action_code="findings.materialized",
+                target=run,
+                metadata={"finding_count": created_count},
+            )
+    return run.findings.prefetch_related("sources", "reviews")
+
+
+def review_finding(*, finding, reviewer, decision, reviewed_value="", review_note=""):
+    _require_operator(reviewer, finding.analysis_run.organization)
+    with transaction.atomic():
+        locked = ExtractedFinding.objects.select_for_update().get(pk=finding.pk)
+        previous = locked.reviews.order_by("-created_at", "-id").first()
+        normalized_value = (reviewed_value or "").strip()
+        normalized_note = (review_note or "").strip()
+        if previous and (
+            previous.decision == decision
+            and previous.reviewed_value == normalized_value
+            and previous.review_note == normalized_note
+        ):
+            return previous, False
+        review = FindingReview(
+            finding=locked,
+            reviewer=reviewer,
+            decision=decision,
+            reviewed_value=normalized_value,
+            review_note=normalized_note,
+            supersedes=previous,
+        )
+        review.full_clean()
+        review.save()
+        action = {
+            FindingReview.Decision.ACCEPTED: "finding.accepted",
+            FindingReview.Decision.EDITED_ACCEPTED: "finding.edited",
+            FindingReview.Decision.REJECTED: "finding.rejected",
+            FindingReview.Decision.NEEDS_CLARIFICATION: "finding.needs_clarification",
+        }[decision]
+        record_event(
+            organization=locked.analysis_run.organization,
+            project=locked.analysis_run.project,
+            actor=reviewer,
+            action_code=action,
+            target=review,
+            metadata={"finding_id": locked.pk, "analysis_run_id": locked.analysis_run_id},
+        )
+    return review, True
+
+
+def resolve_conflict(*, conflict, actor, status, resolution_note=""):
+    _require_operator(actor, conflict.analysis_run.organization)
+    if status not in (
+        IntelligenceConflict.Status.RESOLVED,
+        IntelligenceConflict.Status.DISMISSED,
+    ):
+        raise ValidationError("Conflict resolution must be resolved or dismissed.")
+    with transaction.atomic():
+        current = IntelligenceConflict.objects.select_for_update().get(pk=conflict.pk)
+        if hasattr(current, "superseded_by"):
+            raise ValidationError("This conflict version has already been superseded.")
+        replacement = IntelligenceConflict(
+            project=current.project,
+            analysis_run=current.analysis_run,
+            semantic_key=current.semantic_key,
+            participant_key=current.participant_key,
+            version=current.version + 1,
+            conflict_type=current.conflict_type,
+            explanation=current.explanation,
+            status=status,
+            resolved_by=actor,
+            resolution_note=resolution_note.strip(),
+            resolved_at=timezone.now(),
+            supersedes=current,
+        )
+        replacement.full_clean()
+        replacement.save()
+        replacement.findings.set(current.findings.all())
+        record_event(
+            organization=current.analysis_run.organization,
+            project=current.project,
+            actor=actor,
+            action_code=f"conflict.{status}",
+            target=replacement,
+            metadata={"supersedes_conflict_id": current.pk},
+        )
+    return replacement

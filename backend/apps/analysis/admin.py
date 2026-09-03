@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import AnalysisRun, AnalysisTaskRun
+from .models import (
+    AnalysisRun,
+    AnalysisTaskRun,
+    ExtractedFinding,
+    FindingReview,
+    FindingSource,
+    IntelligenceConflict,
+)
 
 
 class ImmutableAnalysisAdmin(admin.ModelAdmin):
@@ -57,3 +64,34 @@ class AnalysisTaskRunAdmin(ImmutableAnalysisAdmin):
         "analysis_run__document_revision__document__title",
     )
     readonly_fields = tuple(field.name for field in AnalysisTaskRun._meta.fields)
+
+
+@admin.register(ExtractedFinding)
+class ExtractedFindingAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "analysis_run", "category", "subject", "machine_support")
+    list_filter = ("category", "machine_support", "created_at")
+    search_fields = ("subject", "machine_value", "semantic_key")
+    readonly_fields = tuple(field.name for field in ExtractedFinding._meta.fields)
+
+
+@admin.register(FindingSource)
+class FindingSourceAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "finding", "document_revision", "document_page", "evidence_mode")
+    list_filter = ("evidence_mode", "relation", "created_at")
+    readonly_fields = tuple(field.name for field in FindingSource._meta.fields)
+
+
+@admin.register(FindingReview)
+class FindingReviewAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "finding", "decision", "reviewer", "created_at")
+    list_filter = ("decision", "created_at")
+    search_fields = ("finding__subject", "reviewer__email")
+    readonly_fields = tuple(field.name for field in FindingReview._meta.fields)
+
+
+@admin.register(IntelligenceConflict)
+class IntelligenceConflictAdmin(ImmutableAnalysisAdmin):
+    list_display = ("id", "project", "semantic_key", "version", "status", "created_at")
+    list_filter = ("status", "conflict_type", "created_at")
+    search_fields = ("semantic_key", "explanation", "project__project_number")
+    readonly_fields = tuple(field.name for field in IntelligenceConflict._meta.fields)

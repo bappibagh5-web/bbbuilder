@@ -2,7 +2,14 @@ from django.urls import path
 
 from .views import (
     AnalysisRunDetailView,
+    AnalysisRunFindingListView,
     AnalysisRunTaskListView,
+    ConflictListView,
+    FindingDetailView,
+    FindingReviewListView,
+    FindingSourceListView,
+    MaterializeAnalysisRunView,
+    ResolveConflictView,
     RetryAnalysisRunView,
     RevisionAnalysisRunListView,
 )
@@ -27,5 +34,40 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/retry/",
         RetryAnalysisRunView.as_view(),
         name="analysis-run-retry",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/findings/",
+        AnalysisRunFindingListView.as_view(),
+        name="analysis-run-finding-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/findings/materialize/",
+        MaterializeAnalysisRunView.as_view(),
+        name="analysis-run-findings-materialize",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/findings/<int:finding_pk>/",
+        FindingDetailView.as_view(),
+        name="finding-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/findings/<int:finding_pk>/sources/",
+        FindingSourceListView.as_view(),
+        name="finding-source-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/findings/<int:finding_pk>/reviews/",
+        FindingReviewListView.as_view(),
+        name="finding-review-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/conflicts/",
+        ConflictListView.as_view(),
+        name="intelligence-conflict-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/conflicts/<int:conflict_pk>/resolve/",
+        ResolveConflictView.as_view(),
+        name="intelligence-conflict-resolve",
     ),
 ]

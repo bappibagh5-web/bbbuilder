@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Bot, CheckCircle2, Clock3, FileSearch, LoaderCircle, RotateCcw } from "lucide-react";
 import type { OrganizationMembership } from "@/lib/auth";
-import { analysisApi, type AnalysisRun, type MachineCandidate } from "@/lib/analysis";
+import { analysisApi, type AnalysisRun, type ExtractedFinding, type FindingDecision, type IntelligenceConflict, type MachineCandidate } from "@/lib/analysis";
 import { analysisActions, deriveAnalysisState, MACHINE_REVIEW_WARNING, shouldPollAnalysis } from "@/lib/analysis-state";
+import { canSubmitFindingReview, findingReviewActions, REVIEWED_NOT_APPROVED_WARNING, reviewProgress } from "@/lib/finding-review-state";
 import { documentsApi, type ProcessingJob, type ProductionDocument, type ProductionDocumentRevision } from "@/lib/documents";
 import type { ProductionProject } from "@/lib/projects";
 import { Card } from "@/components/ui/card";
@@ -25,6 +26,8 @@ export function ProductionAIReviewModule({ project, membership }: { project: Pro
   const [jobs, setJobs] = useState<ProcessingJob[]>([]);
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [findings, setFindings] = useState<ExtractedFinding[]>([]);
+  const [conflicts, setConflicts] = useState<IntelligenceConflict[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +76,28 @@ export function ProductionAIReviewModule({ project, membership }: { project: Pro
   const isPdf = selected ? (selected.revision.project_file.file_asset.detected_mime_type || selected.revision.project_file.file_asset.declared_mime_type) === "application/pdf" : false;
   const state = deriveAnalysisState({ isPdf, sourceStatus: latestSource?.status, pdfStatus: latestPdf?.status, pageCount: latestPdf?.result_metadata.page_count ?? 0, runStatus: latestRun?.status });
   const actions = analysisActions(state, canOperate);
+  const reviewActions = findingReviewActions(canOperate);
+
+  const refreshReview = useCallback(async (signal?: AbortSignal) => {
+    if (!selectedRun) return;
+    const [nextFindings, nextConflicts] = await Promise.all([
+      analysisApi.findings(slug, project.id, selectedRun.id, signal),
+      analysisApi.conflicts(slug, project.id, signal),
+    ]);
+    setFindings(nextFindings);
+    setConflicts(nextConflicts.filter((conflict) => conflict.analysis_run === selectedRun.id));
+  }, [project.id, selectedRun, slug]);
+
+  useEffect(() => {
+    if (!selectedRun) return;
+    const controller = new AbortController();
+    async function loadReview() {
+      try { await refreshReview(controller.signal); }
+      catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Finding review is unavailable."); }
+    }
+    void loadReview();
+    return () => controller.abort();
+  }, [refreshReview, selectedRun]);
 
   async function act(action: () => Promise<AnalysisRun>) {
     if (acting) return; setActing(true); setError(null);
@@ -87,14 +112,47 @@ export function ProductionAIReviewModule({ project, membership }: { project: Pro
   return <div className="space-y-5">
     <section className="flex flex-col gap-4 rounded-xl border bg-slate-50 p-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0 flex-1"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Production AI Review</p><h2 className="mt-1 text-lg font-semibold">Structured document analysis</h2><p className="mt-1 text-sm text-slate-600">Explicit, versioned machine analysis of one immutable indexed revision.</p></div>
-      <label className="block min-w-0 text-xs font-semibold sm:w-96">Document revision<select value={selectedId ?? ""} onChange={(event) => { setSelectedId(Number(event.target.value)); setJobs([]); setRuns([]); setSelectedRunId(null); }} className="mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">{options.map(({ document, revision }) => <option key={revision.id} value={revision.id}>{document.title} — {revision.revision_label || `Revision #${revision.id}`}</option>)}</select></label>
+      <label className="block min-w-0 text-xs font-semibold sm:w-96">Document revision<select value={selectedId ?? ""} onChange={(event) => { setSelectedId(Number(event.target.value)); setJobs([]); setRuns([]); setSelectedRunId(null); setFindings([]); setConflicts([]); }} className="mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">{options.map(({ document, revision }) => <option key={revision.id} value={revision.id}>{document.title} — {revision.revision_label || `Revision #${revision.id}`}</option>)}</select></label>
     </section>
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">{MACHINE_REVIEW_WARNING} Results are candidates, not approved project intelligence.</div>
     {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</div>}
     <Card className="p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><StateIcon state={state} /><h3 className="font-semibold">{stateLabel(state)}</h3></div><p className="mt-1 text-sm text-slate-500">{stateDetail(state, canOperate)}</p></div><div className="flex gap-2">{(actions.canRun || actions.canRunAgain) && selected && <button type="button" disabled={acting} onClick={() => void act(() => analysisApi.request(slug, project.id, selected.document.id, selected.revision.id))} className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50"><Bot className="h-4 w-4" />{acting ? "Requesting…" : actions.canRunAgain ? "Run AI Analysis Again" : "Run AI Analysis"}</button>}{actions.canRetry && latestRun && <button type="button" disabled={acting} onClick={() => void act(() => analysisApi.retry(slug, project.id, latestRun.id))} className="inline-flex h-10 items-center gap-2 rounded-lg border bg-white px-4 text-sm font-semibold disabled:opacity-50"><RotateCcw className="h-4 w-4" />{acting ? "Requesting…" : "Retry Analysis"}</button>}</div></div>{state === "failed" && latestRun?.safe_failure_message && <p className="mt-3 text-sm text-red-700">{latestRun.safe_failure_message}</p>}</Card>
     {selectedRun?.status === "succeeded" && <MachineResult run={selectedRun} />}
-    <RunHistory runs={runs} selectedRunId={selectedRun?.id ?? null} onSelect={setSelectedRunId} />
+    {selectedRun?.status === "succeeded" && <HumanReviewPanel run={selectedRun} findings={findings} conflicts={conflicts} canOperate={canOperate} actions={reviewActions} slug={slug} projectId={project.id} acting={acting} setActing={setActing} setError={setError} refresh={refreshReview} />}
+    <RunHistory runs={runs} selectedRunId={selectedRun?.id ?? null} onSelect={(id) => { setSelectedRunId(id); setFindings([]); setConflicts([]); }} />
   </div>;
+}
+
+function HumanReviewPanel({ run, findings, conflicts, canOperate, actions, slug, projectId, acting, setActing, setError, refresh }: { run: AnalysisRun; findings: ExtractedFinding[]; conflicts: IntelligenceConflict[]; canOperate: boolean; actions: ReturnType<typeof findingReviewActions>; slug: string; projectId: number; acting: boolean; setActing: (value: boolean) => void; setError: (value: string | null) => void; refresh: () => Promise<void> }) {
+  const progress = reviewProgress(findings);
+  async function perform(action: () => Promise<unknown>) {
+    if (acting) return;
+    setActing(true); setError(null);
+    try { await action(); await refresh(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The review action failed."); }
+    finally { setActing(false); }
+  }
+  if (!findings.length) return <Card className="border-blue-200 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Human review</p><h3 className="mt-1 font-semibold">Prepare Run #{run.id} findings for review</h3><p className="mt-1 text-sm text-slate-600">Deterministically materialize persisted machine candidates. This makes no AI call and creates no approved intelligence.</p></div>{actions.canMaterialize && <button type="button" disabled={acting} onClick={() => void perform(() => analysisApi.materialize(slug, projectId, run.id))} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50">{acting ? "Preparing…" : "Prepare Findings for Review"}</button>}</div>{!canOperate && <p className="mt-3 text-sm text-slate-500">An Admin or Estimator / Operator may prepare this run.</p>}</Card>;
+  return <section className="space-y-4"><div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">{REVIEWED_NOT_APPROVED_WARNING}</div><Card className="p-4"><div className="flex flex-wrap gap-x-6 gap-y-2 text-sm"><span><strong>{progress.total}</strong> findings</span><span><strong>{progress.reviewed}</strong> reviewed</span><span><strong>{progress.unreviewed}</strong> unreviewed</span><span><strong>{conflicts.filter((item) => item.status === "open").length}</strong> open conflicts</span></div></Card><div className="space-y-3">{findings.map((finding) => <FindingCard key={finding.id} finding={finding} canReview={actions.canReview} acting={acting} onReview={(decision, reviewedValue, reviewNote) => perform(() => analysisApi.review(slug, projectId, finding.id, { decision, reviewed_value: reviewedValue, review_note: reviewNote }))} />)}</div><ConflictPanel conflicts={conflicts} canResolve={actions.canResolveConflict} acting={acting} onResolve={(conflict, status, note) => perform(() => analysisApi.resolveConflict(slug, projectId, conflict.id, { status, resolution_note: note }))} /></section>;
+}
+
+function FindingCard({ finding, canReview, acting, onReview }: { finding: ExtractedFinding; canReview: boolean; acting: boolean; onReview: (decision: FindingDecision, value: string, note: string) => void }) {
+  const [editing, setEditing] = useState(false); const [value, setValue] = useState(finding.effective_value || finding.machine_value); const [note, setNote] = useState("");
+  const currentReview = finding.reviews.at(-1);
+  const canAccept = canSubmitFindingReview(canReview, currentReview, "accepted", "", note);
+  const canReject = canSubmitFindingReview(canReview, currentReview, "rejected", "", note);
+  const canClarify = canSubmitFindingReview(canReview, currentReview, "needs_clarification", "", note);
+  return <Card className="p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Machine candidate · Run #{finding.analysis_run}</p><h3 className="mt-1 font-semibold">{finding.subject}</h3></div><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold capitalize">{finding.review_status.replaceAll("_", " ")}</span></div><p className="mt-3 text-sm text-slate-700">{finding.machine_value}</p><p className="mt-1 text-xs text-slate-500">{finding.category.replaceAll("_", " ")} · {finding.machine_support.replaceAll("_", " ")}</p><div className="mt-4 rounded-lg bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Source evidence</p>{finding.sources.map((source) => <div key={source.id} className="mt-2 text-sm"><p className="font-medium">{source.document_title} · {source.revision_label || `Revision #${source.document_revision}`} · Page {source.page_number}{source.sheet_number ? ` · ${source.sheet_number}${source.sheet_title ? ` — ${source.sheet_title}` : ""}` : ""}</p><p className="mt-1 text-slate-600">{source.evidence_excerpt ? `“${source.evidence_excerpt}”` : `Visual evidence: ${source.visual_evidence_description}`}</p></div>)}</div>{finding.review_status !== "unreviewed" && <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm"><p className="font-semibold">Reviewed finding</p>{finding.effective_value && <p className="mt-1">Reviewed value: {finding.effective_value}</p>}<p className="mt-1 text-xs text-slate-600">{finding.reviews.length} review decision{finding.reviews.length === 1 ? "" : "s"} preserved</p></div>}{canReview && <div className="mt-4 space-y-2">{editing && <textarea value={value} onChange={(event) => setValue(event.target.value)} maxLength={2000} className="min-h-20 w-full rounded-lg border p-2 text-sm" aria-label="Reviewed value" />}<input value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Review note (optional)" className="h-10 w-full rounded-lg border px-3 text-sm" /><div className="flex flex-wrap gap-2"><button disabled={acting || !canAccept} onClick={() => onReview("accepted", "", note)} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">Accept</button><button disabled={acting} onClick={() => editing ? onReview("edited_accepted", value, note) : setEditing(true)} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50">{editing ? "Save Edited / Accepted" : "Edit / Accept"}</button><button disabled={acting || !canReject} onClick={() => onReview("rejected", "", note)} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">Reject</button><button disabled={acting || !canClarify} onClick={() => onReview("needs_clarification", "", note)} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">Needs Clarification</button></div></div>}</Card>;
+}
+
+function ConflictPanel({ conflicts, canResolve, acting, onResolve }: { conflicts: IntelligenceConflict[]; canResolve: boolean; acting: boolean; onResolve: (conflict: IntelligenceConflict, status: "resolved" | "dismissed", note: string) => void }) {
+  if (!conflicts.length) return <Card className="p-5"><h3 className="font-semibold">Conflicts</h3><p className="mt-1 text-sm text-slate-500">No deterministic material conflicts were detected for this AnalysisRun.</p></Card>;
+  return <Card className="p-5"><h3 className="font-semibold">Conflicts</h3><div className="mt-3 space-y-4">{conflicts.map((conflict) => <ConflictItem key={conflict.id} conflict={conflict} canResolve={canResolve} acting={acting} onResolve={onResolve} />)}</div></Card>;
+}
+
+function ConflictItem({ conflict, canResolve, acting, onResolve }: { conflict: IntelligenceConflict; canResolve: boolean; acting: boolean; onResolve: (conflict: IntelligenceConflict, status: "resolved" | "dismissed", note: string) => void }) {
+  const [note, setNote] = useState("");
+  return <div className="rounded-lg border p-3"><div className="flex justify-between gap-2"><p className="text-sm font-semibold">{conflict.semantic_key}</p><span className="text-xs font-semibold uppercase">{conflict.status}</span></div><p className="mt-1 text-sm text-slate-600">{conflict.explanation}</p><ul className="mt-2 space-y-2 text-sm">{conflict.findings.map((finding) => <li key={finding.id}><p>Finding #{finding.id}: {finding.machine_value}</p><p className="text-xs text-slate-500">{finding.sources.map((source) => `Page ${source.page_number}${source.sheet_number ? ` · ${source.sheet_number}` : ""}`).join(", ")}</p></li>)}</ul>{conflict.status === "open" && canResolve && <div className="mt-3 flex flex-wrap gap-2"><input value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Resolution rationale" className="h-9 min-w-56 flex-1 rounded-lg border px-3 text-sm" /><button disabled={acting} onClick={() => onResolve(conflict, "resolved", note)} className="rounded-lg border px-3 text-xs font-semibold">Resolve</button><button disabled={acting} onClick={() => onResolve(conflict, "dismissed", note)} className="rounded-lg border px-3 text-xs font-semibold">Dismiss</button></div>}</div>;
 }
 
 function MachineResult({ run }: { run: AnalysisRun }) {

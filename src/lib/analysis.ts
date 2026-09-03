@@ -47,6 +47,33 @@ export type AnalysisRun = {
   updated_at: string;
 };
 
+export type FindingDecision = "accepted" | "edited_accepted" | "rejected" | "needs_clarification";
+export type FindingSource = {
+  id: number; document_revision: number; document_page: number; document_title: string;
+  revision_label: string; page_number: number; drawing_sheet: number | null;
+  sheet_number: string; sheet_title: string; analysis_task_run: number;
+  relation: string; evidence_mode: string; evidence_excerpt: string;
+  visual_evidence_description: string; created_at: string;
+};
+export type FindingReview = {
+  id: number; finding: number; reviewer: string; decision: FindingDecision;
+  reviewed_value: string; review_note: string; supersedes: number | null; created_at: string;
+};
+export type ExtractedFinding = {
+  id: number; analysis_run: number; analysis_task_run: number; document_revision: number;
+  source_candidate_key: string; semantic_key: string; category: string; subject: string;
+  machine_value: string; machine_support: string; schema_version: string;
+  review_status: "unreviewed" | FindingDecision; effective_value: string;
+  sources: FindingSource[]; reviews: FindingReview[]; created_at: string;
+};
+export type IntelligenceConflict = {
+  id: number; analysis_run: number; semantic_key: string; participant_key: string;
+  version: number; conflict_type: string; explanation: string;
+  status: "open" | "resolved" | "dismissed"; findings: ExtractedFinding[];
+  resolved_by: string | null; resolution_note: string; resolved_at: string | null;
+  supersedes: number | null; created_at: string;
+};
+
 function projectPath(slug: string, projectId: string | number) {
   return `/organizations/${encodeURIComponent(slug)}/projects/${encodeURIComponent(String(projectId))}`;
 }
@@ -63,5 +90,20 @@ export const analysisApi = {
   },
   retry(slug: string, projectId: string | number, runId: number) {
     return apiRequest<AnalysisRun>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/retry/`, { method: "POST", body: JSON.stringify({}) });
+  },
+  findings(slug: string, projectId: string | number, runId: number, signal?: AbortSignal) {
+    return apiRequest<ExtractedFinding[]>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/findings/`, { signal });
+  },
+  materialize(slug: string, projectId: string | number, runId: number) {
+    return apiRequest<ExtractedFinding[]>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/findings/materialize/`, { method: "POST", body: JSON.stringify({}) });
+  },
+  review(slug: string, projectId: string | number, findingId: number, payload: { decision: FindingDecision; reviewed_value?: string; review_note?: string }) {
+    return apiRequest<FindingReview>(`${projectPath(slug, projectId)}/findings/${findingId}/reviews/`, { method: "POST", body: JSON.stringify(payload) });
+  },
+  conflicts(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<IntelligenceConflict[]>(`${projectPath(slug, projectId)}/conflicts/`, { signal });
+  },
+  resolveConflict(slug: string, projectId: string | number, conflictId: number, payload: { status: "resolved" | "dismissed"; resolution_note?: string }) {
+    return apiRequest<IntelligenceConflict>(`${projectPath(slug, projectId)}/conflicts/${conflictId}/resolve/`, { method: "POST", body: JSON.stringify(payload) });
   },
 };

@@ -16,7 +16,14 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.analysis.models import AnalysisRun, AnalysisTaskRun
+from apps.analysis.models import (
+    AnalysisRun,
+    AnalysisTaskRun,
+    ExtractedFinding,
+    FindingReview,
+    FindingSource,
+    IntelligenceConflict,
+)
 from apps.analysis.providers import (
     FakeAnalysisProvider,
     OpenAIAnalysisProvider,
@@ -27,11 +34,15 @@ from apps.analysis.rendering import PageRenderFailure, render_page_data_url
 from apps.analysis.schemas import validate_result
 from apps.analysis.services import (
     _claim_run,
+    detect_conflicts,
     dispatch_analysis_run,
     execute_analysis_run,
+    materialize_findings,
     recover_stale_analysis_runs,
     request_analysis_run,
+    resolve_conflict,
     retry_analysis_run,
+    review_finding,
 )
 from apps.documents.models import (
     Document,
@@ -162,7 +173,7 @@ def valid_page_result(page):
                         "page_number": page.page_number,
                         "drawing_sheet_id": sheet.pk if sheet else None,
                         "sheet_number": sheet.sheet_number if sheet else "",
-                        "evidence_excerpt": "MECHANICAL PLAN" if page.has_native_text else "",
+                        "evidence_excerpt": page.native_text if page.has_native_text else "",
                         "visual_evidence_description": "",
                     }
                 ],
@@ -758,3 +769,350 @@ def test_native_text_truncation_is_explicit_in_task_metadata_and_payload(revisio
     payload = _page_payload(task)
     assert payload["page"]["native_text"] == "Bid c"
     assert payload["page"]["native_text_truncated"] is True
+
+
+def completed_run(revision, user):
+    provider = RecordingProvider()
+    provider.calls = []
+    with (
+        patch("apps.analysis.services.get_analysis_provider", return_value=provider),
+        patch(
+            "apps.analysis.services.render_page_data_url",
+            return_value=("data:image/png;base64,eA==", {}),
+        ),
+    ):
+        run = request_analysis_run(revision=revision, requested_by=user)
+        assert execute_analysis_run(run.pk)["outcome"] == "succeeded"
+    run.refresh_from_db()
+    return run
+
+
+def test_successful_run_materializes_idempotent_findings_and_sources(revision, user, membership):
+    run = completed_run(revision, user)
+    with patch("apps.analysis.services.get_analysis_provider") as provider:
+        first = list(materialize_findings(analysis_run=run, actor=user))
+        second = list(materialize_findings(analysis_run=run, actor=user))
+        provider.assert_not_called()
+    assert len(first) == len(second) == 2
+    assert ExtractedFinding.objects.filter(analysis_run=run).count() == 2
+    assert FindingSource.objects.filter(finding__analysis_run=run).count() == 2
+    assert {source.document_page_id for source in FindingSource.objects.all()} == set(
+        revision.pages.values_list("id", flat=True)
+    )
+    assert Project.objects.get(pk=revision.document.project_id).status == "human_scope_review"
+    assert AuditEvent.objects.filter(action_code="findings.materialized").count() == 1
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "failed"])
+def test_only_successful_run_can_materialize_without_status_change(status, revision, user):
+    run = request_analysis_run(revision=revision, requested_by=user)
+    AnalysisRun.objects.filter(pk=run.pk).update(status=status)
+    run.refresh_from_db()
+    with pytest.raises(ValidationError):
+        materialize_findings(analysis_run=run, actor=user)
+    assert not ExtractedFinding.objects.exists()
+    assert Project.objects.get(pk=revision.document.project_id).status == "ai_analysis"
+
+
+def test_reviews_are_append_only_and_preserve_machine_value(revision, user, membership):
+    run = completed_run(revision, user)
+    finding = materialize_findings(analysis_run=run, actor=user).first()
+    machine_value = finding.machine_value
+    accepted, accepted_created = review_finding(
+        finding=finding, reviewer=user, decision=FindingReview.Decision.ACCEPTED
+    )
+    edited, edited_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.EDITED_ACCEPTED,
+        reviewed_value="Human corrected value",
+        review_note="Verified against addendum.",
+    )
+    rejected, rejected_created = review_finding(
+        finding=finding, reviewer=user, decision=FindingReview.Decision.REJECTED
+    )
+    finding.refresh_from_db()
+    assert accepted_created and edited_created and rejected_created
+    assert [accepted.pk, edited.pk, rejected.pk] == list(
+        finding.reviews.values_list("pk", flat=True)
+    )
+    assert edited.supersedes == accepted and rejected.supersedes == edited
+    assert finding.machine_value == machine_value
+    assert finding.review_status == "rejected"
+    assert finding.effective_value == ""
+
+
+@pytest.mark.parametrize(
+    ("decision", "action_code"),
+    [
+        (FindingReview.Decision.NEEDS_CLARIFICATION, "finding.needs_clarification"),
+        (FindingReview.Decision.ACCEPTED, "finding.accepted"),
+        (FindingReview.Decision.REJECTED, "finding.rejected"),
+    ],
+)
+def test_identical_consecutive_review_is_idempotent(
+    decision, action_code, revision, user, membership
+):
+    run = completed_run(revision, user)
+    finding = materialize_findings(analysis_run=run, actor=user).first()
+    machine_value = finding.machine_value
+    first, first_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=decision,
+        reviewed_value=None,
+        review_note="  ",
+    )
+    second, second_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=decision,
+        reviewed_value="",
+        review_note="",
+    )
+    finding.refresh_from_db()
+    assert first_created is True and second_created is False
+    assert second.pk == first.pk
+    assert FindingReview.objects.filter(finding=finding).count() == 1
+    assert AuditEvent.objects.filter(action_code=action_code, target_id=str(first.pk)).count() == 1
+    assert finding.machine_value == machine_value
+
+
+def test_meaningful_review_changes_append_without_changing_machine_value(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    finding = materialize_findings(analysis_run=run, actor=user).first()
+    machine_value = finding.machine_value
+    clarification, _ = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.NEEDS_CLARIFICATION,
+        review_note="Need architect confirmation",
+    )
+    changed_note, changed_note_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.NEEDS_CLARIFICATION,
+        review_note=" Architect response received but still ambiguous ",
+    )
+    edited, _ = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.EDITED_ACCEPTED,
+        reviewed_value="First reviewed value",
+    )
+    changed_value, changed_value_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.EDITED_ACCEPTED,
+        reviewed_value=" Second reviewed value ",
+    )
+    rejected, rejected_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.REJECTED,
+    )
+    accepted, accepted_created = review_finding(
+        finding=finding,
+        reviewer=user,
+        decision=FindingReview.Decision.ACCEPTED,
+    )
+    finding.refresh_from_db()
+    assert changed_note_created and changed_value_created and rejected_created and accepted_created
+    assert changed_note.supersedes == clarification
+    assert changed_note.review_note == "Architect response received but still ambiguous"
+    assert changed_value.supersedes == edited
+    assert changed_value.reviewed_value == "Second reviewed value"
+    assert rejected.supersedes == changed_value and accepted.supersedes == rejected
+    assert finding.reviews.count() == 6
+    assert finding.machine_value == machine_value
+
+
+def test_repeated_identical_review_api_post_returns_existing_review(
+    revision, user, membership, organization
+):
+    run = completed_run(revision, user)
+    finding = materialize_findings(analysis_run=run, actor=user).first()
+    url = reverse(
+        "finding-review-list",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "finding_pk": finding.pk,
+        },
+    )
+    payload = {"decision": "needs_clarification", "review_note": "  Confirm with architect  "}
+    first = client_for(user).post(url, payload, format="json")
+    second = client_for(user).post(url, payload, format="json")
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.data["id"] == first.data["id"]
+    assert second.data["review_note"] == "Confirm with architect"
+    assert FindingReview.objects.filter(finding=finding).count() == 1
+    assert AuditEvent.objects.filter(action_code="finding.needs_clarification").count() == 1
+
+
+def test_finding_and_source_ownership_and_immutability(revision, user, membership):
+    run = completed_run(revision, user)
+    finding = materialize_findings(analysis_run=run, actor=user).first()
+    source = finding.sources.first()
+    finding.machine_value = "changed"
+    with pytest.raises(ValidationError):
+        finding.save()
+    source.evidence_excerpt = "changed"
+    with pytest.raises(ValidationError):
+        source.save()
+    other_page = revision.pages.exclude(pk=source.document_page_id).first()
+    source.document_page = other_page
+    with pytest.raises(ValidationError):
+        source.full_clean()
+
+
+def test_conflict_detection_is_conservative_and_idempotent(revision, user, membership):
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    assert detect_conflicts(analysis_run=run, actor=user) == []
+    original = findings[0]
+    conflicting = ExtractedFinding(
+        analysis_run=run,
+        analysis_task_run=original.analysis_task_run,
+        document_revision=revision,
+        source_candidate_key="different-value-key",
+        semantic_key=original.semantic_key,
+        category=original.category,
+        subject=original.subject,
+        machine_value="Different mechanical responsibility",
+        normalized_machine_value="different mechanical responsibility",
+        machine_support="explicit",
+        schema_version=run.schema_version,
+    )
+    conflicting.full_clean()
+    conflicting.save()
+    # Scope/trade values are intentionally excluded from automatic conflict claims.
+    assert detect_conflicts(analysis_run=run, actor=user) == []
+    original.category = "responsibility"
+    original.semantic_key = "responsibility.fixture_supply"
+    original.source_candidate_key = "responsibility-a"
+    original.pk = None
+    original._state.adding = True
+    original.save(force_insert=True)
+    second = ExtractedFinding.objects.create(
+        analysis_run=run,
+        analysis_task_run=original.analysis_task_run,
+        document_revision=revision,
+        source_candidate_key="responsibility-b",
+        semantic_key="responsibility.fixture_supply",
+        category="responsibility",
+        subject="Fixture supply",
+        machine_value="Owner",
+        normalized_machine_value="owner",
+        machine_support="explicit",
+        schema_version=run.schema_version,
+    )
+    original.normalized_machine_value = "general contractor"
+    ExtractedFinding.objects.filter(pk=original.pk).update(
+        normalized_machine_value="general contractor", machine_value="General contractor"
+    )
+    created = detect_conflicts(analysis_run=run, actor=user)
+    assert len(created) == 1
+    assert set(created[0].findings.values_list("pk", flat=True)) == {original.pk, second.pk}
+    assert detect_conflicts(analysis_run=run, actor=user) == []
+
+
+def test_conflict_resolution_is_append_only_and_audited(revision, user, membership):
+    run = completed_run(revision, user)
+    task = run.task_runs.get(task_type="document_synthesis")
+    common = dict(
+        analysis_run=run,
+        analysis_task_run=task,
+        document_revision=revision,
+        semantic_key="date_deadline.tender_close",
+        category="date_deadline",
+        subject="Tender close",
+        machine_support="explicit",
+        schema_version=run.schema_version,
+    )
+    for key, value in (("date-a", "2026-09-15"), ("date-b", "2026-09-16")):
+        ExtractedFinding.objects.create(
+            **common,
+            source_candidate_key=key,
+            machine_value=value,
+            normalized_machine_value=value,
+        )
+    conflict = detect_conflicts(analysis_run=run, actor=user)[0]
+    resolved = resolve_conflict(
+        conflict=conflict,
+        actor=user,
+        status=IntelligenceConflict.Status.RESOLVED,
+        resolution_note="Addendum controls.",
+    )
+    assert conflict.status == "open"
+    assert resolved.supersedes == conflict and resolved.version == 2
+    assert resolved.status == "resolved"
+    assert AuditEvent.objects.filter(action_code="conflict.resolved").exists()
+
+
+def test_multiple_analysis_runs_keep_findings_and_reviews_isolated(revision, user, membership):
+    first = completed_run(revision, user)
+    first_finding = materialize_findings(analysis_run=first, actor=user).first()
+    review_finding(finding=first_finding, reviewer=user, decision=FindingReview.Decision.ACCEPTED)
+    second = completed_run(revision, user)
+    materialize_findings(analysis_run=second, actor=user)
+    first_finding.refresh_from_db()
+    assert first.findings.count() == second.findings.count() == 2
+    assert first_finding.reviews.count() == 1
+    assert not FindingReview.objects.filter(finding__analysis_run=second).exists()
+
+
+def test_review_api_permissions_scoping_and_read_only_boundaries(
+    revision, user, membership, organization
+):
+    run = completed_run(revision, user)
+    materialize_url = reverse(
+        "analysis-run-findings-materialize",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "run_pk": run.pk,
+        },
+    )
+    viewer = get_user_model().objects.create_user(email="review-viewer@example.com", password="x")
+    Membership.objects.create(organization=organization, user=viewer, role=Membership.Role.VIEWER)
+    assert client_for(viewer).post(materialize_url, {}, format="json").status_code == 403
+    response = client_for(user).post(materialize_url, {}, format="json")
+    assert response.status_code == 200
+    finding = ExtractedFinding.objects.filter(analysis_run=run).first()
+    detail_url = reverse(
+        "finding-detail",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "finding_pk": finding.pk,
+        },
+    )
+    review_url = reverse(
+        "finding-review-list",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "finding_pk": finding.pk,
+        },
+    )
+    assert client_for(viewer).get(detail_url).status_code == 200
+    assert client_for(viewer).post(review_url, {"decision": "accepted"}).status_code == 403
+    assert (
+        client_for(user)
+        .post(
+            review_url,
+            {"decision": "edited_accepted", "reviewed_value": "Reviewed text"},
+            format="json",
+        )
+        .status_code
+        == 201
+    )
+    assert client_for(user).delete(detail_url).status_code == 405
+    payload = client_for(user).get(detail_url).data
+    serialized = json.dumps(payload)
+    assert "storage_key" not in serialized and '"native_text":' not in serialized
+    assert "OPENAI_API_KEY" not in serialized and "normalized_machine_value" not in payload
