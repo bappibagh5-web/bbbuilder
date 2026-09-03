@@ -14,6 +14,8 @@ The approved frontend demo already exists.
 
 Permanent project documentation exists under `/docs`.
 
+`docs/AI_HANDOFF.md` is the concise operational cross-chat/account continuity brief. It points to canonical Git and permanent documentation rather than replacing them.
+
 M1-01 — Backend & Local Development Foundation is **complete**.
 
 M1-02 — Organization, Users, Authentication & Permissions is **complete**. Automated and manual local authentication validation passed on August 29, 2026.
@@ -316,8 +318,9 @@ Before making changes, a new engineer or AI session must read:
 6. `docs/BUSINESS_RULES.md`
 7. `docs/DECISIONS.md`
 8. `docs/CURRENT_STATUS.md`
-9. `README.md`
-10. Recent Git history
+9. `docs/AI_HANDOFF.md`
+10. `README.md`
+11. Recent Git history
 
 The repository and documentation are authoritative. Do not rely on assumptions from a previous chat.
 

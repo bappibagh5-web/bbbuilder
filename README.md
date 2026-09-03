@@ -6,7 +6,7 @@ Milestone 1 implementation is intentionally incremental. The existing demo remai
 
 ## Permanent project memory
 
-If conversation history is unavailable, recover project context from the committed repository before changing code. Start with `docs/PROJECT_CONTEXT.md`, use `docs/ROADMAP.md` for the complete contracted delivery plan, `docs/CURRENT_STATUS.md` for the current execution position, and `docs/DECISIONS.md` for material architecture decisions. Inspect recent Git history and the current status/diff before continuing work.
+If conversation history is unavailable, recover project context from the committed repository before changing code. Start with `docs/AI_HANDOFF.md` for the cross-chat/account recovery procedure, then use `docs/PROJECT_CONTEXT.md`, `docs/ROADMAP.md`, `docs/CURRENT_STATUS.md`, and `docs/DECISIONS.md` as their described canonical sources. Inspect recent Git history and the current status/diff before continuing work. The shorthand **Sync BB Builders** requests this read-only recovery.
 
 ## Demo workflow
 
