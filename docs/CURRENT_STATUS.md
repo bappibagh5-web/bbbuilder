@@ -285,6 +285,10 @@ Do not jump directly into project, document, or AI implementation before complet
 
 ## Source of truth
 
+Full contracted roadmap: `docs/ROADMAP.md`
+
+`ROADMAP.md` is the canonical full project plan. This file remains the authoritative operational record of the current execution position and should not duplicate the complete M2–M5 decomposition.
+
 Before making changes, a new engineer or AI session must read:
 
 1. `docs/PROJECT_CONTEXT.md`

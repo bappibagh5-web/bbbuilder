@@ -4,6 +4,10 @@ This repository contains the approved Next.js frontend demonstration and the pro
 
 Milestone 1 implementation is intentionally incremental. The existing demo remains the UX baseline and still uses deterministic fixture data until later Milestone 1 tasks connect individual workflows to production APIs.
 
+## Permanent project memory
+
+If conversation history is unavailable, recover project context from the committed repository before changing code. Start with `docs/PROJECT_CONTEXT.md`, use `docs/ROADMAP.md` for the complete contracted delivery plan, `docs/CURRENT_STATUS.md` for the current execution position, and `docs/DECISIONS.md` for material architecture decisions. Inspect recent Git history and the current status/diff before continuing work.
+
 ## Demo workflow
 
 Project Intake → Documents → AI Review → Trade Scopes → Bid Packages → Contractor Discovery → Outreach → Bid Intake → Bid Comparison → Client Proposal → Awarded Project
