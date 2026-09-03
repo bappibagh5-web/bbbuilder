@@ -16,6 +16,7 @@ dependencies = [
     "djangorestframework==3.18.0",
     "psycopg[binary]==3.3.4",
     "PyMuPDF==1.28.2",
+    "pydantic==2.12.5",
 ]
 
 [project.optional-dependencies]

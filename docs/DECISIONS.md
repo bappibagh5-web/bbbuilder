@@ -226,6 +226,28 @@ The Documents UI treats a source-verified eligible PDF with no visible indexing 
 
 **Consequence:** M1-08 creates a reproducible physical-page foundation without presenting deterministic extraction as AI understanding or fabricating drawing metadata when source evidence is weak.
 
+### D-034 — Explicit, versioned structured machine analysis
+
+**Status:** Decided
+
+**Decision:** M1-09 introduces an environment-selected backend provider through a narrow analysis-provider interface. The initial production implementation uses the OpenAI Responses API and tests use a deterministic fake provider with no network access. Provider credentials remain environment-only and are never stored in PostgreSQL or sent to the browser. Paid analysis is initiated only by an authorized explicit request; upload, source verification, and PDF indexing never trigger it automatically.
+
+Each request creates a durable immutable `AnalysisRun` for one exact `DocumentRevision`, followed by one `AnalysisTaskRun` per indexed `DocumentPage` and one document-synthesis task. PostgreSQL owns run/task state and Celery transports only the durable run ID. One active run per revision, transactional creation, row-locked claims, leases, bounded retries, succeeded-task no-ops, and explicit new runs for reanalysis preserve history and control concurrency. Old results are never overwritten.
+
+Page tasks execute sequentially beneath one run-level database claim. A valid run lease prevents a second worker from claiming the same run. Transient provider timeout, rate-limit, and availability failures return the affected task and run to durable queued state, then Celery schedules the next delivery after `AI_RETRY_BASE_SECONDS * 2^(attempt-1)`. PostgreSQL attempt counts enforce the task maximum; a recovered stale task at its limit fails safely rather than receiving another provider call. Terminal configuration, schema, provider-rejection, and rendering failures are not retried. Queued redispatch is idempotent within its dispatch window, and stale recovery never touches succeeded or non-stale runs.
+
+Page routing is deterministic: text pages use the indexed `DocumentPage.native_text`; deterministic `DrawingSheet` pages use native text plus an exact bounded temporary page render; pages without native text use the page render. Native text is not reparsed and truncation is recorded. Temporary PDF/PNG artifacts are removed on success and failure. M1-09 performs no OCR and does not use filenames as analytical evidence.
+
+Prompts are centralized and versioned. Page and synthesis results are validated against versioned Pydantic schemas before persistence. Material candidates carry exact page IDs/numbers, optional deterministic sheet IDs/numbers, and bounded text or visual evidence. Document synthesis consumes validated page JSON rather than resending the PDF. Malformed responses fail with controlled errors. Usage metadata is stored only when returned; currency cost is never fabricated. Configurable page, native-text, render-dimension, and retry limits bound cost.
+
+Starting the first eligible run advances a project from `documents_uploaded` to `ai_analysis` and records that transition, without regressing later states or entering `human_scope_review`. Business audit events record request, retry request, and completion without page-level noise. The UI clearly labels every result **Machine generated — not yet human reviewed** and offers no approval controls.
+
+Authenticated manual validation used the deterministic fake provider with real PostgreSQL, Redis, Celery, MinIO, Django, and Next.js. It confirmed persisted structured results and evidence, immutable run/task history, explicit `Run AI Analysis Again` behavior, and durable browser-created queued intent while the worker was stopped. Restarting Celery naturally consumed the same queued run without manual retry or redispatch. No live OpenAI request was part of M1-09 implementation acceptance; live-provider testing requires separate authorization.
+
+M1-10 owns promotion into first-class `ExtractedFinding` and `FindingSource` records, formal provenance, `FindingReview`, and `IntelligenceConflict`. M1-11 owns immutable intelligence snapshots and human approval. An M1-09 machine payload is never approved project truth.
+
+**Consequence:** M1-09 provides durable, inspectable machine interpretation with predictable paid-operation and evidence boundaries while leaving human review and downstream authority to the planned later tasks.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

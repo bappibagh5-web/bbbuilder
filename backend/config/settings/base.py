@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "apps.projects",
     "apps.documents",
     "apps.processing",
+    "apps.analysis",
 ]
 
 MIDDLEWARE = [
@@ -122,6 +123,22 @@ PROCESSING_RETRY_BASE_SECONDS = env.int("PROCESSING_RETRY_BASE_SECONDS", default
 PROCESSING_STREAM_CHUNK_BYTES = env.int("PROCESSING_STREAM_CHUNK_BYTES", default=1024 * 1024)
 PROCESSING_HEARTBEAT_BYTES = env.int("PROCESSING_HEARTBEAT_BYTES", default=8 * 1024 * 1024)
 PROCESSING_AUTO_DISPATCH = env.bool("PROCESSING_AUTO_DISPATCH", default=True)
+
+AI_PROVIDER = env("AI_PROVIDER", default="openai")
+AI_MODEL = env("AI_MODEL", default="gpt-5-mini")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+AI_AUTO_DISPATCH = env.bool("AI_AUTO_DISPATCH", default=True)
+AI_MAX_PAGES_PER_RUN = env.int("AI_MAX_PAGES_PER_RUN", default=50)
+AI_MAX_NATIVE_TEXT_CHARS = env.int("AI_MAX_NATIVE_TEXT_CHARS", default=30000)
+AI_RENDER_MAX_DIMENSION = env.int("AI_RENDER_MAX_DIMENSION", default=2048)
+AI_TASK_MAX_ATTEMPTS = env.int("AI_TASK_MAX_ATTEMPTS", default=3)
+AI_RETRY_BASE_SECONDS = env.int("AI_RETRY_BASE_SECONDS", default=30)
+AI_RUN_LEASE_SECONDS = env.int("AI_RUN_LEASE_SECONDS", default=30 * 60)
+AI_PROVIDER_CLASS = env(
+    "AI_PROVIDER_CLASS", default="apps.analysis.providers.OpenAIAnalysisProvider"
+)
+AI_FAKE_MODE = env("AI_FAKE_MODE", default="success")
+AI_FAKE_INCLUDE_USAGE = env.bool("AI_FAKE_INCLUDE_USAGE", default=True)
 
 FRONTEND_ORIGIN = env("FRONTEND_ORIGIN", default="")
 CORS_ALLOWED_ORIGINS = env.list(

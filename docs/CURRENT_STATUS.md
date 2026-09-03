@@ -30,7 +30,9 @@ M1-07 — Document Processing Pipeline is **complete**. Automated validation and
 
 M1-08 — PDF Page / Sheet Indexing is **complete**. Automated validation and real PostgreSQL, Celery, MinIO, and browser validation passed on September 3, 2026.
 
-M1-09 — Structured AI Analysis is **next / not started**.
+M1-09 — Structured AI Analysis is **complete**. Automated validation and authenticated browser validation against real PostgreSQL, Redis, Celery, and MinIO using the network-free fake provider passed on September 3, 2026.
+
+M1-10 — Provenance, Findings & Human Review is **next / not started**.
 
 M1-01 currently includes:
 
@@ -112,7 +114,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-08 are complete. M1-09 is next / not started.
+M1-04 through M1-09 are complete. M1-10 has not started.
 
 M1-05 currently includes:
 
@@ -218,11 +220,33 @@ M1-05 currently includes:
 - Existing-database forward migration, isolated fresh migration, and automated backend/frontend validation passed
 - Real Mechanical IFC validation confirmed eight human-readable page labels and deterministic sheet identities: M00 Front Cover, D01 Demo Plan, M01 Ventilation, M02 Plumbing, M03 Sprinkler Drawing, M04 Schedule and Details, M05 Specifications, and M06 Specifications
 - Manual browser validation confirmed automatic source-verification chaining, persisted revision isolation, bounded frontend transition polling, and no project-status advancement
-- M1-09 status: next / not started
+- M1-09 status: complete
+
+M1-09 currently includes:
+
+- Immutable revision-scoped `AnalysisRun` history and durable page/synthesis `AnalysisTaskRun` rows
+- Backend-only OpenAI provider abstraction and deterministic network-free fake test provider
+- Explicit Admin/Estimator paid-operation trigger; no automatic AI call after upload or indexing
+- Source-verification, PDF-indexing, durable-page, supported-format, archive, and maximum-page prerequisites
+- Deterministic native-text, drawing text-plus-vision, and image-only vision routing with no OCR
+- Bounded native-text inputs and bounded exact-page temporary rendering with cleanup
+- Centralized versioned prompts and Pydantic-validated structured machine-output schemas
+- Exact page and optional DrawingSheet evidence references validated against the run revision
+- Document synthesis from validated page results without resending the full source PDF
+- One active run per revision, immutable reanalysis history, bounded retries, leases, redispatch, and stale-run recovery
+- Safe provider/model/version and token-usage metadata without fabricated currency costs
+- Organization/project/document/revision-scoped APIs with Viewer read-only access
+- Production numeric-project AI Review UI with prerequisites, bounded polling, results, failures, and run history
+- Explicit `Machine generated — not yet human reviewed` boundary and no M1-10 review controls
+- Narrow audited `documents_uploaded` to `ai_analysis` transition with no transition to `human_scope_review`
+- Authenticated browser validation of persisted results, exact-page evidence, usage, history selection, explicit re-analysis, Viewer-safe actions, and machine-generated warnings
+- Real worker-down validation proving browser-created Run #4 remained durably queued in PostgreSQL, survived refresh, and was consumed naturally by a restarted Celery worker without retry, redispatch, replacement, or history mutation
+- All manual validation used the deterministic fake provider; no live OpenAI request or API credit was used
+- M1-10 status: next / not started
 
 ## Next implementation task
 
-M1-09 — Structured AI Analysis is next / not started and requires separate explicit approval.
+M1-10 — Provenance, Findings & Human Review is next / not started and requires separate explicit approval.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -439,9 +463,7 @@ PDF remains the highest priority.
 
 #### M1-08 — PDF Page & Drawing Sheet Indexing
 
-**Status:** Next / Not started
-
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Create source-addressable construction-document structure.
 
@@ -458,7 +480,7 @@ Expected scope:
 
 #### M1-09 — Structured AI Analysis
 
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Turn processed tender packages into structured proposed project intelligence.
 

@@ -237,6 +237,44 @@ The Celery worker command is unchanged. PyMuPDF 1.28.2 streams each private sour
 
 The production Documents UI polls queued/running jobs at five-second intervals. After source verification succeeds for an eligible PDF, a bounded 15-second `Preparing PDF indexing…` grace allows the automatically chained durable job to become visible before an explicit Index PDF action is offered. The browser never creates the automatic job. A fresh page load always refetches persisted processing state and page counts from Django.
 
+## Structured AI analysis
+
+M1-09 adds explicitly requested, versioned machine analysis for source-verified and indexed PDF revisions. Upload and indexing never trigger an AI call. Admin and Estimator / Operator members may start analysis, explicitly run it again after success, or retry a failed run from a numeric production project's AI Review tab; Viewer members may only read persisted history and results. Refreshing, polling, changing revisions, or selecting historical runs never initiates analysis.
+
+Backend configuration is environment based:
+
+```text
+AI_PROVIDER=openai
+AI_MODEL=gpt-5-mini
+OPENAI_API_KEY=
+AI_MAX_PAGES_PER_RUN=50
+AI_MAX_NATIVE_TEXT_CHARS=30000
+AI_RENDER_MAX_DIMENSION=2048
+AI_TASK_MAX_ATTEMPTS=3
+```
+
+Keep `OPENAI_API_KEY` only in ignored local or production-secret configuration. The browser never receives it. Tests use a deterministic fake provider and make no network calls. Each explicit request creates an immutable `AnalysisRun`, one page task per indexed page, and a document-synthesis task. Text-heavy pages use indexed native text, drawing sheets use native text plus an exact temporary page render, and pages without native text use vision only. M1-09 adds no OCR.
+
+For a local fake-provider operational test, set `AI_PROVIDER=fake`, `AI_PROVIDER_CLASS=apps.analysis.providers.FakeAnalysisProvider`, and `AI_FAKE_MODE=success` only in ignored `backend/.env`, then restart Django and Celery. The fake supports `success`, `timeout`, `rate_limit`, `unavailable`, `permanent_failure`, and `invalid_schema`; `AI_FAKE_INCLUDE_USAGE=false` tests missing usage metadata. Never configure the fake provider in production. Transient failures are durably re-queued with exponential backoff based on `AI_RETRY_BASE_SECONDS`; terminal failures are not retried.
+
+Live-provider validation is a separately authorized operation. Do not place an API key in source control or chat, and do not switch a local validation environment from the fake provider without explicit approval because every Run or Run Again action may consume provider usage.
+
+The normal Celery worker processes both document jobs and analysis runs:
+
+```powershell
+Set-Location backend
+.venv\Scripts\celery.exe -A config worker --loglevel=INFO --pool=solo
+```
+
+Queued analysis intent remains in PostgreSQL. Operational recovery commands from `backend/` are:
+
+```powershell
+.venv\Scripts\python.exe manage.py dispatch_queued_analysis_runs
+.venv\Scripts\python.exe manage.py recover_stale_analysis_runs
+```
+
+Analysis APIs are organization/project/document/revision scoped. Responses expose validated machine output, versions, safe usage metadata, and controlled failures, but no provider key, private storage location, full provider response, or chain-of-thought. Results are explicitly labelled **Machine generated — not yet human reviewed**. M1-10 owns formal findings, provenance records, conflicts, and human decisions.
+
 ## Local ports
 
 | Service | Port | Purpose |

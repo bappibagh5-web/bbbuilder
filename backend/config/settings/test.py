@@ -16,3 +16,5 @@ from .base import *  # noqa: E402,F403
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CELERY_TASK_ALWAYS_EAGER = True
 PROCESSING_AUTO_DISPATCH = False
+AI_AUTO_DISPATCH = False
+AI_PROVIDER_CLASS = "apps.analysis.providers.FakeAnalysisProvider"
