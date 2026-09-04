@@ -315,6 +315,9 @@ class SnapshotSourceSerializer(serializers.ModelSerializer):
     revision_label = serializers.CharField(
         source="document_revision.revision_label", read_only=True
     )
+    document_is_active = serializers.BooleanField(
+        source="document_revision.document.is_active", read_only=True
+    )
     entries = SnapshotEntrySerializer(many=True, read_only=True)
 
     class Meta:
@@ -326,6 +329,7 @@ class SnapshotSourceSerializer(serializers.ModelSerializer):
             "document_title",
             "document_revision",
             "revision_label",
+            "document_is_active",
             "entries",
         )
         read_only_fields = fields
@@ -353,6 +357,7 @@ class IntelligenceSnapshotSerializer(serializers.ModelSerializer):
     sources = SnapshotSourceSerializer(many=True, read_only=True)
     approval = serializers.SerializerMethodField()
     is_stale = serializers.SerializerMethodField()
+    approval_blockers = serializers.SerializerMethodField()
 
     class Meta:
         model = ProjectIntelligenceSnapshot
@@ -368,6 +373,7 @@ class IntelligenceSnapshotSerializer(serializers.ModelSerializer):
             "sources",
             "approval",
             "is_stale",
+            "approval_blockers",
         )
         read_only_fields = fields
 
@@ -380,6 +386,9 @@ class IntelligenceSnapshotSerializer(serializers.ModelSerializer):
 
     def get_is_stale(self, obj):
         return self.context.get("stale_by_id", {}).get(obj.pk, False)
+
+    def get_approval_blockers(self, obj):
+        return self.context.get("approval_blockers_by_id", {}).get(obj.pk, [])
 
 
 class IntelligenceSnapshotCreateSerializer(serializers.Serializer):

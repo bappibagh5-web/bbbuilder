@@ -630,7 +630,6 @@ def test_document_metadata_permissions_archive_and_audit(user, membership, proje
         detail_url,
         {
             "title": "Updated Drawings",
-            "is_active": False,
             "current_revision": 999999,
             "project": 999999,
         },
@@ -639,11 +638,133 @@ def test_document_metadata_permissions_archive_and_audit(user, membership, proje
     assert response.status_code == 200
     document.refresh_from_db()
     assert document.title == "Updated Drawings"
-    assert document.is_active is False
+    assert document.is_active is True
     assert document.project == project
     assert document.current_revision is not None
-    assert AuditEvent.objects.filter(action_code="document.archived").exists()
+    assert AuditEvent.objects.filter(action_code="document.updated").exists()
     assert client.delete(detail_url).status_code == 405
 
     set_role(membership, Membership.Role.VIEWER)
     assert client.patch(detail_url, {"title": "No"}, format="json").status_code == 403
+
+
+@pytest.mark.parametrize("role", [Membership.Role.ADMIN, Membership.Role.ESTIMATOR_OPERATOR])
+def test_scoped_document_archive_and_restore_are_idempotent_and_preserve_history(
+    user, membership, project, fake_storage, role
+):
+    set_role(membership, role)
+    client = authenticated_client(user)
+    document = create_document_via_api(client, project, fake_storage)
+    revision_id = document.current_revision_id
+    object_keys = set(fake_storage.objects)
+    archive_url = reverse(
+        "document-archive",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "document_pk": document.pk,
+        },
+    )
+    restore_url = reverse(
+        "document-reactivate",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "document_pk": document.pk,
+        },
+    )
+
+    assert client.post(archive_url, {}, format="json").status_code == 200
+    assert client.post(archive_url, {}, format="json").status_code == 200
+    document.refresh_from_db()
+    assert document.is_active is False
+    assert document.current_revision_id == revision_id
+    assert document.revisions.filter(pk=revision_id).exists()
+    assert set(fake_storage.objects) == object_keys
+    assert (
+        AuditEvent.objects.filter(
+            action_code="document.archived", target_id=str(document.pk)
+        ).count()
+        == 1
+    )
+
+    assert client.post(restore_url, {}, format="json").status_code == 200
+    assert client.post(restore_url, {}, format="json").status_code == 200
+    document.refresh_from_db()
+    assert document.is_active is True
+    assert document.current_revision_id == revision_id
+    assert set(fake_storage.objects) == object_keys
+    assert (
+        AuditEvent.objects.filter(
+            action_code="document.reactivated", target_id=str(document.pk)
+        ).count()
+        == 1
+    )
+
+
+def test_document_archive_permissions_and_scope(user, membership, project, fake_storage):
+    document = create_document_via_api(authenticated_client(user), project, fake_storage)
+    url = reverse(
+        "document-archive",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "document_pk": document.pk,
+        },
+    )
+    set_role(membership, Membership.Role.VIEWER)
+    assert authenticated_client(user).post(url, {}, format="json").status_code == 403
+    membership.is_active = False
+    membership.save(update_fields=("is_active",))
+    assert authenticated_client(user).post(url, {}, format="json").status_code == 403
+
+    membership.is_active = True
+    membership.role = Membership.Role.ESTIMATOR_OPERATOR
+    membership.save(update_fields=("is_active", "role"))
+
+    other_project = Project.objects.create(
+        organization=project.organization,
+        created_by=user,
+        project_number="BB-ARCHIVE-SCOPE",
+        name="Archive Scope",
+        project_timezone="America/Vancouver",
+    )
+    wrong_url = reverse(
+        "document-archive",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": other_project.pk,
+            "document_pk": document.pk,
+        },
+    )
+    assert authenticated_client(user).post(wrong_url, {}, format="json").status_code == 404
+
+    other_organization = Organization.objects.create(name="Other Builder", slug="other-builder")
+    cross_org_url = reverse(
+        "document-archive",
+        kwargs={
+            "organization_slug": other_organization.slug,
+            "project_pk": project.pk,
+            "document_pk": document.pk,
+        },
+    )
+    assert authenticated_client(user).post(cross_org_url, {}, format="json").status_code == 403
+
+
+def test_document_archive_is_available_for_cleanup_inside_archived_project(
+    user, membership, project, fake_storage
+):
+    document = create_document_via_api(authenticated_client(user), project, fake_storage)
+    project.is_active = False
+    project.save(update_fields=("is_active", "updated_at"))
+    url = reverse(
+        "document-archive",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "document_pk": document.pk,
+        },
+    )
+    assert authenticated_client(user).post(url, {}, format="json").status_code == 200
+    document.refresh_from_db()
+    assert document.is_active is False

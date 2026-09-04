@@ -10,7 +10,7 @@ import {
 const snapshot = (overrides: Partial<IntelligenceSnapshot> = {}): IntelligenceSnapshot => ({
   id: 1, project: 2, version: 1, fingerprint: "a".repeat(64), schema_version: "v1",
   summary_counts: { approved_entries: 2 }, created_by: "admin@example.com",
-  created_at: "2026-09-03T00:00:00Z", sources: [], approval: null, is_stale: false,
+  created_at: "2026-09-03T00:00:00Z", sources: [], approval: null, is_stale: false, approval_blockers: [],
   ...overrides,
 });
 
@@ -34,6 +34,21 @@ test("stale or approved snapshots cannot expose approval action", () => {
   assert.equal(actions.canApprove(snapshot({ approval: { id: 1, project: 2, snapshot: 1, approver: "a", approved_at: "now", approval_note: "", readiness_result: {} } })), false);
   assert.equal(snapshotStatus(snapshot({ is_stale: true })), "stale");
   assert.equal(snapshotStatus(snapshot({ approval: { id: 1, project: 2, snapshot: 1, approver: "a", approved_at: "now", approval_note: "", readiness_result: {} }, is_stale: true })), "approved_historical");
+});
+
+test("an archived source blocks approval without making the snapshot stale", () => {
+  const archived = snapshot({
+    approval_blockers: [{ code: "document_archived", message: "Source archived", count: 1 }],
+  });
+  assert.equal(archived.is_stale, false);
+  assert.equal(snapshotActions(true, null).canApprove(archived), false);
+  assert.equal(snapshotStatus(archived), "awaiting_approval");
+});
+
+test("legacy snapshots without approval blockers remain safe to render", () => {
+  const legacySnapshot = snapshot({ approval_blockers: undefined });
+  assert.equal(snapshotActions(true, null).canApprove(legacySnapshot), true);
+  assert.equal(snapshotStatus(legacySnapshot), "awaiting_approval");
 });
 
 test("two runs for one revision cannot be selected together", () => {

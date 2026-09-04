@@ -10,6 +10,7 @@ import {
   FileText,
   History,
   LoaderCircle,
+  MoreVertical,
   Upload,
   X,
 } from "lucide-react";
@@ -26,6 +27,13 @@ import {
   type ProductionDocumentRevision,
 } from "@/lib/documents";
 import type { ProductionProject } from "@/lib/projects";
+import {
+  canManageDocument,
+  documentArchiveConfirmation,
+  documentArchiveErrorMessage,
+  type DocumentVisibility,
+  visibleDocuments,
+} from "@/lib/document-archive-state";
 import {
   PDF_CHAINING_GRACE_OBSERVATIONS,
   derivePdfProcessingDisplay,
@@ -74,15 +82,16 @@ export function ProductionDocumentsModule({
   onProjectDocumentsUploaded: () => void;
 }) {
   const slug = membership.organization.slug;
-  const canWrite =
-    project.is_active &&
-    (membership.role === "admin" || membership.role === "estimator_operator");
+  const canManageArchive = canManageDocument(membership.role);
+  const canWrite = project.is_active && canManageArchive;
   const [documents, setDocuments] = useState<ProductionDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [selected, setSelected] = useState<ProductionDocument | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [visibility, setVisibility] = useState<DocumentVisibility>("active");
+  const shownDocuments = visibleDocuments(documents, visibility);
 
   const loadDocuments = useCallback(
     async (signal?: AbortSignal) => {
@@ -90,11 +99,13 @@ export function ProductionDocumentsModule({
       setDocuments(response.results);
       setSelected((current) =>
         current
-          ? response.results.find((document) => document.id === current.id) ?? null
+          ? visibleDocuments(response.results, visibility).find(
+              (document) => document.id === current.id,
+            ) ?? null
           : null,
       );
     },
-    [project.id, slug],
+    [project.id, slug, visibility],
   );
 
   useEffect(() => {
@@ -115,6 +126,49 @@ export function ProductionDocumentsModule({
   async function refresh(message?: string) {
     await loadDocuments();
     if (message) setNotice({ tone: "success", message });
+  }
+
+  async function downloadCurrent(document: ProductionDocument) {
+    if (!document.current_revision) return;
+    setNotice(null);
+    try {
+      const revision = document.current_revision;
+      const blob = await documentsApi.download(slug, project.id, document.id, revision.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = revision.source_filename;
+      window.document.body.append(anchor);
+      try {
+        anchor.click();
+      } finally {
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      }
+    } catch (reason) {
+      setNotice({
+        tone: "error",
+        message: reason instanceof Error ? reason.message : "The file could not be downloaded.",
+      });
+    }
+  }
+
+  async function changeArchiveState(document: ProductionDocument, isActive: boolean) {
+    setNotice(null);
+    try {
+      if (isActive) {
+        await documentsApi.reactivate(slug, project.id, document.id);
+        await refresh("Document restored to the active project workflow.");
+      } else {
+        await documentsApi.archive(slug, project.id, document.id);
+        await refresh("Document archived. Its files, revisions and review history remain preserved.");
+      }
+    } catch (reason) {
+      setNotice({
+        tone: "error",
+        message: documentArchiveErrorMessage(reason, isActive),
+      });
+    }
   }
 
   if (loading) {
@@ -149,6 +203,18 @@ export function ProductionDocumentsModule({
         <Notice tone="error" message="This project is archived. Documents remain readable, but uploads and changes are disabled." />
       )}
       {notice && <Notice {...notice} />}
+      <div className="flex flex-wrap items-center gap-2" aria-label="Document visibility">
+        {(["active", "archived", "all"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => { setVisibility(value); setSelected(null); }}
+            className={`rounded-lg border px-3 py-2 text-sm font-semibold capitalize ${visibility === value ? "border-primary bg-primary text-white" : "bg-white text-slate-700"}`}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
       {showUpload && canWrite && (
         <NewDocumentForm
           onCancel={() => setShowUpload(false)}
@@ -161,10 +227,10 @@ export function ProductionDocumentsModule({
         />
       )}
 
-      {!documents.length ? (
+      {!shownDocuments.length ? (
         <ModuleState
           icon={FileText}
-          title="No documents have been uploaded"
+          title={documents.length ? `No ${visibility} documents` : "No documents have been uploaded"}
           detail={
             canWrite
               ? "Upload a drawing set, specification, addendum, spreadsheet, image, or supporting project file."
@@ -174,7 +240,7 @@ export function ProductionDocumentsModule({
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
           <div className="space-y-3">
-            {documents.map((document) => {
+            {shownDocuments.map((document) => {
               const current = document.current_revision;
               return (
                 <Card key={document.id} className="p-4 sm:p-5">
@@ -205,14 +271,23 @@ export function ProductionDocumentsModule({
                         <p className="mt-3 text-sm text-amber-700">No current revision selected.</p>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(document)}
-                      className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border bg-white px-3 text-sm font-semibold text-slate-700"
-                    >
-                      <History className="h-4 w-4" />
-                      {document.revision_count} {document.revision_count === 1 ? "Revision" : "Revisions"}
-                    </button>
+                    <details className="relative shrink-0">
+                      <summary aria-label={`Actions for ${document.title}`} className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border bg-white text-slate-700">
+                        <MoreVertical className="h-4 w-4" />
+                      </summary>
+                      <div className="absolute right-0 z-10 mt-1 w-52 space-y-1 rounded-lg border bg-white p-2 shadow-lg">
+                        <button type="button" onClick={() => setSelected(document)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50">Open Document</button>
+                        {current && <button type="button" onClick={() => void downloadCurrent(document)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50">Download</button>}
+                        <button type="button" onClick={() => setSelected(document)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50">Revision History</button>
+                        {canManageArchive && document.is_active && <button type="button" onClick={async () => {
+                          if (!window.confirm(`${documentArchiveConfirmation.title}\n\n${documentArchiveConfirmation.detail}`)) return;
+                          await changeArchiveState(document, false);
+                        }} className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-amber-800 hover:bg-amber-50">Archive Document</button>}
+                        {canManageArchive && !document.is_active && <button type="button" onClick={async () => {
+                          await changeArchiveState(document, true);
+                        }} className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-emerald-800 hover:bg-emerald-50">Restore Document</button>}
+                      </div>
+                    </details>
                   </div>
                 </Card>
               );
@@ -226,6 +301,7 @@ export function ProductionDocumentsModule({
                 project={project}
                 slug={slug}
                 canWrite={canWrite}
+                canManageArchive={canManageArchive}
                 onChanged={async (message) => {
                   await refresh(message);
                 }}
@@ -252,6 +328,7 @@ function RevisionHistory({
   project,
   slug,
   canWrite,
+  canManageArchive,
   onChanged,
   onClose,
 }: {
@@ -259,6 +336,7 @@ function RevisionHistory({
   project: ProductionProject;
   slug: string;
   canWrite: boolean;
+  canManageArchive: boolean;
   onChanged: (message: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -337,16 +415,17 @@ function RevisionHistory({
       </div>
 
       {error && <Notice tone="error" message={error} />}
-      {canWrite && document.is_active && (
+      {canManageArchive && document.is_active && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setShowRevisionUpload((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-semibold">
+          {canWrite && <button type="button" onClick={() => setShowRevisionUpload((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-semibold">
             <Upload className="h-4 w-4" /> Add Revision
-          </button>
+          </button>}
           <button
             type="button"
             disabled={busy}
             onClick={() => void run(async () => {
-              await documentsApi.update(slug, project.id, document.id, { is_active: false });
+              if (!window.confirm(`${documentArchiveConfirmation.title}\n\n${documentArchiveConfirmation.detail}`)) return;
+              await documentsApi.archive(slug, project.id, document.id);
               await onChanged("Document archived. Its revisions remain preserved.");
             })}
             className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-semibold disabled:opacity-50"
@@ -355,17 +434,17 @@ function RevisionHistory({
           </button>
         </div>
       )}
-      {canWrite && !document.is_active && (
+      {canManageArchive && !document.is_active && (
         <button
           type="button"
           disabled={busy}
           onClick={() => void run(async () => {
-            await documentsApi.update(slug, project.id, document.id, { is_active: true });
-            await onChanged("Document reactivated.");
+            await documentsApi.reactivate(slug, project.id, document.id);
+            await onChanged("Document restored to the active project workflow.");
           })}
           className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-semibold disabled:opacity-50"
         >
-          <ArchiveRestore className="h-4 w-4" /> Reactivate
+          <ArchiveRestore className="h-4 w-4" /> Restore Document
         </button>
       )}
 

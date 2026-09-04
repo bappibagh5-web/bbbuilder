@@ -38,6 +38,7 @@ from .services import (
     resolve_conflict,
     retry_analysis_run,
     review_finding,
+    snapshot_freshness,
     snapshot_readiness,
 )
 
@@ -245,9 +246,37 @@ def snapshot_stale_map(snapshots):
     result = {}
     for snapshot in snapshots:
         run_ids = list(snapshot.sources.values_list("analysis_run_id", flat=True))
-        state = snapshot_readiness(project=snapshot.project, run_ids=run_ids)
+        state = snapshot_freshness(project=snapshot.project, run_ids=run_ids)
         result[snapshot.pk] = not state["eligible"] or state["fingerprint"] != snapshot.fingerprint
     return result
+
+
+def snapshot_approval_blockers_map(snapshots):
+    result = {}
+    for snapshot in snapshots:
+        if hasattr(snapshot, "approval"):
+            result[snapshot.pk] = []
+            continue
+        archived = snapshot.sources.filter(document_revision__document__is_active=False).exists()
+        result[snapshot.pk] = (
+            [
+                {
+                    "code": "document_archived",
+                    "message": "One of the source documents for this version is archived.",
+                    "count": 1,
+                }
+            ]
+            if archived
+            else []
+        )
+    return result
+
+
+def snapshot_serializer_context(snapshots):
+    return {
+        "stale_by_id": snapshot_stale_map(snapshots),
+        "approval_blockers_by_id": snapshot_approval_blockers_map(snapshots),
+    }
 
 
 class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
@@ -257,7 +286,11 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
         project = self.get_project()
         runs = (
             run_queryset(project)
-            .filter(status=AnalysisRun.Status.SUCCEEDED, findings__isnull=False)
+            .filter(
+                status=AnalysisRun.Status.SUCCEEDED,
+                findings__isnull=False,
+                document_revision__document__is_active=True,
+            )
             .distinct()
         )
         candidates = []
@@ -299,7 +332,7 @@ class IntelligenceSnapshotListView(ProjectDocumentContextMixin, APIView):
         snapshots = list(snapshot_queryset(self.get_project()))
         return Response(
             IntelligenceSnapshotSerializer(
-                snapshots, many=True, context={"stale_by_id": snapshot_stale_map(snapshots)}
+                snapshots, many=True, context=snapshot_serializer_context(snapshots)
             ).data
         )
 
@@ -319,7 +352,7 @@ class IntelligenceSnapshotListView(ProjectDocumentContextMixin, APIView):
         snapshot = snapshot_queryset(self.get_project()).get(pk=snapshot.pk)
         return Response(
             IntelligenceSnapshotSerializer(
-                snapshot, context={"stale_by_id": {snapshot.pk: False}}
+                snapshot, context=snapshot_serializer_context([snapshot])
             ).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
@@ -337,7 +370,7 @@ class IntelligenceSnapshotDetailView(ProjectDocumentContextMixin, APIView):
         snapshot = self.get_snapshot()
         return Response(
             IntelligenceSnapshotSerializer(
-                snapshot, context={"stale_by_id": snapshot_stale_map([snapshot])}
+                snapshot, context=snapshot_serializer_context([snapshot])
             ).data
         )
 

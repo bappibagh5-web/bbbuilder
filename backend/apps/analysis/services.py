@@ -811,7 +811,7 @@ def _snapshot_block(code, message, count=1):
     return {"code": code, "message": message, "count": count}
 
 
-def _snapshot_state(*, project, run_ids):
+def _snapshot_state(*, project, run_ids, require_active_documents):
     selected_ids = sorted({int(run_id) for run_id in run_ids})
     blockers = []
     if project.status != Project.Status.HUMAN_SCOPE_REVIEW:
@@ -879,6 +879,13 @@ def _snapshot_state(*, project, run_ids):
     }
     accepted_by_key = defaultdict(set)
     for run in runs:
+        if require_active_documents and not run.document_revision.document.is_active:
+            blockers.append(
+                _snapshot_block(
+                    "document_archived",
+                    "This document is archived and is not part of the active project information.",
+                )
+            )
         if run.status != AnalysisRun.Status.SUCCEEDED:
             blockers.append(
                 _snapshot_block("run_not_succeeded", f"Analysis Run #{run.pk} has not succeeded.")
@@ -1020,14 +1027,19 @@ def _snapshot_state(*, project, run_ids):
 
 
 def snapshot_readiness(*, project, run_ids):
-    return _snapshot_state(project=project, run_ids=run_ids)
+    return _snapshot_state(project=project, run_ids=run_ids, require_active_documents=True)
+
+
+def snapshot_freshness(*, project, run_ids):
+    """Evaluate frozen source/review divergence without treating archive as staleness."""
+    return _snapshot_state(project=project, run_ids=run_ids, require_active_documents=False)
 
 
 def create_intelligence_snapshot(*, project, creator, run_ids):
     _require_operator(creator, project.organization)
     with transaction.atomic():
         locked_project = Project.objects.select_for_update().get(pk=project.pk)
-        state = _snapshot_state(project=locked_project, run_ids=run_ids)
+        state = snapshot_readiness(project=locked_project, run_ids=run_ids)
         if not state["eligible"]:
             raise ValidationError(
                 {"snapshot": [blocker["message"] for blocker in state["blockers"]]}
@@ -1120,9 +1132,14 @@ def approve_intelligence_snapshot(*, snapshot, approver, approval_note=""):
         if existing:
             return existing, False
         run_ids = list(current.sources.values_list("analysis_run_id", flat=True))
-        state = _snapshot_state(project=current.project, run_ids=run_ids)
-        if not state["eligible"] or state["fingerprint"] != current.fingerprint:
+        freshness = snapshot_freshness(project=current.project, run_ids=run_ids)
+        operational = snapshot_readiness(project=current.project, run_ids=run_ids)
+        if not freshness["eligible"] or freshness["fingerprint"] != current.fingerprint:
             blocked_snapshot = current
+            blocked_reason = "stale"
+        elif not operational["eligible"]:
+            blocked_snapshot = current
+            blocked_reason = "document_archived"
         else:
             approval = ProjectIntelligenceApproval(
                 project=current.project,
@@ -1131,8 +1148,8 @@ def approve_intelligence_snapshot(*, snapshot, approver, approval_note=""):
                 approval_note=(approval_note or "").strip(),
                 readiness_result={
                     "eligible": True,
-                    "fingerprint": state["fingerprint"],
-                    "summary_counts": state["summary_counts"],
+                    "fingerprint": freshness["fingerprint"],
+                    "summary_counts": freshness["summary_counts"],
                 },
             )
             approval.full_clean()
@@ -1150,7 +1167,7 @@ def approve_intelligence_snapshot(*, snapshot, approver, approval_note=""):
                     "approval_id": approval.pk,
                 },
             )
-    if blocked_snapshot:
+    if blocked_snapshot and blocked_reason == "stale":
         record_event(
             organization=blocked_snapshot.project.organization,
             project=blocked_snapshot.project,
@@ -1164,5 +1181,14 @@ def approve_intelligence_snapshot(*, snapshot, approver, approval_note=""):
         )
         raise ValidationError(
             {"snapshot": "snapshot_stale: Create a new snapshot from the current reviewed state."}
+        )
+    if blocked_snapshot:
+        raise ValidationError(
+            {
+                "snapshot": (
+                    "document_archived: One of the source documents for this version is archived. "
+                    "Restore the document or prepare a new project-information version."
+                )
+            }
         )
     return approval, True

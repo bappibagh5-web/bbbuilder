@@ -47,6 +47,7 @@ from apps.analysis.services import (
     resolve_conflict,
     retry_analysis_run,
     review_finding,
+    snapshot_freshness,
     snapshot_readiness,
 )
 from apps.documents.models import (
@@ -57,6 +58,7 @@ from apps.documents.models import (
     FileAsset,
     ProjectFile,
 )
+from apps.documents.services import set_document_active
 from apps.organizations.models import Membership, Organization
 from apps.processing.models import ProcessingJob
 from apps.projects.models import AuditEvent, Project
@@ -1280,6 +1282,88 @@ def test_historical_revision_cannot_create_new_snapshot(revision, user, membersh
     assert state["eligible"] is False
     assert "revision_not_current" in {item["code"] for item in state["blockers"]}
     assert replacement.document_id != revision.document_id
+
+
+def test_archived_document_is_excluded_from_new_snapshot_and_restore_recovers_readiness(
+    revision, user, membership, organization
+):
+    run, _ = snapshot_ready_run(revision, user)
+    document = revision.document
+    set_document_active(document=document, is_active=False, actor=user)
+    state = snapshot_readiness(project=document.project, run_ids=[run.pk])
+    assert state["eligible"] is False
+    assert "document_archived" in {item["code"] for item in state["blockers"]}
+    endpoint = reverse(
+        "intelligence-readiness",
+        kwargs={"organization_slug": organization.slug, "project_pk": document.project_id},
+    )
+    assert client_for(user).get(endpoint).data["candidate_runs"] == []
+    set_document_active(document=document, is_active=True, actor=user)
+    assert snapshot_readiness(project=document.project, run_ids=[run.pk])["eligible"] is True
+
+
+def test_archive_blocks_draft_approval_without_creating_staleness(
+    revision, user, membership, organization
+):
+    run, _ = snapshot_ready_run(revision, user)
+    snapshot, _ = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    fingerprint = snapshot.fingerprint
+    manifest = snapshot.manifest
+    set_document_active(document=revision.document, is_active=False, actor=user)
+
+    fresh = snapshot_freshness(project=revision.document.project, run_ids=[run.pk])
+    assert fresh["eligible"] is True and fresh["fingerprint"] == fingerprint
+    with pytest.raises(ValidationError, match="document_archived"):
+        approve_intelligence_snapshot(snapshot=snapshot, approver=user)
+    snapshot.refresh_from_db()
+    assert snapshot.fingerprint == fingerprint and snapshot.manifest == manifest
+    assert not ProjectIntelligenceApproval.objects.filter(snapshot=snapshot).exists()
+
+    detail = reverse(
+        "intelligence-snapshot-detail",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "snapshot_pk": snapshot.pk,
+        },
+    )
+    payload = client_for(user).get(detail).data
+    assert payload["is_stale"] is False
+    assert payload["approval_blockers"][0]["code"] == "document_archived"
+    assert payload["sources"][0]["document_is_active"] is False
+
+    set_document_active(document=revision.document, is_active=True, actor=user)
+    approval, created = approve_intelligence_snapshot(snapshot=snapshot, approver=user)
+    assert created is True and approval.snapshot_id == snapshot.pk
+
+
+def test_approved_snapshot_remains_approved_and_fresh_when_source_is_archived(
+    revision, user, membership, organization
+):
+    run, _ = snapshot_ready_run(revision, user)
+    snapshot, _ = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    approval, _ = approve_intelligence_snapshot(snapshot=snapshot, approver=user)
+    fingerprint, manifest = snapshot.fingerprint, snapshot.manifest
+    set_document_active(document=revision.document, is_active=False, actor=user)
+    detail = reverse(
+        "intelligence-snapshot-detail",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+            "snapshot_pk": snapshot.pk,
+        },
+    )
+    payload = client_for(user).get(detail).data
+    snapshot.refresh_from_db()
+    approval.refresh_from_db()
+    assert payload["is_stale"] is False
+    assert payload["approval"]["id"] == approval.pk
+    assert payload["sources"][0]["document_is_active"] is False
+    assert snapshot.fingerprint == fingerprint and snapshot.manifest == manifest
 
 
 def test_snapshot_approval_self_approval_idempotency_and_staleness(revision, user, membership):

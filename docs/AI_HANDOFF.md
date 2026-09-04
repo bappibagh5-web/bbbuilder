@@ -41,6 +41,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - M1-12 — Real BB Builders Project Validation & Milestone Polish: complete
 - Milestone 1: complete
 - M1-UX-01 — Non-Technical Document Review UX: complete
+- M1-UX-02A — Document Archive / Restore: complete; automated validation and client manual acceptance passed September 5, 2026
 - Milestone 2: not started
 - Working tree: clean
 - Ahead/behind: `0/0`
@@ -65,6 +66,10 @@ M1-12 is the final Milestone 1 task. It must validate the complete production jo
 - Approval leaves the project at `human_scope_review`. Milestone 2 owns trade-package creation and readiness.
 
 See `DECISIONS.md`, `DATA_MODEL.md`, and `BUSINESS_RULES.md` for canonical detail.
+
+### Document archive policy
+
+Document archive controls active workflow membership; it never deletes or rewrites files, revisions, processing, analysis, findings, reviews, provenance, snapshots, approvals, or audit history. Archived documents are excluded from normal Document Review selection and new project-information source selection. When no active documents remain, the document-specific area shows an empty state without an AI action while project-wide historical versions and approvals remain readable. An archived source blocks approval of an unapproved snapshot, but archive state alone does not make the frozen snapshot stale or change its fingerprint. Already approved historical versions remain approved and readable. Restoring a source may recover draft approval eligibility when its meaningful frozen source/review state is otherwise current.
 
 ## M1-11 manual validation
 

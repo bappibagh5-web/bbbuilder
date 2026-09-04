@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    DocumentArchiveView,
+    DocumentReactivateView,
     DocumentRevisionViewSet,
     DocumentViewSet,
     NewDocumentUploadView,
@@ -31,6 +33,16 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:pk>/",
         document_detail,
         name="document-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/archive/",
+        DocumentArchiveView.as_view(),
+        name="document-archive",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/reactivate/",
+        DocumentReactivateView.as_view(),
+        name="document-reactivate",
     ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/revisions/",

@@ -95,7 +95,7 @@ export type SnapshotEntry = {
 };
 export type SnapshotSource = {
   id: number; analysis_run: number; document: number; document_title: string;
-  document_revision: number; revision_label: string; entries: SnapshotEntry[];
+  document_revision: number; revision_label: string; document_is_active: boolean; entries: SnapshotEntry[];
 };
 export type IntelligenceApproval = {
   id: number; project: number; snapshot: number; approver: string; approved_at: string;
@@ -105,6 +105,7 @@ export type IntelligenceSnapshot = {
   id: number; project: number; version: number; fingerprint: string; schema_version: string;
   summary_counts: Record<string, number>; created_by: string; created_at: string;
   sources: SnapshotSource[]; approval: IntelligenceApproval | null; is_stale: boolean;
+  approval_blockers?: IntelligenceBlocker[];
 };
 
 function projectPath(slug: string, projectId: string | number) {

@@ -70,6 +70,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "project",
+            "is_active",
             "current_revision",
             "revision_count",
             "created_by",

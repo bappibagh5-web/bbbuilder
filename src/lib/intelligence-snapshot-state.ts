@@ -4,7 +4,10 @@ export function snapshotActions(canOperate: boolean, readiness: IntelligenceRead
   return {
     canCreate: canOperate && Boolean(readiness?.eligible),
     canApprove: (snapshot: IntelligenceSnapshot) =>
-      canOperate && !snapshot.approval && !snapshot.is_stale,
+      canOperate &&
+      !snapshot.approval &&
+      !snapshot.is_stale &&
+      !(snapshot.approval_blockers?.length ?? 0),
   };
 }
 

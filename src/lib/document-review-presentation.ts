@@ -43,6 +43,21 @@ export const documentReviewScopeCopy = {
   projectWideExplanation: "Reviewed information from your current project documents is combined here before final approval.",
 } as const;
 
+export const emptyActiveDocumentReviewCopy = {
+  title: "No active documents ready for review",
+  detail: "Restore an archived document or upload a new document to start a review.",
+} as const;
+
+export function reviewSectionVisibility(activeDocumentRevisionCount: number) {
+  const hasActiveDocumentReview = activeDocumentRevisionCount > 0;
+  return {
+    showActiveDocumentReview: hasActiveDocumentReview,
+    showActiveEmptyState: !hasActiveDocumentReview,
+    showReviewWithAi: hasActiveDocumentReview,
+    showProjectWideHistory: true,
+  };
+}
+
 export function categoryLabel(category: string) {
   return categoryPresentation[category] ?? "Project Details";
 }
@@ -142,7 +157,7 @@ export function reviewStages(input: {
     your_review: humanComplete ? "All items confirmed or excluded" : "Confirm, edit or exclude items",
     approved: input.approved ? "Approved project information saved" : "Save as approved project information",
   };
-  const labels = { uploaded: "Uploaded", prepared: "Prepared", ai_reviewed: "AI Reviewed", your_review: "Your Review", approved: "Approved" };
+  const labels = { uploaded: "Uploaded", prepared: "Prepared", ai_reviewed: "AI Review", your_review: "Your Review", approved: "Approved" };
   return order.map((key, index) => ({
     key,
     label: labels[key],

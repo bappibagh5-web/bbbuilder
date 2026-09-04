@@ -5,11 +5,13 @@ import {
   categoryLabel,
   decisionLabel,
   documentReviewScopeCopy,
+  emptyActiveDocumentReviewCopy,
   documentVersionLabel,
   plainAnalysisStatus,
   progressPresentation,
   reviewCounts,
   reviewStages,
+  reviewSectionVisibility,
   snapshotPresentation,
   versionSummary,
   versionDetailsButtonLabel,
@@ -29,6 +31,26 @@ test("distinguishes selected-document review from project-wide approval", () => 
   assert.equal(documentReviewScopeCopy.projectWideHeading, "Project Information for Approval");
   assert.equal(documentReviewScopeCopy.projectWideBadge, "Project-wide");
   assert.match(documentReviewScopeCopy.projectWideExplanation, /current project documents/);
+});
+
+test("zero active documents preserve project-wide historical information", () => {
+  assert.deepEqual(reviewSectionVisibility(0), {
+    showActiveDocumentReview: false,
+    showActiveEmptyState: true,
+    showReviewWithAi: false,
+    showProjectWideHistory: true,
+  });
+  assert.equal(emptyActiveDocumentReviewCopy.title, "No active documents ready for review");
+  assert.match(emptyActiveDocumentReviewCopy.detail, /Restore an archived document/);
+});
+
+test("active document review and project-wide history render together", () => {
+  assert.deepEqual(reviewSectionVisibility(1), {
+    showActiveDocumentReview: true,
+    showActiveEmptyState: false,
+    showReviewWithAi: true,
+    showProjectWideHistory: true,
+  });
 });
 
 test("distinguishes current and older document versions", () => {
@@ -76,6 +98,7 @@ test("version manifest is collapsed by default and exposes an explicit toggle", 
 
 test("stage mapping uses existing persisted states without another workflow", () => {
   const stages = reviewStages({ uploaded: true, sourceStatus: "succeeded", pdfStatus: "succeeded", pageCount: 8, runStatus: "succeeded", findingCount: 8, needsAttention: 1, approved: false });
+  assert.deepEqual(stages.map((stage) => stage.label), ["Uploaded", "Prepared", "AI Review", "Your Review", "Approved"]);
   assert.deepEqual(stages.map((stage) => stage.state), ["completed", "completed", "completed", "current", "upcoming"]);
   const approved = reviewStages({ uploaded: true, sourceStatus: "succeeded", pdfStatus: "succeeded", pageCount: 8, runStatus: "succeeded", findingCount: 8, needsAttention: 0, approved: true });
   assert.ok(approved.every((stage) => stage.state === "completed"));

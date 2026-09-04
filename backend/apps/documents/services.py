@@ -7,6 +7,29 @@ from .models import Document, DocumentRevision
 
 
 @transaction.atomic
+def set_document_active(*, document: Document, is_active: bool, actor):
+    locked = (
+        Document.objects.select_for_update()
+        .select_related("project__organization")
+        .get(pk=document.pk)
+    )
+    if locked.is_active == is_active:
+        return locked, False
+    locked.is_active = is_active
+    locked.full_clean()
+    locked.save(update_fields=("is_active", "updated_at"))
+    record_event(
+        organization=locked.project.organization,
+        project=locked.project,
+        actor=actor,
+        action_code="document.reactivated" if is_active else "document.archived",
+        target=locked,
+        metadata={"is_active": is_active},
+    )
+    return locked, True
+
+
+@transaction.atomic
 def set_current_revision(*, document: Document, revision: DocumentRevision | None, actor):
     locked_document = Document.objects.select_for_update().get(pk=document.pk)
     if revision is not None and revision.document_id != locked_document.pk:

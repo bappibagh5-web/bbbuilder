@@ -26,7 +26,7 @@ from .serializers import (
     NewDocumentUploadSerializer,
     RevisionUploadSerializer,
 )
-from .services import set_current_revision
+from .services import set_current_revision, set_document_active
 from .storage import ObjectStorageError, get_object_storage
 from .uploads import upload_document_revision, upload_new_document
 
@@ -98,23 +98,41 @@ class DocumentViewSet(
             raise serializers.ValidationError(
                 {"detail": "Documents in an archived project cannot be changed."}
             )
-        fields = ("title", "category", "discipline", "description", "is_active")
+        fields = ("title", "category", "discipline", "description")
         before = {field: getattr(document, field) for field in fields}
         document = serializer.save()
         after = {field: getattr(document, field) for field in fields}
         changed = [field for field in fields if before[field] != after[field]]
         if changed:
-            action_code = "document.updated"
-            if "is_active" in changed:
-                action_code = "document.reactivated" if document.is_active else "document.archived"
             record_event(
                 organization=document.project.organization,
                 project=document.project,
                 actor=self.request.user,
-                action_code=action_code,
+                action_code="document.updated",
                 target=document,
                 metadata={"changed_fields": changed, "before": before, "after": after},
             )
+
+
+class DocumentArchiveView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+    is_active = False
+
+    def post(self, request, *args, **kwargs):
+        document = get_object_or_404(
+            document_queryset(self.get_project()), pk=self.kwargs["document_pk"]
+        )
+        try:
+            document, _ = set_document_active(
+                document=document, is_active=self.is_active, actor=request.user
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(DocumentSerializer(document).data)
+
+
+class DocumentReactivateView(DocumentArchiveView):
+    is_active = True
 
 
 class DocumentRevisionViewSet(

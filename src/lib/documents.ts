@@ -243,11 +243,23 @@ export const documentsApi = {
     slug: string,
     projectId: string | number,
     documentId: number,
-    values: Partial<Pick<ProductionDocument, "title" | "category" | "discipline" | "description" | "is_active">>,
+    values: Partial<Pick<ProductionDocument, "title" | "category" | "discipline" | "description">>,
   ) {
     return apiRequest<ProductionDocument>(
       `${projectPath(slug, projectId)}/documents/${documentId}/`,
       { method: "PATCH", body: JSON.stringify(values) },
+    );
+  },
+  archive(slug: string, projectId: string | number, documentId: number) {
+    return apiRequest<ProductionDocument>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/archive/`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+  reactivate(slug: string, projectId: string | number, documentId: number) {
+    return apiRequest<ProductionDocument>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/reactivate/`,
+      { method: "POST", body: JSON.stringify({}) },
     );
   },
   download(slug: string, projectId: string | number, documentId: number, revisionId: number) {

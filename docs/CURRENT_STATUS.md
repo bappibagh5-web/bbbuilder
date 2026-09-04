@@ -44,6 +44,8 @@ M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**
 
 M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
 
+M1-UX-02A — Document Archive / Restore is **complete**. Automated validation and client manual acceptance passed on September 5, 2026. It uses the existing `Document.is_active` state, preserves every file and historical record, excludes archived documents from active review and new project-information preparation, and keeps archive state separate from immutable snapshot staleness. When no active documents remain, Document Review retains readable project-wide versions and approvals. M2 remains not started.
+
 M1-01 currently includes:
 
 - Django 5.2 backend

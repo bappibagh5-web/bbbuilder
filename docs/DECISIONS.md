@@ -306,6 +306,16 @@ Normal user-facing screens should answer three questions without requiring backe
 
 **Consequence:** The end-to-end bidding workflow remains visible and predictable as later milestones replace placeholders, while individual screens can become easier to understand without destabilizing product information architecture.
 
+### D-040 — Document archive is operational membership, not historical staleness
+
+**Status:** Decided
+
+**Decision:** `Document.is_active` controls whether a document participates in the active project workflow. Archive and restore are explicit, organization/project/document-scoped, idempotent operator actions. They preserve the current revision, all immutable source bytes and revision history, processing and analysis records, findings and reviews, provenance, conflicts, snapshots, approvals, and audit history. Archived documents are excluded from normal Document Review selection, active project coverage, readiness candidates, and new snapshot creation.
+
+Snapshot creation readiness, pending-snapshot approval eligibility, and frozen-state freshness are evaluated separately. An archived source blocks approval of an unapproved snapshot but does not change its fingerprint or make it stale by itself. Restoring the source may recover approval eligibility if the frozen source/review state remains current. An already approved historical snapshot remains approved, immutable, readable, and fresh relative to archive state; historical displays may identify its source as archived.
+
+**Consequence:** Users can clean the active workspace without erasing evidence or corrupting the historical meaning of project-information versions. If every document is archived, the document-specific review area becomes empty but project-wide historical versions and approvals remain readable. Permanent deletion remains outside M1-UX-02A and requires a separately approved tombstone/purge design.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology
