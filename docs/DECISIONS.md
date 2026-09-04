@@ -288,6 +288,24 @@ Approval remains represented by immutable snapshot/approval history and leaves t
 
 **Consequence:** Users can verify meaningful production workflow history without turning the Activity tab into an administrative data-export surface or weakening the append-only audit boundary. Audit retention, tamper evidence, export, and privileged metadata access remain unresolved deployment decisions under U-012.
 
+### D-038 — Translate technical workflow state at the presentation boundary
+
+**Status:** Decided
+
+**Decision:** The normal production UI describes document processing and human control in construction/business language. Backend terms such as `ProcessingJob`, `AnalysisRun`, `ExtractedFinding`, and `ProjectIntelligenceSnapshot` remain unchanged and authoritative, while the UI presents Prepared documents, AI-assisted Document Review, review items, source locations, and Project Information Versions. Technical identifiers and diagnostics remain available under collapsed Advanced details. Presentation helpers deterministically map persisted state; they do not create a second workflow state machine.
+
+**Consequence:** Non-technical BB Builders users can understand what happened, what needs attention, where information came from, and what approval preserves without weakening provenance, append-only history, permissions, or auditability.
+
+### D-039 — Stable project workflow navigation
+
+**Status:** Decided
+
+**Decision:** The horizontal project workflow tabs are stable product navigation: Overview, Documents, Document Review, Scopes, Contractors, Outreach, Bids, Comparisons, Proposal, and Activity. Milestone or usability work may improve the content inside a tab but must not casually remove, replace, hide, or restructure the complete workflow navigation. The global application sidebar remains a separate navigation layer.
+
+Normal user-facing screens should answer three questions without requiring backend terminology: **What am I looking at? What happened? What do I need to do next?** Technical concepts remain available for support and audit use without becoming required knowledge for normal BB Builders users.
+
+**Consequence:** The end-to-end bidding workflow remains visible and predictable as later milestones replace placeholders, while individual screens can become easier to understand without destabilizing product information architecture.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

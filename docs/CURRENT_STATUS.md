@@ -42,6 +42,8 @@ M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**
 
 **Milestone 1 is COMPLETE. M2 is NEXT / NOT STARTED.**
 
+M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
+
 M1-01 currently includes:
 
 - Django 5.2 backend

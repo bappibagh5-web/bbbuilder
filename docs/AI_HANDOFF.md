@@ -40,6 +40,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - M1-01 through M1-11: complete and pushed
 - M1-12 — Real BB Builders Project Validation & Milestone Polish: complete
 - Milestone 1: complete
+- M1-UX-01 — Non-Technical Document Review UX: complete
 - Milestone 2: not started
 - Working tree: clean
 - Ahead/behind: `0/0`
@@ -115,6 +116,8 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 ## Next exact action
 
 Milestone 1 is complete. M2-01 is next but has not started. Before production acceptance, treat `LIVE_PROVIDER_SMOKE_RECOMMENDED` as a staging/UAT prerequisite; the live OpenAI provider has not been exercised and compatibility must not be claimed as proven.
+
+M1-UX-01 was manually accepted on numeric production Project 2. The UI presents `Uploaded → Prepared → AI Reviewed → Your Review → Approved`, familiar finding categories and decisions, understandable provenance, clear selected-document versus project-wide approval scope, concise collapsed project information versions, and Viewer read-only guidance. Technical run/provider/token/fingerprint information remains available only under collapsed Advanced details. No backend model/API semantics or commercial roadmap totals changed.
 
 ## Maintenance
 

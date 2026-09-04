@@ -318,6 +318,12 @@ GET /api/v1/organizations/{slug}/projects/{project_id}/audit-events/
 
 All active organization roles may read the project-scoped feed; mutation methods are unavailable. The response includes the event identity, action, safe target reference, actor display name, and UTC timestamp. Raw audit metadata is intentionally excluded from this general project feed because it may contain detailed before/after business values. Audit retention, export, and privileged detail access remain deployment-policy decisions.
 
+## Product navigation and language
+
+The horizontal project workflow—Overview, Documents, Document Review, Scopes, Contractors, Outreach, Bids, Comparisons, Proposal, and Activity—is stable product navigation. Implementation tasks may refine a tab's content but should not casually restructure the full workflow or confuse it with the global application sidebar.
+
+Normal production screens translate technical state into BB Builders business language and should make three things clear: what the user is looking at, what happened, and what they need to do next. Backend models, immutable history, provenance, permissions, and audit boundaries remain authoritative and unchanged by presentation terminology.
+
 ## Local ports
 
 | Service | Port | Purpose |

@@ -1,27 +1,17 @@
 "use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { projectWorkflowHref, projectWorkflowNavigation } from "@/lib/project-workflow-navigation";
 import { cn } from "@/lib/utils";
-const tabs = [
-  { label: "Overview", slug: "" },
-  { label: "Documents", slug: "documents" },
-  { label: "AI Review", slug: "ai-review" },
-  { label: "Scopes", slug: "scopes" },
-  { label: "Contractors", slug: "contractors" },
-  { label: "Outreach", slug: "outreach" },
-  { label: "Bids", slug: "bids" },
-  { label: "Comparisons", slug: "comparisons" },
-  { label: "Proposal", slug: "proposal" },
-  { label: "Activity", slug: "activity" },
-];
+
 export function ProjectWorkspaceTabs({ projectId }: { projectId: string }) {
   const path = usePathname();
-  const base = `/projects/${projectId}`;
   return (
-    <nav aria-label="Project workspace" className="overflow-x-auto border-b">
+    <nav aria-label="Project workflow" className="overflow-x-auto border-b">
       <div className="flex min-w-max">
-        {tabs.map((tab) => {
-          const href = tab.slug ? `${base}/${tab.slug}` : base;
+        {projectWorkflowNavigation.map((tab) => {
+          const href = projectWorkflowHref(projectId, tab.slug);
           const active = path === href;
           return (
             <Link
@@ -36,6 +26,7 @@ export function ProjectWorkspaceTabs({ projectId }: { projectId: string }) {
               )}
             >
               {tab.label}
+              {"badge" in tab && tab.badge && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">{tab.badge}</span>}
             </Link>
           );
         })}
