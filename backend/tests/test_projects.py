@@ -81,6 +81,16 @@ def contact_url(contact, organization=None, project=None):
     )
 
 
+def audit_events_url(project, organization=None):
+    return reverse(
+        "project-audit-event-list",
+        kwargs={
+            "organization_slug": (organization or project.organization).slug,
+            "project_pk": project.pk,
+        },
+    )
+
+
 @pytest.fixture
 def project(organization, user):
     return Project.objects.create(**project_values(organization, user))
@@ -453,6 +463,60 @@ def test_api_contact_audit_events(user, membership, project):
     assert AuditEvent.objects.filter(action_code="project_contact.updated").exists()
     assert AuditEvent.objects.filter(action_code="project_contact.deactivated").exists()
     assert AuditEvent.objects.filter(action_code="project_contact.reactivated").exists()
+
+
+def test_project_audit_api_is_scoped_read_only_and_omits_metadata(
+    organization, user, membership, project
+):
+    event = AuditEvent.objects.create(
+        organization=organization,
+        project=project,
+        actor=user,
+        action_code="project.created",
+        target_type="projects.project",
+        target_id=str(project.pk),
+        metadata={"private_detail": "not exposed"},
+    )
+    client = authenticated_client(user)
+
+    response = client.get(audit_events_url(project))
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"] == [
+        {
+            "id": event.pk,
+            "action_code": "project.created",
+            "target_type": "projects.project",
+            "target_id": str(project.pk),
+            "actor": "Alex Morgan",
+            "occurred_at": response.data["results"][0]["occurred_at"],
+        }
+    ]
+    assert "metadata" not in response.data["results"][0]
+    assert client.post(audit_events_url(project), {}, format="json").status_code == 405
+    assert client.patch(audit_events_url(project), {}, format="json").status_code == 405
+    assert client.delete(audit_events_url(project)).status_code == 405
+
+    set_role(membership, Membership.Role.VIEWER)
+    assert client.get(audit_events_url(project)).status_code == 200
+
+
+def test_project_audit_api_denies_inactive_and_cross_organization_access(
+    organization, user, membership, project
+):
+    other = Organization.objects.create(name="Other Builder", slug="other-audit-builder")
+    other_project = Project.objects.create(
+        **project_values(other, user, project_number="OTHER-AUDIT-1")
+    )
+    client = authenticated_client(user)
+
+    assert client.get(audit_events_url(other_project)).status_code == 403
+    assert client.get(audit_events_url(other_project, organization=organization)).status_code == 404
+
+    membership.is_active = False
+    membership.save(update_fields=("is_active",))
+    assert client.get(audit_events_url(project)).status_code == 403
 
 
 def test_django_admin_project_and_contact_mutations_are_audited(organization, user):

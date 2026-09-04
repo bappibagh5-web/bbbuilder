@@ -38,7 +38,8 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - Latest pushed HEAD: `6016e4ab7476b89295cb873676e247b48530405a`
 - Latest completed and pushed task: M1-11 — Intelligence Snapshot, Approval & Audit
 - M1-01 through M1-11: complete and pushed
-- M1-12 — Real BB Builders Project Validation & Milestone Polish: next / not started
+- M1-12 — Real BB Builders Project Validation & Milestone Polish: complete
+- Milestone 1: complete
 - Milestone 2: not started
 - Working tree: clean
 - Ahead/behind: `0/0`
@@ -103,6 +104,8 @@ M1-12 should validate intake/upload/revisions, deterministic processing/indexing
 
 M1-12 does not include scope/trade-package generation, trade taxonomy, subcontractor discovery, RFQ/outreach, bid workflows, proposal generation, award workflow, or PM sync. Those belong to later milestones.
 
+The M1-12 implementation adds a safe read-only project Activity feed because persisted `AuditEvent` history previously had no production API/UI path. It also adds `docs/MILESTONE_1_ACCEPTANCE.md`, reconciles milestone documentation, and records the remaining production/UAT prerequisites. No new domain workflow, migration, provider call, or Milestone 2 feature was introduced.
+
 ## Business context and scope guard
 
 BB Builders is a Canadian commercial general contractor with substantial retail work plus restaurant and office work. Historical evidence includes heterogeneous tender/RFP packages, architectural/MEP/structural drawings, landlord and responsibility schedules, subtrade quotes, trade lists, estimate/proposal revisions, schedules, and submittals. Revisions, responsibility splits, quote qualifications, and human judgment matter. Consult `PROJECT_CONTEXT.md` and `REAL_WORKFLOW.md` for canonical context.
@@ -111,7 +114,7 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 ## Next exact action
 
-Begin M1-12 planning or implementation only after this continuity checkpoint is reviewed, committed, and pushed. Do not start M1-12 as part of this documentation task.
+Milestone 1 is complete. M2-01 is next but has not started. Before production acceptance, treat `LIVE_PROVIDER_SMOKE_RECOMMENDED` as a staging/UAT prerequisite; the live OpenAI provider has not been exercised and compatibility must not be claimed as proven.
 
 ## Maintenance
 

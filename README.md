@@ -308,6 +308,16 @@ GET/POST /api/v1/organizations/{slug}/projects/{project_id}/intelligence-snapsho
 
 Snapshot manifests and normalized relational rows freeze the exact runs, revisions, findings, effective reviews, reviewed values, and bounded page/sheet/task provenance. A canonical, key-sorted compact JSON representation is hashed with SHA-256; equivalent source/review state is idempotent, while a meaningful change creates the next project snapshot version. Approval targets one exact snapshot, is explicit and immutable, and rechecks the current review/source fingerprint so stale drafts cannot be approved. Admin and Estimator / Operator members may create and self-approve; Viewer members are read-only. Approval leaves the project in `human_scope_review`; Milestone 2 owns trade-package readiness.
 
+## Project audit history
+
+Numeric production projects expose a read-only Activity tab backed by server-side `AuditEvent` records:
+
+```text
+GET /api/v1/organizations/{slug}/projects/{project_id}/audit-events/
+```
+
+All active organization roles may read the project-scoped feed; mutation methods are unavailable. The response includes the event identity, action, safe target reference, actor display name, and UTC timestamp. Raw audit metadata is intentionally excluded from this general project feed because it may contain detailed before/after business values. Audit retention, export, and privileged detail access remain deployment-policy decisions.
+
 ## Local ports
 
 | Service | Port | Purpose |
@@ -357,6 +367,6 @@ The reset command permanently removes local infrastructure data. It does not rem
 
 ## Important demo disclosure
 
-All project data, subcontractors, bids, AI findings, communication activity, pricing, and client activity are fictional demonstration data.
+The repository preserves the approved fictional frontend demonstration for future procurement, bid, proposal, award, and downstream workflow screens. Numeric project routes are the Milestone 1 production path and use Django/PostgreSQL state for project intake, documents, processing, PDF indexing, structured analysis, human review, intelligence snapshots, approval, and project activity.
 
-The current frontend screens still use fictional deterministic data and temporary React state. M1-01 adds only the backend and local-infrastructure foundation: it does not add project CRUD, uploads, document processing, AI calls, authentication screens, procurement, bid, or proposal functionality.
+Fake-provider outputs are deterministic validation artifacts and are never presented as approved project facts until the human-review and snapshot-approval gates are completed. Milestone 1 does not include OCR, live-provider acceptance, production cloud deployment, trade packages, subcontractor discovery, outreach, bid leveling, proposals, awards, or project-management synchronization.

@@ -17,6 +17,7 @@ import { ProductionAIReviewModule } from "@/components/ai-review/production-ai-r
 import { ProductionProjectForm } from "./production-project-form";
 import { ProductionProjectStatus } from "./production-project-status";
 import { ProjectWorkspaceTabs } from "./project-workspace-tabs";
+import { ProductionProjectActivity } from "./production-project-activity";
 
 const workflowStates: Record<string, { title: string; description: string }> = {
   documents: { title: "No documents have been added", description: "Project documents will appear here after they are uploaded." },
@@ -27,7 +28,6 @@ const workflowStates: Record<string, { title: string; description: string }> = {
   bids: { title: "No bids have been received", description: "Bid submissions associated with this project will appear here." },
   comparisons: { title: "No bid comparisons are available", description: "Comparisons become available after eligible bids are received and reviewed." },
   proposal: { title: "No proposal has been prepared", description: "Client proposal information will appear here when it is ready." },
-  activity: { title: "No project activity is available", description: "Project workflow activity will appear here as production workflows are used." },
 };
 
 export function ProductionProjectWorkspace({ projectId }: { projectId: string }) {
@@ -85,7 +85,7 @@ function OrganizationProjectWorkspace({ projectId, membership }: { projectId: st
           <div className="flex flex-wrap gap-2">{canEdit && section === "overview" && <button type="button" onClick={() => setEditing((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-medium text-slate-700"><Pencil className="h-4 w-4" />{editing ? "Close Edit" : "Edit Project"}</button>}{isAdmin && <button type="button" onClick={() => void toggleArchive()} disabled={changingArchive} className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-medium text-slate-700 disabled:opacity-50">{project.is_active ? <Archive className="h-4 w-4" /> : <ArchiveRestore className="h-4 w-4" />}{changingArchive ? "Saving…" : project.is_active ? "Archive" : "Reactivate"}</button>}</div>
         </div>
       </header>
-      <div className="rounded-xl border bg-white"><ProjectWorkspaceTabs projectId={projectId} /><div className="p-4 sm:p-5">{section === "overview" ? editing && canEdit ? <ProductionProjectForm key={project.updated_at} organizationSlug={membership.organization.slug} project={project} onSaved={(saved) => { setProject(saved); setEditing(false); }} onCancel={() => setEditing(false)} /> : <ProjectMetadata project={project} /> : section === "documents" ? <ProductionDocumentsModule project={project} membership={membership} onProjectDocumentsUploaded={() => setProject((current) => current?.status === "draft" ? { ...current, status: "documents_uploaded" } : current)} /> : section === "ai-review" ? <ProductionAIReviewModule project={project} membership={membership} /> : futureState ? <FutureWorkflowState {...futureState} /> : <WorkspaceState title="Page not found" detail="This project workspace page is not available." error />}</div></div>
+      <div className="rounded-xl border bg-white"><ProjectWorkspaceTabs projectId={projectId} /><div className="p-4 sm:p-5">{section === "overview" ? editing && canEdit ? <ProductionProjectForm key={project.updated_at} organizationSlug={membership.organization.slug} project={project} onSaved={(saved) => { setProject(saved); setEditing(false); }} onCancel={() => setEditing(false)} /> : <ProjectMetadata project={project} /> : section === "documents" ? <ProductionDocumentsModule project={project} membership={membership} onProjectDocumentsUploaded={() => setProject((current) => current?.status === "draft" ? { ...current, status: "documents_uploaded" } : current)} /> : section === "ai-review" ? <ProductionAIReviewModule project={project} membership={membership} /> : section === "activity" ? <ProductionProjectActivity project={project} membership={membership} /> : futureState ? <FutureWorkflowState {...futureState} /> : <WorkspaceState title="Page not found" detail="This project workspace page is not available." error />}</div></div>
     </div>
   );
 }

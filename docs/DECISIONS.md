@@ -280,6 +280,14 @@ Approval remains represented by immutable snapshot/approval history and leaves t
 
 **Consequence:** Approved project intelligence can cover several tender documents without arbitrary historical-run mixing or finding cherry-picking, while preserving exact evidence and maintaining the Milestone 2 boundary.
 
+### D-037 — Safe project activity feed boundary
+
+**Status:** Decided
+
+**Decision:** Milestone 1 exposes project audit history through an organization- and project-scoped, paginated, read-only API. Active Admin, Estimator / Operator, and Viewer memberships may read safe event identity, action code, target reference, actor display name, and timestamp. The general project Activity feed does not expose raw `AuditEvent.metadata`; detailed before/after values may include business or contact information and require a future privileged audit/export policy. No product API may create, update, or delete audit events.
+
+**Consequence:** Users can verify meaningful production workflow history without turning the Activity tab into an administrative data-export surface or weakening the append-only audit boundary. Audit retention, tamper evidence, export, and privileged metadata access remain unresolved deployment decisions under U-012.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

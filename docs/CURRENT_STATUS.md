@@ -38,7 +38,9 @@ M1-10 — Provenance, Findings & Human Review is **complete**. Automated validat
 
 M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated validation and authenticated Admin/Estimator and Viewer browser validation against the real local PostgreSQL-backed workflow passed on September 3, 2026.
 
-M1-12 — Real BB Builders Project Validation & Milestone Polish is **next / not started**.
+M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
+
+**Milestone 1 is COMPLETE. M2 is NEXT / NOT STARTED.**
 
 M1-01 currently includes:
 
@@ -120,7 +122,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-11 are complete. M1-12 has not started.
+M1-04 through M1-12 are complete. Milestone 1 is complete; M2 has not started.
 
 M1-05 currently includes:
 
@@ -281,9 +283,22 @@ M1-11 currently includes:
 - Zero AI, OpenAI, OCR, vision, or provider calls in snapshot creation, readiness, and approval
 - Manual validation confirmed explicit fake-provider Run #5 review, immutable Snapshot V1 creation and approval, refresh/login persistence, Viewer read-only history, append-only review/snapshot versions, duplicate-submit idempotency, and controlled stale-V2 approval rejection without changing project status
 
-## Next implementation task
+## Current implementation status
 
-M1-12 — Real BB Builders Project Validation & Milestone Polish is next / not started and requires separate explicit approval after M1-11 manual validation and finalization.
+M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
+
+M1-12 currently includes:
+
+- Milestone-wide acceptance audit across M1-01 through M1-11
+- Review of genuine local BB Builders architectural, mechanical, electrical, structural, construction-SOW, and landlord-criteria evidence without copying customer artifacts into Git
+- Production project Activity feed backed by a paginated, organization/project-scoped read-only AuditEvent API
+- Viewer-readable business history with mutation denied and raw audit metadata excluded from the general feed
+- Durable `docs/MILESTONE_1_ACCEPTANCE.md` acceptance record and explicit limitation/deployment prerequisite inventory
+- Static production-provider compatibility audit only; no live provider request was made
+
+The focused Activity validation was accepted on September 4, 2026. Numeric Project 2 renders production AuditEvent history without fixture fallback; Viewer access is read-only, the API is organization/project scoped and GET-only, and raw audit metadata is excluded. The earlier placeholder observation was caused by a stopped/stale Next.js development server and required no code or database correction.
+
+Milestone 1 is complete. M2 is next and has not started. Live OpenAI compatibility is not proven: `LIVE_PROVIDER_SMOKE_RECOMMENDED` is a staging/UAT prerequisite and requires separate authorization.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
@@ -576,7 +591,7 @@ Original AI values must never be overwritten by human edits.
 
 #### M1-11 — Intelligence Snapshot, Approval & Audit
 
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Create the controlled output of Milestone 1.
 
@@ -593,7 +608,7 @@ Only approved intelligence becomes eligible for later bidding workflows.
 
 #### M1-12 — Real BB Builders Project Validation & Milestone Polish
 
-**Status:** Planned
+**Status:** Complete
 
 **Purpose:** Validate the completed milestone using representative BB Builders historical material.
 

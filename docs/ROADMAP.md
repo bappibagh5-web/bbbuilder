@@ -106,8 +106,8 @@ Downstream milestones must not create a competing source of truth for approved u
 | M1-08 PDF Page / Sheet Indexing | COMPLETE |
 | M1-09 Structured AI Analysis | COMPLETE |
 | M1-10 Provenance, Findings & Human Review | COMPLETE |
-| M1-11 Intelligence Snapshot, Approval & Audit | **NEXT / NOT STARTED** |
-| M1-12 Real BB Builders Project Validation & Milestone Polish | NOT STARTED |
+| M1-11 Intelligence Snapshot, Approval & Audit | COMPLETE |
+| M1-12 Real BB Builders Project Validation & Milestone Polish | COMPLETE |
 
 ### M1-11 Intelligence Snapshot, Approval & Audit
 
@@ -351,10 +351,11 @@ New requested functionality must be evaluated for whether it is already within m
 
 ## 12. Current Approved Checkpoint
 
-- Latest completed and pushed task: **M1-10 — Provenance, Findings & Human Review**
-- Latest pushed commit when this roadmap was created: `e137e14c4260cd3832ac63877f80e28e8505b1f9`
-- Next task: **M1-11 — Intelligence Snapshot, Approval & Audit**
-- Status: **NOT STARTED**
+- Latest completed and pushed task: **M1-11 — Intelligence Snapshot, Approval & Audit**
+- Latest pushed commit before M1-12: `18d29a4a4e50455133fefc6886b5acc76785d4a1`
+- Latest completed local task: **M1-12 — Real BB Builders Project Validation & Milestone Polish**
+- Next task: **M2-01 — Approved Intelligence → Scope Domain Model**
+- Status: **MILESTONE 1 COMPLETE; M2 NEXT / NOT STARTED**
 
 Update this checkpoint when the roadmap materially requires it. `CURRENT_STATUS.md` remains authoritative for day-to-day execution position.
 

@@ -13,8 +13,8 @@ from .audit import (
     snapshot,
     update_action,
 )
-from .models import Project, ProjectContact
-from .serializers import ProjectContactSerializer, ProjectSerializer
+from .models import AuditEvent, Project, ProjectContact
+from .serializers import AuditEventSerializer, ProjectContactSerializer, ProjectSerializer
 
 
 class OrganizationContextMixin:
@@ -142,3 +142,26 @@ class ProjectContactViewSet(
                 target=contact,
                 metadata={"changed_fields": changed, "before": before, "after": after},
             )
+
+
+class ProjectAuditEventViewSet(
+    OrganizationContextMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = AuditEventSerializer
+    permission_classes = (OrganizationReadWritePermission,)
+    pagination_class = ProjectDomainPagination
+    http_method_names = ("get", "head", "options")
+
+    def get_project(self):
+        if not hasattr(self, "project"):
+            self.project = get_object_or_404(
+                Project,
+                pk=self.kwargs["project_pk"],
+                organization=self.get_organization(),
+            )
+        return self.project
+
+    def get_queryset(self):
+        return AuditEvent.objects.select_related("actor").filter(project=self.get_project())

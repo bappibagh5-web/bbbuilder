@@ -80,6 +80,22 @@ export type PaginatedProjects = {
   results: ProductionProject[];
 };
 
+export type ProjectAuditEvent = {
+  id: number;
+  action_code: string;
+  target_type: string;
+  target_id: string;
+  actor: string;
+  occurred_at: string;
+};
+
+export type PaginatedProjectAuditEvents = {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: ProjectAuditEvent[];
+};
+
 function organizationPath(slug: string) {
   return `/organizations/${encodeURIComponent(slug)}/projects`;
 }
@@ -104,6 +120,12 @@ export const projectsApi = {
     return apiRequest<ProductionProject>(
       `${organizationPath(slug)}/${encodeURIComponent(String(projectId))}/`,
       { method: "PATCH", body: JSON.stringify(payload) },
+    );
+  },
+  auditEvents(slug: string, projectId: string | number, page = 1, signal?: AbortSignal) {
+    return apiRequest<PaginatedProjectAuditEvents>(
+      `${organizationPath(slug)}/${encodeURIComponent(String(projectId))}/audit-events/?page=${page}`,
+      { signal },
     );
   },
 };

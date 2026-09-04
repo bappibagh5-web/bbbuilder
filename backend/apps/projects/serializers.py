@@ -7,7 +7,28 @@ from rest_framework.exceptions import PermissionDenied
 from apps.organizations.models import Membership
 from apps.organizations.services import active_membership
 
-from .models import Project, ProjectContact
+from .models import AuditEvent, Project, ProjectContact
+
+
+class AuditEventSerializer(serializers.ModelSerializer):
+    actor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditEvent
+        fields = (
+            "id",
+            "action_code",
+            "target_type",
+            "target_id",
+            "actor",
+            "occurred_at",
+        )
+        read_only_fields = fields
+
+    def get_actor(self, event):
+        if event.actor is None:
+            return "System"
+        return event.actor.get_full_name() or event.actor.email
 
 
 class OffsetDateTimeField(serializers.DateTimeField):
