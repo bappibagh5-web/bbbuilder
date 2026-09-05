@@ -40,6 +40,7 @@ from .prompts import (
 )
 from .providers import ProviderFailure, get_analysis_provider
 from .rendering import PageRenderFailure, render_page_data_url
+from .sanitization import sanitize_provider_value
 from .schemas import DOCUMENT_SCHEMA_VERSION, PAGE_SCHEMA_VERSION, json_schema_for, validate_result
 
 logger = logging.getLogger(__name__)
@@ -335,13 +336,17 @@ def _execute_task(task, provider, page_results):
         schema=json_schema_for(task.task_type),
         image_data_url=image,
     )
-    validated = validate_result(task.task_type, result.structured_output)
+    sanitized_output = sanitize_provider_value(result.structured_output)
+    validated = validate_result(task.task_type, sanitized_output)
     _validate_evidence(task, validated)
     task.status = AnalysisTaskRun.Status.SUCCEEDED
     task.finished_at = timezone.now()
     task.structured_result = validated
-    task.provider_request_id = result.request_id
-    task.usage_metadata = {**(result.usage or {}), **render_metadata}
+    task.provider_request_id = sanitize_provider_value(result.request_id)
+    task.usage_metadata = {
+        **sanitize_provider_value(result.usage or {}),
+        **render_metadata,
+    }
     task.error_code = ""
     task.safe_error_message = ""
     task.save(
@@ -572,6 +577,21 @@ def _normalized_value(category, value):
     return normalized
 
 
+def _grounded_excerpt(excerpt, page_text):
+    if not excerpt:
+        return None
+    if excerpt in page_text:
+        return excerpt, "exact"
+    chunks = excerpt.split()
+    if not chunks:
+        return None
+    pattern = re.compile(r"\s+".join(re.escape(chunk) for chunk in chunks))
+    matches = list(pattern.finditer(page_text))
+    if len(matches) != 1:
+        return None
+    return matches[0].group(0), "whitespace"
+
+
 def _latest_conflicts(queryset):
     return [conflict for conflict in queryset if not hasattr(conflict, "superseded_by")]
 
@@ -638,8 +658,48 @@ def materialize_findings(*, analysis_run, actor):
                 status=AnalysisTaskRun.Status.SUCCEEDED,
             ).select_related("document_page__drawing_sheet")
         }
+        provenance_counts = {
+            "candidates_considered": len(validated["candidates"]),
+            "candidates_materialized": 0,
+            "candidates_skipped_no_valid_provenance": 0,
+            "evidence_refs_accepted_exact": 0,
+            "evidence_refs_recovered_whitespace": 0,
+            "evidence_refs_rejected_invalid": 0,
+        }
         created_count = 0
         for candidate in validated["candidates"]:
+            grounded_sources = []
+            for evidence in candidate["evidence"]:
+                page_task = page_tasks.get(evidence["document_page_id"])
+                if not page_task or page_task.document_page.page_number != evidence["page_number"]:
+                    provenance_counts["evidence_refs_rejected_invalid"] += 1
+                    continue
+                page = page_task.document_page
+                sheet = getattr(page, "drawing_sheet", None)
+                if evidence.get("drawing_sheet_id") not in (None, sheet.pk if sheet else None):
+                    provenance_counts["evidence_refs_rejected_invalid"] += 1
+                    continue
+                excerpt = evidence["evidence_excerpt"]
+                if excerpt:
+                    grounded = _grounded_excerpt(excerpt, page.native_text)
+                    if grounded is None:
+                        provenance_counts["evidence_refs_rejected_invalid"] += 1
+                        continue
+                    excerpt, match_type = grounded
+                    provenance_counts[
+                        "evidence_refs_accepted_exact"
+                        if match_type == "exact"
+                        else "evidence_refs_recovered_whitespace"
+                    ] += 1
+                    mode = FindingSource.EvidenceMode.NATIVE_TEXT
+                else:
+                    provenance_counts["evidence_refs_accepted_exact"] += 1
+                    mode = FindingSource.EvidenceMode.VISUAL
+                grounded_sources.append((evidence, page_task, page, sheet, excerpt, mode))
+            if not grounded_sources:
+                provenance_counts["candidates_skipped_no_valid_provenance"] += 1
+                continue
+            provenance_counts["candidates_materialized"] += 1
             candidate_key = _stable_hash(candidate)
             finding, created = ExtractedFinding.objects.get_or_create(
                 analysis_run=run,
@@ -661,20 +721,7 @@ def materialize_findings(*, analysis_run, actor):
             if created:
                 finding.full_clean()
                 created_count += 1
-            for evidence in candidate["evidence"]:
-                page_task = page_tasks.get(evidence["document_page_id"])
-                if not page_task or page_task.document_page.page_number != evidence["page_number"]:
-                    raise ValidationError("Finding evidence does not belong to the analysis run.")
-                page = page_task.document_page
-                sheet = getattr(page, "drawing_sheet", None)
-                if evidence.get("drawing_sheet_id") not in (None, sheet.pk if sheet else None):
-                    raise ValidationError("Finding evidence sheet does not belong to its page.")
-                excerpt = evidence["evidence_excerpt"]
-                mode = (
-                    FindingSource.EvidenceMode.NATIVE_TEXT
-                    if excerpt
-                    else FindingSource.EvidenceMode.VISUAL
-                )
+            for evidence, page_task, page, sheet, excerpt, mode in grounded_sources:
                 source_values = {
                     "document_page_id": page.pk,
                     "drawing_sheet_id": sheet.pk if evidence.get("drawing_sheet_id") else None,
@@ -720,7 +767,7 @@ def materialize_findings(*, analysis_run, actor):
                 actor=actor,
                 action_code="findings.materialized",
                 target=run,
-                metadata={"finding_count": created_count},
+                metadata={"finding_count": created_count, **provenance_counts},
             )
     return run.findings.prefetch_related("sources", "reviews")
 

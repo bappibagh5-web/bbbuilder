@@ -316,6 +316,20 @@ Snapshot creation readiness, pending-snapshot approval eligibility, and frozen-s
 
 **Consequence:** Users can clean the active workspace without erasing evidence or corrupting the historical meaning of project-information versions. If every document is archived, the document-specific review area becomes empty but project-wide historical versions and approvals remain readable. Permanent deletion remains outside M1-UX-02A and requires a separately approved tombstone/purge design.
 
+### D-041 — Live provider persistence and strict provenance boundary
+
+**Status:** Decided
+
+**Decision:** Provider-returned structured values are recursively sanitized immediately before validation and durable persistence. Only U+0000 is replaced, using U+FFFD; other Unicode is preserved. Indexed page text, source files, hashes, rendering inputs, and immutable source material are never rewritten. The same boundary protects page and synthesis results. OpenAI requests use a named 240-second HTTP timeout while the established bounded retry count and fake-provider behavior remain unchanged.
+
+Finding materialization preserves `FindingSource.clean()` as the final strict invariant: a stored native-text excerpt must occur exactly in its indexed page text. Exact excerpts are retained unchanged. When an excerpt differs only in whitespace, materialization may recover the unique exact contiguous substring from the indexed page. Evidence that is ambiguous, non-contiguous, ellipsized, reordered, paraphrased, or otherwise ungrounded is rejected. A candidate with another valid source may proceed using only valid provenance; a candidate with no valid source is skipped without aborting other grounded findings. Aggregate acceptance/recovery/rejection counts are audited without logging source excerpts. Repeated preparation remains idempotent.
+
+Document Review source actions bind the source's exact document revision and 1-based page number. The browser PDF viewer receives `#page=N`; normal full-document opening remains unchanged, and historical sources never silently fall back to the current revision.
+
+The first controlled live OpenAI validation completed successfully on September 6, 2026 as Run 10 using `gpt-5-mini` against the eight-page JD Sports Intercity mechanical IFC drawing set. Strict provider-free materialization retained 30 of 34 synthesis candidates with 63 durable provenance sources. This validates the exercised local path, not every deployment environment or model revision.
+
+**Consequence:** Live provider text cannot break PostgreSQL JSON persistence, and human review receives only source-grounded findings without weakening exact provenance. Remaining performance work—bounded parallel page analysis, safe reuse/resume, and live x-of-N progress—is intentionally deferred for separate design and is not part of this decision's implementation.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

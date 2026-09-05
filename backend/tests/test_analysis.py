@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.error
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,9 +34,11 @@ from apps.analysis.providers import (
     ProviderResult,
 )
 from apps.analysis.rendering import PageRenderFailure, render_page_data_url
+from apps.analysis.sanitization import sanitize_provider_value
 from apps.analysis.schemas import validate_result
 from apps.analysis.services import (
     _claim_run,
+    _grounded_excerpt,
     approve_intelligence_snapshot,
     create_intelligence_snapshot,
     detect_conflicts,
@@ -219,6 +222,99 @@ class RecordingProvider:
             "synthesis",
             {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
         )
+
+
+def test_provider_value_sanitizer_is_recursive_and_null_only():
+    original = {
+        "plain": "unchanged",
+        "normal_unicode": "Mécanique — 温度",
+        "nested": {
+            "multiple": "before\x00middle\x00after",
+            "items": ["one\x00two", 7, None, {"deep": "\x00"}],
+        },
+    }
+
+    sanitized = sanitize_provider_value(original)
+
+    assert sanitized == {
+        "plain": "unchanged",
+        "normal_unicode": "Mécanique — 温度",
+        "nested": {
+            "multiple": "before�middle�after",
+            "items": ["one�two", 7, None, {"deep": "�"}],
+        },
+    }
+    assert original["nested"]["multiple"] == "before\x00middle\x00after"
+
+
+class NullCharacterProvider:
+    def analyze(self, **kwargs):
+        payload = kwargs["input_payload"]
+        if payload["task_type"] == "page_analysis":
+            page = DocumentPage.objects.get(pk=payload["page"]["document_page_id"])
+            result = valid_page_result(page)
+            result["summary"] = "Résumé \x00 unchanged Unicode — 温度"
+            result["candidates"][0]["value"] = "Supply\x00and\x00install"
+            result["candidates"][0]["evidence"][0]["evidence_excerpt"] = (
+                "PROVIDE & INSTALL\x00NEW WORK"
+            )
+            return ProviderResult(
+                result,
+                "request\x00id",
+                {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+            )
+        candidates = [
+            candidate
+            for item in payload["page_results"]
+            for candidate in item["result"]["candidates"]
+        ]
+        return ProviderResult(
+            {
+                "document_type_candidate": "drawings",
+                "document_summary": "Combined\x00summary",
+                "candidates": candidates,
+                "unresolved_questions": ["Confirm\x00scope"],
+            },
+            "synthesis\x00request",
+            {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+        )
+
+
+@override_settings(AI_PROVIDER_CLASS="tests.test_analysis.NullCharacterProvider")
+@patch(
+    "apps.analysis.services.render_page_data_url",
+    return_value=("data:image/png;base64,eA==", {}),
+)
+def test_null_characters_are_sanitized_before_page_and_synthesis_persistence(
+    render, revision, user
+):
+    original_page_text = list(revision.pages.order_by("id").values_list("id", "native_text"))
+    original_checksum = revision.project_file.file_asset.checksum
+
+    run = request_analysis_run(revision=revision, requested_by=user)
+    assert execute_analysis_run(run.pk) == {"outcome": "succeeded"}
+    run.refresh_from_db()
+    tasks = list(run.task_runs.select_related("document_page").order_by("id"))
+
+    assert run.status == AnalysisRun.Status.SUCCEEDED
+    assert all(task.status == AnalysisTaskRun.Status.SUCCEEDED for task in tasks)
+    assert "\x00" not in json.dumps(run.result_summary, ensure_ascii=False)
+    assert run.result_summary["document_summary"] == "Combined�summary"
+    assert run.result_summary["unresolved_questions"] == ["Confirm�scope"]
+    page_task = tasks[0]
+    assert page_task.structured_result["summary"] == "Résumé � unchanged Unicode — 温度"
+    assert page_task.structured_result["candidates"][0]["value"] == ("Supply�and�install")
+    evidence = page_task.structured_result["candidates"][0]["evidence"][0]
+    assert evidence["evidence_excerpt"] == "PROVIDE & INSTALL�NEW WORK"
+    assert evidence["document_page_id"] == page_task.document_page_id
+    assert evidence["page_number"] == page_task.document_page.page_number
+    assert page_task.provider_request_id == "request�id"
+    assert tasks[-1].provider_request_id == "synthesis�request"
+    assert list(revision.pages.order_by("id").values_list("id", "native_text")) == (
+        original_page_text
+    )
+    revision.project_file.file_asset.refresh_from_db()
+    assert revision.project_file.file_asset.checksum == original_checksum
 
 
 @override_settings(AI_PROVIDER_CLASS="tests.test_analysis.RecordingProvider")
@@ -689,7 +785,7 @@ def test_openai_success_parses_only_structured_output_and_usage():
     response.__enter__ = Mock(return_value=response)
     response.__exit__ = Mock(return_value=False)
     response.read.return_value = json.dumps(payload).encode()
-    with patch("apps.analysis.providers.urllib.request.urlopen", return_value=response):
+    with patch("apps.analysis.providers.urllib.request.urlopen", return_value=response) as urlopen:
         result = OpenAIAnalysisProvider().analyze(
             model="configured-model",
             system_prompt="final JSON only",
@@ -699,6 +795,7 @@ def test_openai_success_parses_only_structured_output_and_usage():
     assert result.structured_output == {"ok": True}
     assert result.request_id == "response-safe-id"
     assert result.usage["total_tokens"] == 3
+    assert urlopen.call_args.kwargs["timeout"] == 240
 
 
 @override_settings(AI_PROVIDER_CLASS="tests.test_analysis.RecordingProvider")
@@ -808,6 +905,87 @@ def test_successful_run_materializes_idempotent_findings_and_sources(revision, u
     )
     assert Project.objects.get(pk=revision.document.project_id).status == "human_scope_review"
     assert AuditEvent.objects.filter(action_code="findings.materialized").count() == 1
+
+
+@pytest.mark.parametrize(
+    ("excerpt", "page_text", "expected"),
+    [
+        ("Exact source text", "Before Exact source text After", ("Exact source text", "exact")),
+        (
+            "Supply   and\ninstall work",
+            "Before Supply and\r\ninstall work After",
+            ("Supply and\r\ninstall work", "whitespace"),
+        ),
+        ("Area 6476 sqm", "Area details from schedule 6476 sqm", None),
+        ("Supply ... work", "Supply and install work", None),
+        ("work Supply", "Supply work", None),
+        ("Provide equipment", "Supply equipment", None),
+        ("A  B", "A\nB then A\tB", None),
+    ],
+)
+def test_grounded_excerpt_requires_unique_contiguous_source(excerpt, page_text, expected):
+    assert _grounded_excerpt(excerpt, page_text) == expected
+
+
+def test_materialization_recovers_grounded_sources_and_skips_invalid_candidates(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    page_tasks = list(
+        run.task_runs.filter(task_type="page_analysis")
+        .select_related("document_page")
+        .order_by("id")
+    )
+    payload = deepcopy(run.result_summary)
+    valid = payload["candidates"][0]
+    valid_evidence = valid["evidence"][0]
+    valid_evidence["evidence_excerpt"] = "Bid   closes\nSeptember 15."
+    invalid_evidence = deepcopy(valid_evidence)
+    invalid_evidence["evidence_excerpt"] = "Bid ... September 15."
+    valid["evidence"].append(invalid_evidence)
+    invalid = payload["candidates"][1]
+    invalid["evidence"][0]["evidence_excerpt"] = "M01 ... PLAN"
+    synthesis = run.task_runs.get(task_type="document_synthesis")
+    AnalysisRun.objects.filter(pk=run.pk).update(result_summary=payload)
+    AnalysisTaskRun.objects.filter(pk=synthesis.pk).update(structured_result=payload)
+    run.refresh_from_db()
+    original_provider_output = deepcopy(run.result_summary)
+    original_page_text = list(revision.pages.order_by("id").values_list("id", "native_text"))
+
+    first = list(materialize_findings(analysis_run=run, actor=user))
+    second = list(materialize_findings(analysis_run=run, actor=user))
+
+    assert [finding.pk for finding in first] == [finding.pk for finding in second]
+    assert len(first) == 1
+    sources = list(first[0].sources.all())
+    assert len(sources) == 1
+    assert sources[0].evidence_excerpt == "Bid closes September 15."
+    assert sources[0].document_page_id == page_tasks[0].document_page_id
+    event = AuditEvent.objects.get(action_code="findings.materialized", target_id=str(run.pk))
+    assert event.metadata == {
+        "finding_count": 1,
+        "candidates_considered": 2,
+        "candidates_materialized": 1,
+        "candidates_skipped_no_valid_provenance": 1,
+        "evidence_refs_accepted_exact": 0,
+        "evidence_refs_recovered_whitespace": 1,
+        "evidence_refs_rejected_invalid": 2,
+    }
+    assert (
+        AuditEvent.objects.filter(
+            action_code="findings.materialized", target_id=str(run.pk)
+        ).count()
+        == 1
+    )
+    run.refresh_from_db()
+    assert run.result_summary == original_provider_output
+    assert list(revision.pages.order_by("id").values_list("id", "native_text")) == (
+        original_page_text
+    )
+
+    sources[0].evidence_excerpt = "Paraphrased evidence"
+    with pytest.raises(ValidationError, match="Excerpt must occur"):
+        sources[0].full_clean()
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "failed"])

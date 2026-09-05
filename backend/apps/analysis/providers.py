@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+OPENAI_REQUEST_TIMEOUT_SECONDS = 240
+
 
 class ProviderFailure(Exception):
     def __init__(self, code, message, *, transient=False):
@@ -56,7 +58,9 @@ class OpenAIAnalysisProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with urllib.request.urlopen(
+                request, timeout=OPENAI_REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 payload = json.loads(response.read())
         except urllib.error.HTTPError as error:
             if error.code == 429:

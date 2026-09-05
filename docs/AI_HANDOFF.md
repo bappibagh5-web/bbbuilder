@@ -102,7 +102,7 @@ Append-only validation proved that later review changes did not rewrite V1, stal
 - Keep `backend/.env` ignored. Never place API keys or passwords in chat, prompts, Git, or frontend code.
 - Repository and Git state override remembered conversation context.
 
-The local validation configuration has used the deterministic fake provider. No live OpenAI request or OpenAI API credit has been used during Milestone 1 validation. Do not assume the fake provider remains configured; a live-provider test requires explicit authorization.
+Milestone 1 acceptance used the deterministic fake provider. A separately authorized post-milestone smoke test later completed successfully as OpenAI Run 10 against the eight-page JD Sports Intercity mechanical IFC drawing set using `gpt-5-mini`. Never infer the effective provider from this document: inspect environment configuration without exposing secrets, and require explicit authorization before every paid run.
 
 ## M1-12 boundary
 
@@ -120,7 +120,9 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 ## Next exact action
 
-Milestone 1 is complete. M2-01 is next but has not started. Before production acceptance, treat `LIVE_PROVIDER_SMOKE_RECOMMENDED` as a staging/UAT prerequisite; the live OpenAI provider has not been exercised and compatibility must not be claimed as proven.
+Milestone 1 is complete. M2-01 is next but has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
+
+Staging/UAT must still validate the deployed environment, secrets, network behavior, latency, cost, and monitoring. Known performance work—bounded parallel page analysis, safe reuse/resume, and live x-of-N progress—has not been implemented and must not be assumed.
 
 M1-UX-01 was manually accepted on numeric production Project 2. The UI presents `Uploaded → Prepared → AI Reviewed → Your Review → Approved`, familiar finding categories and decisions, understandable provenance, clear selected-document versus project-wide approval scope, concise collapsed project information versions, and Viewer read-only guidance. Technical run/provider/token/fingerprint information remains available only under collapsed Advanced details. No backend model/API semantics or commercial roadmap totals changed.
 

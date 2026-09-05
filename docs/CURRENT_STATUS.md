@@ -46,6 +46,8 @@ M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validat
 
 M1-UX-02A — Document Archive / Restore is **complete**. Automated validation and client manual acceptance passed on September 5, 2026. It uses the existing `Document.is_active` state, preserves every file and historical record, excludes archived documents from active review and new project-information preparation, and keeps archive state separate from immutable snapshot staleness. When no active documents remain, Document Review retains readable project-wide versions and approvals. M2 remains not started.
 
+Post-Milestone-1 live-provider hardening is **complete**. On September 6, 2026, explicit OpenAI Run 10 successfully analyzed all eight pages of the JD Sports Intercity mechanical IFC drawing set with `gpt-5-mini`. The persisted run produced 34 synthesis candidates; strict materialization retained 30 grounded findings with 63 durable provenance sources and skipped four candidates without valid source evidence. Provider output is recursively protected from PostgreSQL-forbidden U+0000 characters, the OpenAI request timeout is 240 seconds, whitespace-only provenance differences are recovered to the unique exact indexed substring, and invalid non-contiguous, ellipsized, reordered, or paraphrased evidence is rejected. Source actions preserve the exact document revision and open the cited 1-based PDF page. No Milestone 2 functionality was introduced.
+
 M1-01 currently includes:
 
 - Django 5.2 backend
@@ -253,7 +255,7 @@ M1-09 currently includes:
 - Narrow audited `documents_uploaded` to `ai_analysis` transition with no transition to `human_scope_review`
 - Authenticated browser validation of persisted results, exact-page evidence, usage, history selection, explicit re-analysis, Viewer-safe actions, and machine-generated warnings
 - Real worker-down validation proving browser-created Run #4 remained durably queued in PostgreSQL, survived refresh, and was consumed naturally by a restarted Celery worker without retry, redispatch, replacement, or history mutation
-- All manual validation used the deterministic fake provider; no live OpenAI request or API credit was used
+- Milestone 1 acceptance originally used the deterministic fake provider; a separately authorized post-milestone live-provider validation subsequently succeeded as Run 10
 - M1-10 status: complete
 
 M1-10 currently includes:
@@ -302,7 +304,9 @@ M1-12 currently includes:
 
 The focused Activity validation was accepted on September 4, 2026. Numeric Project 2 renders production AuditEvent history without fixture fallback; Viewer access is read-only, the API is organization/project scoped and GET-only, and raw audit metadata is excluded. The earlier placeholder observation was caused by a stopped/stale Next.js development server and required no code or database correction.
 
-Milestone 1 is complete. M2 is next and has not started. Live OpenAI compatibility is not proven: `LIVE_PROVIDER_SMOKE_RECOMMENDED` is a staging/UAT prerequisite and requires separate authorization.
+Milestone 1 is complete. M2 is next and has not started. A controlled local live-provider smoke completed successfully with Run 10. Environment-specific staging/UAT validation, cost/latency evaluation, and operational monitoring remain required before production deployment.
+
+Known performance work remains intentionally unimplemented: bounded parallel page analysis, safe reuse/resume of previously completed page tasks across explicit runs, and live x-of-N progress. Those changes require a separately reviewed design and are not part of this hardening patch.
 
 Do not jump directly into project, document, or AI implementation before completing the planned task sequence.
 
