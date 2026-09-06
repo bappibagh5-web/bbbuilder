@@ -32,6 +32,7 @@ INSTALLED_APPS = [
 ]
 
 CONTRACTOR_DISCOVERY_PROVIDER = env("CONTRACTOR_DISCOVERY_PROVIDER", default="fake")
+GOOGLE_PLACES_API_KEY = env("GOOGLE_PLACES_API_KEY", default="")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

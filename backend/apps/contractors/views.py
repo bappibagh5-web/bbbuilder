@@ -1,6 +1,7 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
-from rest_framework import serializers
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -9,14 +10,18 @@ from apps.organizations.permissions import ActiveOrganizationMember, Organizatio
 from apps.scope_packages.models import ScopePackage
 
 from .models import ScopeContractorCandidate
+from .providers import ContractorProviderError
 from .serializers import CandidateSerializer, CandidateStatusSerializer, SearchSerializer
 from .services import discover_contractors, set_candidate_status
 
 
 def candidates(project):
-    return ScopeContractorCandidate.objects.filter(
+    queryset = ScopeContractorCandidate.objects.filter(
         project=project, scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE
     ).select_related("company", "scope_package")
+    if settings.CONTRACTOR_DISCOVERY_PROVIDER == "google_places":
+        queryset = queryset.exclude(company__external_provider="fake")
+    return queryset
 
 
 class CandidateListView(ProjectDocumentContextMixin, APIView):
@@ -46,11 +51,17 @@ class DiscoverySearchView(ProjectDocumentContextMixin, APIView):
                 actor=request.user,
                 city=serializer.validated_data["city"],
                 province=serializer.validated_data["province"],
+                country=serializer.validated_data["country"],
                 radius_km=serializer.validated_data.get("radius_km"),
                 keywords=serializer.validated_data.get("keywords", []),
             )
         except DjangoValidationError as error:
             raise serializers.ValidationError({"detail": error.messages}) from error
+        except ContractorProviderError as error:
+            return Response(
+                {"code": "contractor_provider_unavailable", "detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(
             {
                 "discovery_request_id": discovery.pk,

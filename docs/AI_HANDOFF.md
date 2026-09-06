@@ -43,7 +43,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - M1-UX-01 — Non-Technical Document Review UX: complete
 - M1-UX-02A — Document Archive / Restore: complete; automated validation and client manual acceptance passed September 5, 2026
 - M1-UX-03 — Smart Human Review: complete; deterministic exception triage passed automated and client manual validation September 6, 2026
-- Milestone 2: active; M2A-01 deterministic Trade Scope Builder and M2B-01 Contractor Discovery Foundation complete; outreach/M3 not started
+- Milestone 2: active; M2A-01, M2B-01, and M2B-02 Google Places Contractor Discovery complete; outreach/M3 not started
 - Working tree: clean
 - Ahead/behind: `0/0`
 
@@ -79,6 +79,10 @@ M2A-01 deterministically converts approved Project Information only into trade b
 ### M2B-01 contractor discovery foundation
 
 M2B-01 adds organization-scoped Company, Contact, and TradeCapability records plus project/scope candidate shortlists. Discovery is available only for the current Ready scope-package version, searches the internal network first, and invokes a configured provider only after an explicit user action. Provider access is abstracted behind deterministic fake and inactive Google Places implementations. Deduplication uses external provider ID, website domain, normalized phone, then normalized name plus city; ambiguous matches are preserved rather than silently merged. The fake provider and shortlist workflow were manually validated. Google Places is not active, no provider key is required, and outreach/M3 has not started.
+
+### M2B-02 Google Places contractor discovery
+
+M2B-02 activates backend-only Google Places API (New) Text Search behind the existing explicit Ready-scope discovery action. It uses controlled trade query expansion, project city/province/country, optional user keywords, a minimal response field mask, safe provider error mapping, internal-first results, and the established deterministic dedupe order. The first authorized live HVAC search for the JD Sports project returned 14 candidates. Historical fake-provider records are preserved for audit and testing but filtered from production-facing Google candidate lists; internal and real Google companies remain visible. The key exists only in ignored backend environment configuration. No automatic searches, OpenAI calls, outreach, or M3 behavior were added.
 
 ## M1-11 manual validation
 
@@ -129,7 +133,7 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 ## Next exact action
 
-Milestone 1 is complete. M2A-01 and M2B-01 are complete; outreach/M3 is next and has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
+Milestone 1 is complete. M2A-01, M2B-01, and M2B-02 are complete; outreach/M3 is next and has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
 
 Smart Human Review now derives machine handling from persisted evidence without another provider call. A finding is AI handled only when it is explicit or strongly supported, every provider evidence reference remains strictly and completely represented by exact revision/page provenance, it is not an open question, it has no open conflict, and no human review supersedes it. Human-reviewed decisions remain append-only and distinct. Snapshot entry decision `machine_handled` has no `FindingReview`; migration `analysis.0004` makes that honest representation possible. Run 10's current read-only split is 23 AI handled / 7 needing attention / 0 conflicting. Final project-information approval is still an authorized human action.
 

@@ -362,6 +362,16 @@ Candidate deduplication is deterministic and ordered: external provider/place ID
 
 **Consequence:** Estimators can discover and curate contractors for approved Ready bid scopes without losing organization isolation, provenance, or human control. External calls and outreach remain separate, explicitly authorized later work.
 
+### D-045 — Google Places discovery is explicit, minimal, and backend-only
+
+**Status:** Decided
+
+**Decision:** Google Places API (New) Text Search is the first live external contractor-discovery provider. It runs only after an authorized user explicitly searches one Ready scope package. Controlled queries expand HVAC / Mechanical, Plumbing, and Fire Protection / Sprinkler into trade-specific commercial search terms and append user keywords plus the project city, province, and country. General Requirements does not trigger an external search. The provider requests only place identity, display name, formatted address, phone, website, types, rating, and review count; it stores mapped business fields and bounded safe metadata rather than raw provider payloads.
+
+The API key is backend-only. Provider errors cross the application boundary only as safe controlled responses. Internal network matching remains first, and Google results reuse the established deterministic dedupe order. Historical fake-provider companies and candidates are retained but excluded from production-facing candidate lists while Google is active. A live JD Sports HVAC search returned 14 candidates and validated the explicit search path. Shortlisting remains human-controlled, and no discovery action creates outreach.
+
+**Consequence:** BB Builders can find real contractors without exposing credentials, making hidden calls, polluting production lists with test fixtures, or coupling discovery to outreach. Search cost remains tied to an explicit trade-level action, and historical test evidence stays intact.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

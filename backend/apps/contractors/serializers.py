@@ -12,9 +12,12 @@ class CompanySerializer(serializers.ModelSerializer):
             "website",
             "phone",
             "email",
+            "address",
             "city",
             "province",
+            "country",
             "source_type",
+            "external_provider",
             "is_active",
         )
         read_only_fields = fields
@@ -54,6 +57,7 @@ class SearchSerializer(serializers.Serializer):
     scope_package_id = serializers.IntegerField(min_value=1)
     city = serializers.CharField(max_length=120)
     province = serializers.CharField(max_length=80)
+    country = serializers.CharField(max_length=80, required=False, default="Canada")
     radius_km = serializers.IntegerField(
         min_value=1, max_value=500, required=False, allow_null=True
     )

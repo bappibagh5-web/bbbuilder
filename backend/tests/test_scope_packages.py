@@ -1,4 +1,6 @@
 import hashlib
+import json
+import urllib.error
 from types import SimpleNamespace
 
 import pytest
@@ -23,9 +25,12 @@ from apps.contractors.models import (
     TradeCapability,
 )
 from apps.contractors.providers import (
+    ContractorProviderError,
     ContractorResult,
     FakeContractorDiscoveryProvider,
     GooglePlacesContractorDiscoveryProvider,
+    build_search_queries,
+    map_google_place,
 )
 from apps.contractors.services import dedupe_company, discover_contractors, internal_companies
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
@@ -454,7 +459,7 @@ def test_dedupe_priority_and_ambiguous_name_do_not_merge(organization, user):
     )
 
 
-def test_fake_provider_and_google_shell_make_no_google_request():
+def test_fake_provider_remains_network_free():
     assert (
         len(
             FakeContractorDiscoveryProvider().search(
@@ -463,8 +468,172 @@ def test_fake_provider_and_google_shell_make_no_google_request():
         )
         == 1
     )
-    with pytest.raises(RuntimeError, match="not configured"):
-        GooglePlacesContractorDiscoveryProvider().search()
+
+
+def test_google_trade_query_construction_is_controlled():
+    assert build_search_queries(
+        trade_key="hvac-mechanical",
+        city="Thunder Bay",
+        province="Ontario",
+        country="CA",
+        keywords=["retail", "retail"],
+    ) == [
+        "commercial HVAC contractor retail Thunder Bay Ontario Canada",
+        "mechanical contractor retail Thunder Bay Ontario Canada",
+    ]
+    assert (
+        build_search_queries(
+            trade_key="general-requirements",
+            city="Thunder Bay",
+            province="Ontario",
+            country="Canada",
+            keywords=[],
+        )
+        == []
+    )
+
+
+def test_google_place_mapping_uses_only_safe_discovery_fields():
+    result = map_google_place(
+        {
+            "id": "google-place-1",
+            "displayName": {"text": "Lakehead Mechanical"},
+            "formattedAddress": "1 Example St, Thunder Bay, ON",
+            "websiteUri": "https://lakehead.example",
+            "nationalPhoneNumber": "(807) 555-0100",
+            "primaryType": "plumber",
+            "types": ["plumber", "point_of_interest"],
+            "rating": 4.6,
+            "userRatingCount": 38,
+            "ignoredOversizedField": {"raw": "not persisted"},
+        },
+        city="Thunder Bay",
+        province="Ontario",
+        country="Canada",
+        query="commercial plumber Thunder Bay Ontario Canada",
+    )
+    assert result.display_name == "Lakehead Mechanical"
+    assert result.external_place_id == "google-place-1"
+    assert result.address == "1 Example St, Thunder Bay, ON"
+    assert result.metadata == {
+        "query": "commercial plumber Thunder Bay Ontario Canada",
+        "primary_type": "plumber",
+        "types": ["plumber", "point_of_interest"],
+        "rating": 4.6,
+        "review_count": 38,
+    }
+    assert (
+        map_google_place(
+            {"id": "missing-name"},
+            city="Thunder Bay",
+            province="Ontario",
+            country="Canada",
+            query="query",
+        )
+        is None
+    )
+
+
+class GoogleResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode()
+
+
+def test_google_provider_posts_minimal_mask_and_maps_missing_optional_fields():
+    requests = []
+
+    def opener(request, *, timeout):
+        requests.append((request, timeout))
+        return GoogleResponse(
+            {"places": [{"id": "place-1", "displayName": {"text": "Safe Plumbing"}}]}
+        )
+
+    results = GooglePlacesContractorDiscoveryProvider(
+        api_key="test-key-not-a-real-secret", opener=opener
+    ).search(
+        trade_key="plumbing",
+        city="Thunder Bay",
+        province="Ontario",
+        country="Canada",
+        radius_km=50,
+        keywords=[],
+    )
+    assert len(requests) == 2
+    assert len(results) == 1
+    assert results[0].phone == results[0].website == results[0].address == ""
+    request, timeout = requests[0]
+    assert request.full_url == "https://places.googleapis.com/v1/places:searchText"
+    assert timeout == 30
+    assert request.get_header("X-goog-fieldmask") is not None
+    assert "textQuery" in json.loads(request.data)
+
+
+def test_google_provider_failure_is_safe_and_does_not_expose_key():
+    def opener(*args, **kwargs):
+        raise urllib.error.HTTPError("safe-url", 403, "forbidden", {}, None)
+
+    provider = GooglePlacesContractorDiscoveryProvider(
+        api_key="test-key-not-a-real-secret", opener=opener
+    )
+    with pytest.raises(ContractorProviderError) as error:
+        provider.search(
+            trade_key="plumbing",
+            city="Thunder Bay",
+            province="Ontario",
+            country="Canada",
+            radius_km=None,
+            keywords=[],
+        )
+    assert str(error.value) == "Contractor search is temporarily unavailable."
+    assert "test-key" not in str(error.value)
+
+
+def test_google_provider_failure_maps_to_safe_api_response(
+    project, user, membership, approved_snapshot, settings, monkeypatch
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "google_places"
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+
+    class FailingProvider:
+        def search(self, **kwargs):
+            raise ContractorProviderError("Contractor search is temporarily unavailable.")
+
+    monkeypatch.setattr("apps.contractors.services.provider_for", lambda name: FailingProvider())
+    response = client_for(user).post(
+        reverse(
+            "contractor-discovery-search",
+            kwargs={
+                "organization_slug": project.organization.slug,
+                "project_pk": project.pk,
+            },
+        ),
+        {
+            "scope_package_id": package.pk,
+            "city": "Thunder Bay",
+            "province": "Ontario",
+            "country": "CA",
+            "keywords": [],
+        },
+        format="json",
+    )
+    assert response.status_code == 503
+    assert response.data == {
+        "code": "contractor_provider_unavailable",
+        "detail": "Contractor search is temporarily unavailable.",
+    }
+    assert DiscoveryRequest.objects.count() == 0
 
 
 def test_discovery_requires_ready_scope_and_is_idempotent(
@@ -499,6 +668,57 @@ def test_discovery_requires_ready_scope_and_is_idempotent(
     assert DiscoveryRequest.objects.count() == 2
 
 
+def test_google_discovery_persists_mapped_identity_and_safe_search_history(
+    project, user, approved_snapshot, settings, monkeypatch
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "google_places"
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+
+    class MockGoogleProvider:
+        def search(self, **kwargs):
+            assert kwargs["country"] == "CA"
+            return [
+                ContractorResult(
+                    display_name="Lakehead Mechanical",
+                    city="Thunder Bay",
+                    province="Ontario",
+                    country="Canada",
+                    address="1 Example St, Thunder Bay, ON",
+                    website="https://lakehead.example",
+                    external_place_id="google-place-1",
+                    metadata={"rating": 4.6, "review_count": 38},
+                )
+            ]
+
+    monkeypatch.setattr("apps.contractors.services.provider_for", lambda name: MockGoogleProvider())
+    request = discover_contractors(
+        project=project,
+        package=package,
+        actor=user,
+        city="Thunder Bay",
+        province="Ontario",
+        country="CA",
+        keywords=["retail"],
+    )
+    company = Company.objects.get(external_place_id="google-place-1")
+    assert request.provider == "google_places"
+    assert request.search_terms[0].endswith("retail Thunder Bay Ontario Canada")
+    assert request.provider_metadata == {
+        "internal_first": True,
+        "query_count": 2,
+        "external_result_count": 1,
+    }
+    assert company.address == "1 Example St, Thunder Bay, ON"
+    assert company.trade_capabilities.get().source_metadata == {
+        "provider": "google_places",
+        "rating": 4.6,
+        "review_count": 38,
+    }
+
+
 def test_candidate_permissions_and_human_shortlist(
     project, user, membership, approved_snapshot, settings
 ):
@@ -521,3 +741,64 @@ def test_candidate_permissions_and_human_shortlist(
     membership.role = Membership.Role.VIEWER
     membership.save(update_fields=("role",))
     assert client_for(user).patch(url, {"status": "rejected"}, format="json").status_code == 403
+
+
+def test_google_candidate_list_hides_fake_history_but_keeps_internal_and_google(
+    project, user, membership, approved_snapshot, settings
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "google_places"
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    companies = [
+        Company.objects.create(
+            organization=project.organization,
+            display_name="Internal Network Co",
+            source_type=Company.Source.INTERNAL,
+            created_by=user,
+            updated_by=user,
+        ),
+        Company.objects.create(
+            organization=project.organization,
+            display_name="Historical Fake Co",
+            source_type=Company.Source.DISCOVERED,
+            external_provider="fake",
+            external_place_id="fake-history-1",
+            created_by=user,
+            updated_by=user,
+        ),
+        Company.objects.create(
+            organization=project.organization,
+            display_name="Google Places Co",
+            source_type=Company.Source.DISCOVERED,
+            external_provider="google_places",
+            external_place_id="google-live-1",
+            created_by=user,
+            updated_by=user,
+        ),
+    ]
+    for company in companies:
+        ScopeContractorCandidate.objects.create(
+            project=project,
+            scope_package=package,
+            company=company,
+            created_by=user,
+            updated_by=user,
+        )
+    response = client_for(user).get(
+        reverse(
+            "contractor-candidate-list",
+            kwargs={
+                "organization_slug": project.organization.slug,
+                "project_pk": project.pk,
+            },
+        )
+    )
+    assert response.status_code == 200
+    assert {item["company"]["display_name"] for item in response.data} == {
+        "Internal Network Co",
+        "Google Places Co",
+    }
+    assert Company.objects.filter(external_provider="fake").count() == 1
+    assert ScopeContractorCandidate.objects.filter(company__external_provider="fake").count() == 1

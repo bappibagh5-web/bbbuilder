@@ -9,7 +9,7 @@ from apps.projects.audit import record_event
 from apps.scope_packages.models import ScopePackageVersion
 
 from .models import Company, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
-from .providers import provider_for
+from .providers import build_search_queries, provider_for
 
 
 def normalize_domain(value):
@@ -78,7 +78,9 @@ def internal_companies(*, organization, trade_key, city, province):
 
 
 @transaction.atomic
-def discover_contractors(*, project, package, actor, city, province, radius_km=None, keywords=None):
+def discover_contractors(
+    *, project, package, actor, city, province, country="Canada", radius_km=None, keywords=None
+):
     if (
         package.project_id != project.pk
         or package.current_version.status != ScopePackageVersion.Status.READY
@@ -86,7 +88,13 @@ def discover_contractors(*, project, package, actor, city, province, radius_km=N
         raise ValidationError("Only Ready scope packages in this project can be searched.")
     keywords = list(dict.fromkeys(item.strip() for item in (keywords or []) if item.strip()))
     provider_name = settings.CONTRACTOR_DISCOVERY_PROVIDER
-    terms = [package.trade_category, *keywords]
+    terms = build_search_queries(
+        trade_key=package.trade_key,
+        city=city,
+        province=province,
+        country=country,
+        keywords=keywords,
+    )
     request = DiscoveryRequest.objects.create(
         project=project,
         scope_package=package,
@@ -112,6 +120,7 @@ def discover_contractors(*, project, package, actor, city, province, radius_km=N
         trade_key=package.trade_key,
         city=city,
         province=province,
+        country=country,
         radius_km=radius_km,
         keywords=keywords,
     ):
@@ -123,8 +132,10 @@ def discover_contractors(*, project, package, actor, city, province, radius_km=N
                 website=result.website,
                 phone=result.phone,
                 email=result.email,
+                address=result.address,
                 city=result.city,
                 province=result.province,
+                country=result.country,
                 source_type=Company.Source.DISCOVERED,
                 external_provider=provider_name,
                 external_place_id=result.external_place_id,
@@ -138,7 +149,7 @@ def discover_contractors(*, project, package, actor, city, province, radius_km=N
                 service_cities=[city],
                 province=province,
                 source_type=Company.Source.DISCOVERED,
-                source_metadata={"provider": provider_name},
+                source_metadata={"provider": provider_name, **result.metadata},
             )
         if company not in companies:
             companies.append(company)
@@ -152,6 +163,7 @@ def discover_contractors(*, project, package, actor, city, province, radius_km=N
     request.result_count = len(companies)
     request.provider_metadata = {
         "internal_first": True,
+        "query_count": len(terms),
         "external_result_count": sum(
             company.source_type == Company.Source.DISCOVERED for company in companies
         ),
