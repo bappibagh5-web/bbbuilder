@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "apps.documents",
     "apps.processing",
     "apps.analysis",
+    "apps.scope_packages",
 ]
 
 MIDDLEWARE = [

@@ -342,6 +342,16 @@ Real read-only validation against JD Sports Run 10 produced 23 AI-handled findin
 
 **Consequence:** Estimators focus on exceptions without weakening provenance or falsely attributing machine decisions to a person. Human overrides, immutable historical versions, Viewer read-only access, and final human approval remain intact.
 
+### D-043 — Approved intelligence produces versioned trade packages deterministically
+
+**Status:** Decided
+
+**Decision:** A `ScopePackage` represents a subcontractor/trade bid package, not an M1 finding category. Explicit generation accepts only an approved `ProjectIntelligenceSnapshot` and applies a controlled, provider-free taxonomy. HVAC/ventilation/duct/control content aggregates under HVAC / Mechanical; plumbing/fixture/water/drain content under Plumbing; sprinkler/NFPA 13 content under Fire Protection / Sprinkler; and information that cannot safely be attributed to a trade under General Requirements. A finding may source multiple packages only when its approved text explicitly spans those trades. Every generated version retains its approved snapshot and snapshot-entry sources.
+
+Scope content is append-only. Initial generation creates Draft V1, an estimator edit creates a new Draft version, and Mark Ready creates an explicit Ready version. No action overwrites historical versions. Repeated generation and repeated Ready requests are idempotent. A taxonomy upgrade may supersede only untouched machine-generated drafts; human-edited legacy packages remain preserved. The real JD Sports approved Version 1 deterministically produced four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated Ready.
+
+**Consequence:** Approved M1 intelligence can seed practical bid scopes without another AI call or category-shaped package proliferation. Estimators retain control over edits and readiness, provenance remains traceable, and contractor discovery remains a separate later workflow.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

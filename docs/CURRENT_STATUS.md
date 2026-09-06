@@ -40,7 +40,9 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 is COMPLETE. M2 is NEXT / NOT STARTED.**
+**Milestone 1 is COMPLETE. Milestone 2 is active. M2A-01 is COMPLETE; M2B contractor discovery has NOT started.**
+
+M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged, and no contractor-discovery workflow exists yet.
 
 M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
 
@@ -130,7 +132,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-12 are complete. Milestone 1 is complete; M2 has not started.
+M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 is complete and M2B has not started.
 
 M1-05 currently includes:
 
