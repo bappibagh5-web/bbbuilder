@@ -372,6 +372,16 @@ The API key is backend-only. Provider errors cross the application boundary only
 
 **Consequence:** BB Builders can find real contractors without exposing credentials, making hidden calls, polluting production lists with test fixtures, or coupling discovery to outreach. Search cost remains tied to an explicit trade-level action, and historical test evidence stays intact.
 
+### D-046 — Contractor fit ranking is deterministic and explanatory
+
+**Status:** Decided
+
+**Decision:** Contractor ranking is deterministic application logic over persisted candidate data. The additive score weights exact trade capability at 30 points, project-city match at 20, internal BB network status at 18, website and phone availability at 5 each, Google rating tiers at up to 12, Google review-count tiers at up to 10, and existing shortlist status at 5, with the displayed result capped at 100. Missing optional rating or review data contributes zero and is not a negative fact. Internal status is meaningful but does not guarantee first place when an external candidate has substantially stronger local and quality signals.
+
+All candidates remain visible. Best Match is the default ordering, with Internal First, Rating, Review Count, and Company Name alternatives. The interface shows the score on a 100-point scale, Excellent/Good/Possible fit bands, and an expandable list of the actual contributing signals. The score is neither AI-generated nor an approval decision. Shortlisting remains an explicit human action and outreach remains disabled.
+
+**Consequence:** Estimators can prioritize a large candidate set quickly while retaining visibility, traceability, and judgment. The same persisted inputs always produce the same score and explanation, and missing provider data cannot silently penalize a contractor.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

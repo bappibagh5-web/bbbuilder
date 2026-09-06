@@ -40,13 +40,15 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 is COMPLETE. Milestone 2 is active. M2A-01, M2B-01, and M2B-02 are COMPLETE; outreach/M3 has NOT started.**
+**Milestone 1 is COMPLETE. Milestone 2 is active. M2A-01 and M2B-01 through M2B-03 are COMPLETE; outreach/M3 has NOT started.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
 M2B-01 — Contractor Discovery Foundation is **complete**. Organization-scoped Company, Contact, and TradeCapability records support an internal contractor network. Ready scope packages can initiate explicit, project-scoped discovery using an internal-first service and a provider abstraction. Deterministic deduplication prioritizes external provider ID, website domain, normalized phone, then normalized company name plus city without silently merging ambiguous records. Candidates remain human-controlled through candidate and shortlist states; outreach is not created or sent. The deterministic fake provider was manually validated locally. Google Places remains an inactive configuration shell and requires no key at this stage.
 
 M2B-02 — Google Places Contractor Discovery is **complete**. Explicit Ready-scope searches use the backend-only Google Places API (New) Text Search integration after the internal contractor network is evaluated. Controlled trade queries, minimal field masks, deterministic deduplication, safe provider errors, persisted search history, and human shortlist control remain enforced. The first live HVAC search for the JD Sports project returned 14 candidates. Historical fake-provider records remain preserved but are hidden from production-facing Google candidate lists; internal and Google-sourced companies remain visible. The Google key remains backend-only and ignored from Git. No outreach/M3 workflow exists yet.
+
+M2B-03 — Contractor Ranking & Shortlist Quality is **complete**. Every scope-bound candidate receives a deterministic, transparent fit score derived from exact trade capability, project-city match, internal BB network status, website, phone, Google rating, Google review count, and existing shortlist state. Missing optional Google data is neutral. Internal contractors receive a meaningful preference without automatically outranking a clearly stronger external candidate. The UI defaults to Best Match and also supports Internal First, Rating, Review Count, and Company Name sorts without hiding lower-ranked candidates. Scores are capped at 100 and use `/100` presentation with Excellent, Good, and Possible fit bands plus expandable explanations of every contributing signal. Ranking is explicitly not AI scoring or an approval decision. No outreach/M3 workflow exists yet.
 
 M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
 
@@ -136,7 +138,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01, M2B-01, and M2B-02 are complete, and outreach/M3 has not started.
+M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 and M2B-01 through M2B-03 are complete, and outreach/M3 has not started.
 
 M1-05 currently includes:
 

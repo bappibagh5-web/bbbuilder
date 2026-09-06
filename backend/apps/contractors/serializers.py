@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Company, DiscoveryRequest, ScopeContractorCandidate
+from .ranking import rank_candidate
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -25,10 +26,43 @@ class CompanySerializer(serializers.ModelSerializer):
 
 class CandidateSerializer(serializers.ModelSerializer):
     company = CompanySerializer(read_only=True)
+    match_score = serializers.SerializerMethodField()
+    match_reasons = serializers.SerializerMethodField()
+    google_rating = serializers.SerializerMethodField()
+    google_review_count = serializers.SerializerMethodField()
+
+    @staticmethod
+    def ranking(candidate):
+        if not hasattr(candidate, "_candidate_ranking"):
+            candidate._candidate_ranking = rank_candidate(candidate)
+        return candidate._candidate_ranking
+
+    def get_match_score(self, candidate):
+        return self.ranking(candidate).score
+
+    def get_match_reasons(self, candidate):
+        return self.ranking(candidate).reasons
+
+    def get_google_rating(self, candidate):
+        return self.ranking(candidate).google_rating
+
+    def get_google_review_count(self, candidate):
+        return self.ranking(candidate).google_review_count
 
     class Meta:
         model = ScopeContractorCandidate
-        fields = ("id", "scope_package", "status", "company", "created_at", "updated_at")
+        fields = (
+            "id",
+            "scope_package",
+            "status",
+            "company",
+            "match_score",
+            "match_reasons",
+            "google_rating",
+            "google_review_count",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 

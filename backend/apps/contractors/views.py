@@ -16,9 +16,13 @@ from .services import discover_contractors, set_candidate_status
 
 
 def candidates(project):
-    queryset = ScopeContractorCandidate.objects.filter(
-        project=project, scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE
-    ).select_related("company", "scope_package")
+    queryset = (
+        ScopeContractorCandidate.objects.filter(
+            project=project, scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE
+        )
+        .select_related("company", "scope_package", "project")
+        .prefetch_related("company__trade_capabilities")
+    )
     if settings.CONTRACTOR_DISCOVERY_PROVIDER == "google_places":
         queryset = queryset.exclude(company__external_provider="fake")
     return queryset

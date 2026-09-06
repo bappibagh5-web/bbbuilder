@@ -32,6 +32,7 @@ from apps.contractors.providers import (
     build_search_queries,
     map_google_place,
 )
+from apps.contractors.ranking import rank_candidate
 from apps.contractors.services import dedupe_company, discover_contractors, internal_companies
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
@@ -802,3 +803,145 @@ def test_google_candidate_list_hides_fake_history_but_keeps_internal_and_google(
     }
     assert Company.objects.filter(external_provider="fake").count() == 1
     assert ScopeContractorCandidate.objects.filter(company__external_provider="fake").count() == 1
+
+
+def test_candidate_ranking_is_deterministic_and_transparent(project, user, approved_snapshot):
+    project.city = "Thunder Bay"
+    project.save(update_fields=("city", "updated_at"))
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    internal = Company.objects.create(
+        organization=project.organization,
+        display_name="Known Internal Contractor",
+        source_type=Company.Source.INTERNAL,
+        created_by=user,
+        updated_by=user,
+    )
+    external = Company.objects.create(
+        organization=project.organization,
+        display_name="Strong Local Google Contractor",
+        city=project.city,
+        website="https://strong-local.example",
+        phone="807-555-0100",
+        source_type=Company.Source.DISCOVERED,
+        external_provider="google_places",
+        external_place_id="ranking-google-1",
+        created_by=user,
+        updated_by=user,
+    )
+    TradeCapability.objects.create(company=internal, trade_key=package.trade_key)
+    TradeCapability.objects.create(
+        company=external,
+        trade_key=package.trade_key,
+        source_type=Company.Source.DISCOVERED,
+        source_metadata={"rating": 4.8, "review_count": 140},
+    )
+    internal_candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=internal,
+        created_by=user,
+        updated_by=user,
+    )
+    external_candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=external,
+        created_by=user,
+        updated_by=user,
+    )
+    internal_rank = rank_candidate(internal_candidate)
+    external_rank = rank_candidate(external_candidate)
+    assert internal_rank.score == 48
+    assert internal_rank.reasons == ("Exact trade match", "Internal network")
+    assert external_rank.score == 82
+    assert external_rank.reasons == (
+        "Exact trade match",
+        "Local to project",
+        "Website available",
+        "Phone available",
+        "Strong Google rating",
+        "Established review history",
+    )
+    assert external_rank.score > internal_rank.score
+    assert rank_candidate(external_candidate) == external_rank
+
+
+def test_missing_google_quality_is_neutral_and_shortlist_is_additive(
+    project, user, approved_snapshot
+):
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="Unrated External Contractor",
+        source_type=Company.Source.DISCOVERED,
+        external_provider="google_places",
+        external_place_id="ranking-google-unrated",
+        created_by=user,
+        updated_by=user,
+    )
+    TradeCapability.objects.create(
+        company=company,
+        trade_key=package.trade_key,
+        source_type=Company.Source.DISCOVERED,
+        source_metadata={},
+    )
+    candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=company,
+        created_by=user,
+        updated_by=user,
+    )
+    unranked = rank_candidate(candidate)
+    assert unranked.score == 30
+    assert unranked.google_rating is None
+    assert unranked.google_review_count is None
+    assert all("rating" not in reason.casefold() for reason in unranked.reasons)
+    candidate.status = ScopeContractorCandidate.Status.SHORTLISTED
+    shortlisted = rank_candidate(candidate)
+    assert shortlisted.score == 35
+    assert "Shortlisted by BB Builders" in shortlisted.reasons
+
+
+def test_candidate_ranking_caps_at_100_and_explains_lower_quality_tiers(
+    project, user, approved_snapshot
+):
+    project.city = "Thunder Bay"
+    project.save(update_fields=("city", "updated_at"))
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="Fully Scored Contractor",
+        city=project.city,
+        website="https://fully-scored.example",
+        phone="807-555-0199",
+        source_type=Company.Source.INTERNAL,
+        created_by=user,
+        updated_by=user,
+    )
+    TradeCapability.objects.create(
+        company=company,
+        trade_key=package.trade_key,
+        source_type=Company.Source.DISCOVERED,
+        source_metadata={"rating": 3.6, "review_count": 8},
+    )
+    candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=company,
+        status=ScopeContractorCandidate.Status.SHORTLISTED,
+        created_by=user,
+        updated_by=user,
+    )
+    ranking = rank_candidate(candidate)
+    assert ranking.score == 90
+    assert "Google rating signal" in ranking.reasons
+    assert "Review history available" in ranking.reasons
+
+    capability = company.trade_capabilities.get(trade_key=package.trade_key)
+    capability.source_metadata = {"rating": 5.0, "review_count": 500}
+    capability.save(update_fields=("source_metadata", "updated_at"))
+    assert rank_candidate(candidate).score == 100

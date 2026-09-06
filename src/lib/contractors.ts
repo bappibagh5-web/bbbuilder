@@ -1,7 +1,7 @@
 import { apiRequest } from "@/lib/api-client";
 
 export type ContractorCompany = { id: number; display_name: string; website: string; phone: string; email: string; address: string; city: string; province: string; country: string; source_type: "internal" | "discovered"; external_provider: string; is_active: boolean };
-export type ContractorCandidate = { id: number; scope_package: number; status: "candidate" | "shortlisted" | "approved_for_outreach" | "rejected"; company: ContractorCompany; created_at: string; updated_at: string };
+export type ContractorCandidate = { id: number; scope_package: number; status: "candidate" | "shortlisted" | "approved_for_outreach" | "rejected"; company: ContractorCompany; match_score: number; match_reasons: string[]; google_rating: number | null; google_review_count: number | null; created_at: string; updated_at: string };
 function base(slug: string, projectId: number) { return `/organizations/${encodeURIComponent(slug)}/projects/${projectId}`; }
 export const contractorsApi = {
   candidates(slug: string, projectId: number, signal?: AbortSignal) { return apiRequest<ContractorCandidate[]>(`${base(slug, projectId)}/contractor-candidates/`, { signal }); },
