@@ -10,9 +10,11 @@ export function findingReviewActions(canOperate: boolean) {
   };
 }
 
-export function reviewProgress(findings: Pick<ExtractedFinding, "review_status">[]) {
+export function reviewProgress(findings: Pick<ExtractedFinding, "review_status" | "handling_status">[]) {
   const reviewed = findings.filter((finding) => finding.review_status !== "unreviewed").length;
-  return { total: findings.length, reviewed, unreviewed: findings.length - reviewed };
+  const aiHandled = findings.filter((finding) => finding.handling_status === "ai_handled").length;
+  const needsAttention = findings.filter((finding) => ["needs_attention", "conflicting", "human_needs_follow_up"].includes(finding.handling_status)).length;
+  return { total: findings.length, reviewed, aiHandled, needsAttention, unreviewed: findings.length - reviewed };
 }
 
 function normalizedReviewText(value: string | null | undefined) {

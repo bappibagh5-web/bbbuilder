@@ -330,6 +330,18 @@ The first controlled live OpenAI validation completed successfully on September 
 
 **Consequence:** Live provider text cannot break PostgreSQL JSON persistence, and human review receives only source-grounded findings without weakening exact provenance. Remaining performance work—bounded parallel page analysis, safe reuse/resume, and live x-of-N progress—is intentionally deferred for separate design and is not part of this decision's implementation.
 
+### D-042 — Deterministic exception-based human review
+
+**Status:** Decided
+
+**Decision:** Document Review classifies a materialized finding as `ai_handled` only through deterministic persisted state: machine support is explicit or strongly supported; at least one strict source exists; every original evidence reference remains uniquely grounded and represented by the exact document revision, page, task, and optional sheet; the finding is not an open question; no invalid provenance condition remains; no open conflict applies; and no human review exists. Missing or incomplete provenance, inferred or uncertain support, open questions, and unresolved follow-up are human-attention states. Open conflicts remain conflicting items. Provider confidence alone never establishes eligibility, and classification makes no provider call.
+
+`ai_handled` is not a human review and is never represented by a fabricated `FindingReview`. An explicit human confirmation, edit, rejection, or follow-up creates the existing append-only human review and supersedes machine handling for current workflow purposes. Migration `analysis.0004` adds `machine_handled` to immutable snapshot-entry decisions and permits a null review reference only for that decision. Eligible machine-handled, human-confirmed, and human-edited items may enter a project-information snapshot; rejected, unresolved, conflicting, or ineligible items cannot silently pass. Snapshot entries and audit summary counts preserve whether inclusion was machine-handled or explicitly human-reviewed. Final `ProjectIntelligenceApproval` remains an explicit authorized human checkpoint.
+
+Real read-only validation against JD Sports Run 10 produced 23 AI-handled findings, 7 attention findings, and 0 conflicts from the existing 30 findings, without creating or changing any review decision.
+
+**Consequence:** Estimators focus on exceptions without weakening provenance or falsely attributing machine decisions to a person. Human overrides, immutable historical versions, Viewer read-only access, and final human approval remain intact.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

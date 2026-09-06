@@ -190,6 +190,12 @@ class ExtractedFindingSerializer(serializers.ModelSerializer):
     reviews = FindingReviewSerializer(many=True, read_only=True)
     review_status = serializers.CharField(read_only=True)
     effective_value = serializers.CharField(read_only=True)
+    handling_status = serializers.SerializerMethodField()
+
+    def get_handling_status(self, finding):
+        from .services import finding_handling_status
+
+        return finding_handling_status(finding)
 
     class Meta:
         model = ExtractedFinding
@@ -207,6 +213,7 @@ class ExtractedFindingSerializer(serializers.ModelSerializer):
             "schema_version",
             "review_status",
             "effective_value",
+            "handling_status",
             "sources",
             "reviews",
             "created_at",

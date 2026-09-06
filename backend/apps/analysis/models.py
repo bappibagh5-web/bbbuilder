@@ -603,6 +603,16 @@ class ProjectIntelligenceSnapshotSource(ImmutableFieldsMixin):
 
 
 class ProjectIntelligenceSnapshotEntry(ImmutableFieldsMixin):
+    class Decision(models.TextChoices):
+        MACHINE_HANDLED = "machine_handled", "AI handled"
+        ACCEPTED = FindingReview.Decision.ACCEPTED, "Accepted"
+        EDITED_ACCEPTED = FindingReview.Decision.EDITED_ACCEPTED, "Edited / Accepted"
+        REJECTED = FindingReview.Decision.REJECTED, "Rejected"
+        NEEDS_CLARIFICATION = (
+            FindingReview.Decision.NEEDS_CLARIFICATION,
+            "Needs clarification",
+        )
+
     snapshot = models.ForeignKey(
         ProjectIntelligenceSnapshot, on_delete=models.PROTECT, related_name="entries"
     )
@@ -613,9 +623,13 @@ class ProjectIntelligenceSnapshotEntry(ImmutableFieldsMixin):
         ExtractedFinding, on_delete=models.PROTECT, related_name="intelligence_snapshot_entries"
     )
     finding_review = models.ForeignKey(
-        FindingReview, on_delete=models.PROTECT, related_name="intelligence_snapshot_entries"
+        FindingReview,
+        on_delete=models.PROTECT,
+        related_name="intelligence_snapshot_entries",
+        null=True,
+        blank=True,
     )
-    decision = models.CharField(max_length=30, choices=FindingReview.Decision)
+    decision = models.CharField(max_length=30, choices=Decision)
     effective_value = models.TextField(max_length=2000, blank=True)
     semantic_key = models.CharField(max_length=255)
     category = models.CharField(max_length=40, choices=ExtractedFinding.Category)
@@ -649,11 +663,17 @@ class ProjectIntelligenceSnapshotEntry(ImmutableFieldsMixin):
             raise ValidationError({"snapshot_source": "Source must belong to the snapshot."})
         if self.finding.analysis_run_id != self.snapshot_source.analysis_run_id:
             raise ValidationError({"finding": "Finding must belong to the selected run."})
-        if self.finding_review.finding_id != self.finding_id:
+        machine_handled = self.decision == self.Decision.MACHINE_HANDLED
+        if machine_handled and self.finding_review_id:
+            raise ValidationError({"finding_review": "AI-handled entries cannot claim a review."})
+        if not machine_handled and not self.finding_review_id:
+            raise ValidationError({"finding_review": "Human decisions require a frozen review."})
+        if self.finding_review_id and self.finding_review.finding_id != self.finding_id:
             raise ValidationError({"finding_review": "Review must belong to the finding."})
-        if self.decision != self.finding_review.decision:
+        if self.finding_review_id and self.decision != self.finding_review.decision:
             raise ValidationError({"decision": "Decision must match the frozen review."})
         included = self.decision in (
+            self.Decision.MACHINE_HANDLED,
             FindingReview.Decision.ACCEPTED,
             FindingReview.Decision.EDITED_ACCEPTED,
         )

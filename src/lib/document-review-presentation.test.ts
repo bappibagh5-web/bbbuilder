@@ -6,6 +6,8 @@ import {
   decisionLabel,
   documentReviewScopeCopy,
   emptyActiveDocumentReviewCopy,
+  findingMatchesFilter,
+  handlingLabel,
   documentVersionLabel,
   plainAnalysisStatus,
   progressPresentation,
@@ -24,6 +26,8 @@ test("maps technical categories and decisions to client language", () => {
   assert.equal(decisionLabel("edited_accepted"), "Confirmed");
   assert.equal(decisionLabel("rejected"), "Not relevant");
   assert.equal(decisionLabel("needs_clarification"), "Needs follow-up");
+  assert.equal(decisionLabel("machine_handled"), "AI handled");
+  assert.equal(handlingLabel("ai_handled"), "AI handled");
 });
 
 test("distinguishes selected-document review from project-wide approval", () => {
@@ -59,10 +63,18 @@ test("distinguishes current and older document versions", () => {
 });
 
 test("review counts distinguish complete and attention states", () => {
-  assert.deepEqual(reviewCounts([{ review_status: "accepted" }, { review_status: "rejected" }, { review_status: "needs_clarification" }]), {
-    total: 3, reviewed: 3, confirmed: 1, notRelevant: 1, followUp: 1, unreviewed: 0, needsAttention: 1, complete: false,
+  assert.deepEqual(reviewCounts([{ review_status: "unreviewed", handling_status: "ai_handled" }, { review_status: "accepted", handling_status: "human_confirmed" }, { review_status: "needs_clarification", handling_status: "human_needs_follow_up" }]), {
+    total: 3, reviewed: 2, confirmed: 1, notRelevant: 0, followUp: 1, unreviewed: 1, aiHandled: 1, conflicting: 0, reviewedByHuman: 2, needsAttention: 1, complete: false,
   });
-  assert.equal(reviewCounts([{ review_status: "accepted" }, { review_status: "rejected" }]).complete, true);
+  assert.equal(reviewCounts([{ review_status: "unreviewed", handling_status: "ai_handled" }, { review_status: "rejected", handling_status: "human_rejected" }]).complete, true);
+});
+
+test("smart review filters separate AI handled, attention, conflicts, and human work", () => {
+  assert.equal(findingMatchesFilter({ handling_status: "ai_handled" }, "AI handled"), true);
+  assert.equal(findingMatchesFilter({ handling_status: "needs_attention" }, "Needs your attention"), true);
+  assert.equal(findingMatchesFilter({ handling_status: "conflicting" }, "Conflicts"), true);
+  assert.equal(findingMatchesFilter({ handling_status: "human_edited" }, "Reviewed by you"), true);
+  assert.equal(findingMatchesFilter({ handling_status: "ai_handled" }, "Reviewed by you"), false);
 });
 
 test("an untouched document never presents misleading zero-of-zero progress", () => {

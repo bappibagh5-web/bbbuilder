@@ -853,6 +853,125 @@ def resolve_conflict(*, conflict, actor, status, resolution_note=""):
 
 SNAPSHOT_SCHEMA_VERSION = "project-intelligence-v1"
 
+AI_HANDLED = "ai_handled"
+NEEDS_ATTENTION = "needs_attention"
+CONFLICTING = "conflicting"
+HUMAN_CONFIRMED = "human_confirmed"
+HUMAN_EDITED = "human_edited"
+HUMAN_REJECTED = "human_rejected"
+HUMAN_NEEDS_FOLLOW_UP = "human_needs_follow_up"
+
+
+def _candidate_for_finding(finding):
+    try:
+        candidates = validate_result(
+            AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS,
+            finding.analysis_run.result_summary,
+        )["candidates"]
+    except (KeyError, PydanticValidationError, ValidationError):
+        return None
+    return next(
+        (
+            candidate
+            for candidate in candidates
+            if _stable_hash(candidate) == finding.source_candidate_key
+        ),
+        None,
+    )
+
+
+def _has_strict_complete_provenance(finding):
+    sources = list(finding.sources.all())
+    if not sources:
+        return False
+    candidate = _candidate_for_finding(finding)
+    if not candidate or not candidate["evidence"]:
+        return False
+    pages = {source.document_page_id: source.document_page for source in sources}
+    for evidence in candidate["evidence"]:
+        page = pages.get(evidence["document_page_id"])
+        if page is None or page.page_number != evidence["page_number"]:
+            return False
+        sheet = getattr(page, "drawing_sheet", None)
+        if evidence.get("drawing_sheet_id") not in (None, sheet.pk if sheet else None):
+            return False
+        excerpt = evidence["evidence_excerpt"]
+        if excerpt:
+            grounded = _grounded_excerpt(excerpt, page.native_text)
+            if grounded is None:
+                return False
+            expected_excerpt = grounded[0]
+            expected_mode = FindingSource.EvidenceMode.NATIVE_TEXT
+        else:
+            if not evidence["visual_evidence_description"]:
+                return False
+            expected_excerpt = ""
+            expected_mode = FindingSource.EvidenceMode.VISUAL
+        if not any(
+            source.document_page_id == page.pk
+            and source.drawing_sheet_id == evidence.get("drawing_sheet_id")
+            and source.evidence_mode == expected_mode
+            and source.evidence_excerpt == expected_excerpt
+            and source.visual_evidence_description == evidence["visual_evidence_description"]
+            for source in sources
+        ):
+            return False
+    return all(
+        source.document_revision_id == finding.document_revision_id
+        and source.document_page.document_revision_id == finding.document_revision_id
+        and source.analysis_task_run.analysis_run_id == finding.analysis_run_id
+        and source.analysis_task_run.document_page_id == source.document_page_id
+        and (
+            source.evidence_mode != FindingSource.EvidenceMode.NATIVE_TEXT
+            or (
+                bool(source.evidence_excerpt)
+                and source.evidence_excerpt in source.document_page.native_text
+            )
+        )
+        and (
+            source.evidence_mode != FindingSource.EvidenceMode.VISUAL
+            or (not source.evidence_excerpt and bool(source.visual_evidence_description))
+        )
+        for source in sources
+    )
+
+
+def finding_handling_status(finding, *, open_conflict_finding_ids=None):
+    if open_conflict_finding_ids is None:
+        cached_conflicts = getattr(finding, "_prefetched_objects_cache", {}).get("conflicts")
+        if cached_conflicts is None:
+            has_open_conflict = IntelligenceConflict.objects.filter(
+                findings=finding,
+                status=IntelligenceConflict.Status.OPEN,
+                superseded_by__isnull=True,
+            ).exists()
+        else:
+            has_open_conflict = any(
+                conflict.status == IntelligenceConflict.Status.OPEN
+                and not hasattr(conflict, "superseded_by")
+                for conflict in cached_conflicts
+            )
+    else:
+        has_open_conflict = finding.pk in open_conflict_finding_ids
+    if has_open_conflict:
+        return CONFLICTING
+    review = max(finding.reviews.all(), key=lambda item: (item.created_at, item.pk), default=None)
+    if review:
+        return {
+            FindingReview.Decision.ACCEPTED: HUMAN_CONFIRMED,
+            FindingReview.Decision.EDITED_ACCEPTED: HUMAN_EDITED,
+            FindingReview.Decision.REJECTED: HUMAN_REJECTED,
+            FindingReview.Decision.NEEDS_CLARIFICATION: HUMAN_NEEDS_FOLLOW_UP,
+        }[review.decision]
+    if finding.category == ExtractedFinding.Category.OPEN_QUESTION:
+        return NEEDS_ATTENTION
+    if finding.machine_support not in {
+        ExtractedFinding.Support.EXPLICIT,
+        ExtractedFinding.Support.STRONGLY_SUPPORTED,
+    }:
+        return NEEDS_ATTENTION
+    return AI_HANDLED if _has_strict_complete_provenance(finding) else NEEDS_ATTENTION
+
 
 def _snapshot_block(code, message, count=1):
     return {"code": code, "message": message, "count": count}
@@ -923,6 +1042,9 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
         "unreviewed": 0,
         "open_conflicts": 0,
         "approved_entries": 0,
+        "ai_handled": 0,
+        "needs_attention": 0,
+        "conflicting": 0,
     }
     accepted_by_key = defaultdict(set)
     for run in runs:
@@ -953,6 +1075,15 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
                 )
             )
         run_entries = []
+        open_conflicts = [
+            conflict
+            for conflict in run.intelligence_conflicts.all()
+            if not hasattr(conflict, "superseded_by")
+            and conflict.status == IntelligenceConflict.Status.OPEN
+        ]
+        open_conflict_finding_ids = {
+            finding.pk for conflict in open_conflicts for finding in conflict.findings.all()
+        }
         for finding in findings:
             counts["findings"] += 1
             review = max(
@@ -966,25 +1097,43 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
                     )
                 )
             if review is None:
-                counts["unreviewed"] += 1
-                blockers.append(
-                    _snapshot_block("unreviewed", f"Finding #{finding.pk} has not been reviewed.")
+                handling_status = finding_handling_status(
+                    finding, open_conflict_finding_ids=open_conflict_finding_ids
                 )
-                continue
-            counts[review.decision] += 1
-            if review.decision == FindingReview.Decision.NEEDS_CLARIFICATION:
+                if handling_status == CONFLICTING:
+                    counts["conflicting"] += 1
+                    continue
+                if handling_status != AI_HANDLED:
+                    counts["unreviewed"] += 1
+                    counts["needs_attention"] += 1
+                    blockers.append(
+                        _snapshot_block(
+                            "unreviewed",
+                            f"Finding #{finding.pk} needs human attention.",
+                        )
+                    )
+                    continue
+                counts["ai_handled"] += 1
+                decision = ProjectIntelligenceSnapshotEntry.Decision.MACHINE_HANDLED
+                effective_value = finding.machine_value
+                review_id = None
+            else:
+                counts[review.decision] += 1
+                decision = review.decision
+                review_id = review.pk
+                effective_value = (
+                    review.reviewed_value
+                    if review.decision == FindingReview.Decision.EDITED_ACCEPTED
+                    else finding.machine_value
+                    if review.decision == FindingReview.Decision.ACCEPTED
+                    else ""
+                )
+            if review and review.decision == FindingReview.Decision.NEEDS_CLARIFICATION:
                 blockers.append(
                     _snapshot_block(
                         "needs_clarification", f"Finding #{finding.pk} needs clarification."
                     )
                 )
-            effective_value = (
-                review.reviewed_value
-                if review.decision == FindingReview.Decision.EDITED_ACCEPTED
-                else finding.machine_value
-                if review.decision == FindingReview.Decision.ACCEPTED
-                else ""
-            )
             provenance = [
                 {
                     "finding_source_id": source.pk,
@@ -1001,8 +1150,8 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
             ]
             entry = {
                 "finding_id": finding.pk,
-                "finding_review_id": review.pk,
-                "decision": review.decision,
+                "finding_review_id": review_id,
+                "decision": decision,
                 "effective_value": effective_value,
                 "semantic_key": finding.semantic_key,
                 "category": finding.category,
@@ -1016,12 +1165,6 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
                     _normalized_value(finding.category, effective_value)
                 )
                 approved_entries.append(entry)
-        open_conflicts = [
-            conflict
-            for conflict in run.intelligence_conflicts.all()
-            if not hasattr(conflict, "superseded_by")
-            and conflict.status == IntelligenceConflict.Status.OPEN
-        ]
         if open_conflicts:
             counts["open_conflicts"] += len(open_conflicts)
             blockers.append(
@@ -1124,7 +1267,11 @@ def create_intelligence_snapshot(*, project, creator, run_ids):
             findings_by_id = {finding.pk: finding for finding in run.findings.all()}
             for item in run_data["findings"]:
                 finding = findings_by_id[item["finding_id"]]
-                review = finding.reviews.get(pk=item["finding_review_id"])
+                review = (
+                    finding.reviews.get(pk=item["finding_review_id"])
+                    if item["finding_review_id"]
+                    else None
+                )
                 entry = ProjectIntelligenceSnapshotEntry(
                     snapshot=snapshot,
                     snapshot_source=source,

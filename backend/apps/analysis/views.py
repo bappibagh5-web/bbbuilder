@@ -31,8 +31,10 @@ from .serializers import (
     IntelligenceSnapshotSerializer,
 )
 from .services import (
+    AI_HANDLED,
     approve_intelligence_snapshot,
     create_intelligence_snapshot,
+    finding_handling_status,
     materialize_findings,
     request_analysis_run,
     resolve_conflict,
@@ -121,6 +123,7 @@ def finding_queryset(project):
             "sources__document_page__drawing_sheet",
             "sources__document_revision__document",
             "reviews__reviewer",
+            "conflicts__superseded_by",
         )
     )
 
@@ -191,6 +194,7 @@ def conflict_queryset(project):
             "findings__sources__document_page__drawing_sheet",
             "findings__sources__document_revision__document",
             "findings__reviews__reviewer",
+            "findings__conflicts__superseded_by",
         )
     )
 
@@ -297,6 +301,7 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
         for run in runs:
             findings = list(run.findings.all())
             statuses = [finding.review_status for finding in findings]
+            handling_statuses = [finding_handling_status(finding) for finding in findings]
             candidates.append(
                 {
                     "id": run.pk,
@@ -307,7 +312,11 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
                     "is_current_revision": run.document_revision.document.current_revision_id
                     == run.document_revision_id,
                     "finding_count": len(findings),
-                    "unreviewed_count": statuses.count("unreviewed"),
+                    "unreviewed_count": sum(
+                        status
+                        not in (AI_HANDLED, "human_confirmed", "human_edited", "human_rejected")
+                        for status in handling_statuses
+                    ),
                     "needs_clarification_count": statuses.count("needs_clarification"),
                     "created_at": run.created_at,
                 }

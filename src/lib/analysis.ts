@@ -48,6 +48,14 @@ export type AnalysisRun = {
 };
 
 export type FindingDecision = "accepted" | "edited_accepted" | "rejected" | "needs_clarification";
+export type FindingHandlingStatus =
+  | "ai_handled"
+  | "needs_attention"
+  | "conflicting"
+  | "human_confirmed"
+  | "human_edited"
+  | "human_rejected"
+  | "human_needs_follow_up";
 export type FindingSource = {
   id: number; document_revision: number; document_page: number; document_title: string;
   revision_label: string; page_number: number; drawing_sheet: number | null;
@@ -64,6 +72,7 @@ export type ExtractedFinding = {
   source_candidate_key: string; semantic_key: string; category: string; subject: string;
   machine_value: string; machine_support: string; schema_version: string;
   review_status: "unreviewed" | FindingDecision; effective_value: string;
+  handling_status: FindingHandlingStatus;
   sources: FindingSource[]; reviews: FindingReview[]; created_at: string;
 };
 export type IntelligenceConflict = {
@@ -89,7 +98,7 @@ export type SnapshotProvenance = {
   analysis_task_run: number; evidence_excerpt: string; visual_evidence_description: string;
 };
 export type SnapshotEntry = {
-  id: number; finding: number; finding_review: number; decision: FindingDecision;
+  id: number; finding: number; finding_review: number | null; decision: FindingDecision | "machine_handled";
   effective_value: string; semantic_key: string; category: string; subject: string;
   machine_value: string; included_in_intelligence: boolean; provenance: SnapshotProvenance[];
 };

@@ -28,13 +28,13 @@ test("viewer receives read-only finding and conflict state", () => {
 test("review progress counts accepted edited rejected and clarification as reviewed", () => {
   assert.deepEqual(
     reviewProgress([
-      { review_status: "unreviewed" },
-      { review_status: "accepted" },
-      { review_status: "edited_accepted" },
-      { review_status: "rejected" },
-      { review_status: "needs_clarification" },
+      { review_status: "unreviewed", handling_status: "ai_handled" },
+      { review_status: "accepted", handling_status: "human_confirmed" },
+      { review_status: "edited_accepted", handling_status: "human_edited" },
+      { review_status: "rejected", handling_status: "human_rejected" },
+      { review_status: "needs_clarification", handling_status: "human_needs_follow_up" },
     ]),
-    { total: 5, reviewed: 4, unreviewed: 1 },
+    { total: 5, reviewed: 4, aiHandled: 1, needsAttention: 1, unreviewed: 1 },
   );
 });
 

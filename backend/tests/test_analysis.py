@@ -37,6 +37,11 @@ from apps.analysis.rendering import PageRenderFailure, render_page_data_url
 from apps.analysis.sanitization import sanitize_provider_value
 from apps.analysis.schemas import validate_result
 from apps.analysis.services import (
+    AI_HANDLED,
+    CONFLICTING,
+    HUMAN_CONFIRMED,
+    HUMAN_NEEDS_FOLLOW_UP,
+    NEEDS_ATTENTION,
     _claim_run,
     _grounded_excerpt,
     approve_intelligence_snapshot,
@@ -44,6 +49,7 @@ from apps.analysis.services import (
     detect_conflicts,
     dispatch_analysis_run,
     execute_analysis_run,
+    finding_handling_status,
     materialize_findings,
     recover_stale_analysis_runs,
     request_analysis_run,
@@ -907,6 +913,90 @@ def test_successful_run_materializes_idempotent_findings_and_sources(revision, u
     assert AuditEvent.objects.filter(action_code="findings.materialized").count() == 1
 
 
+def test_smart_review_classification_is_deterministic_and_human_review_overrides(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    grounded = findings[0]
+    assert finding_handling_status(grounded) == AI_HANDLED
+
+    review_finding(
+        finding=grounded,
+        reviewer=user,
+        decision=FindingReview.Decision.ACCEPTED,
+    )
+    grounded.refresh_from_db()
+    assert finding_handling_status(grounded) == HUMAN_CONFIRMED
+
+    follow_up = findings[1]
+    review_finding(
+        finding=follow_up,
+        reviewer=user,
+        decision=FindingReview.Decision.NEEDS_CLARIFICATION,
+    )
+    follow_up.refresh_from_db()
+    assert finding_handling_status(follow_up) == HUMAN_NEEDS_FOLLOW_UP
+
+
+def test_smart_review_requires_strong_complete_provenance_and_surfaces_conflict(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    finding = findings[0]
+
+    FindingSource.objects.filter(finding=finding).delete()
+    finding.refresh_from_db()
+    assert finding_handling_status(finding) == NEEDS_ATTENTION
+
+    finding = findings[1]
+    ExtractedFinding.objects.filter(pk=finding.pk).update(
+        machine_support=ExtractedFinding.Support.INFERRED
+    )
+    finding.refresh_from_db()
+    assert finding_handling_status(finding) == NEEDS_ATTENTION
+
+    ExtractedFinding.objects.filter(pk=finding.pk).update(
+        machine_support=ExtractedFinding.Support.EXPLICIT
+    )
+    conflict = IntelligenceConflict.objects.create(
+        project=run.project,
+        analysis_run=run,
+        semantic_key=finding.semantic_key,
+        participant_key="smart-review-conflict",
+        explanation="Deterministic test conflict.",
+    )
+    conflict.findings.add(finding)
+    finding.refresh_from_db()
+    assert finding_handling_status(finding) == CONFLICTING
+
+
+def test_snapshot_includes_ai_handled_without_fabricating_human_review(revision, user, membership):
+    Document.objects.filter(pk=revision.document_id).update(current_revision=revision)
+    run = completed_run(revision, user)
+    findings = list(materialize_findings(analysis_run=run, actor=user))
+    revision.document.project.refresh_from_db()
+
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+    assert state["eligible"] is True
+    assert state["summary_counts"]["ai_handled"] == len(findings)
+
+    snapshot, created = create_intelligence_snapshot(
+        project=revision.document.project, creator=user, run_ids=[run.pk]
+    )
+    assert created is True
+    assert snapshot.entries.count() == len(findings)
+    assert not FindingReview.objects.filter(finding__analysis_run=run).exists()
+    assert set(snapshot.entries.values_list("decision", flat=True)) == {"machine_handled"}
+    assert not snapshot.entries.exclude(finding_review=None).exists()
+    assert snapshot.entries.filter(included_in_intelligence=True).count() == len(findings)
+    event = AuditEvent.objects.get(
+        action_code="intelligence_snapshot.created", target_id=str(snapshot.pk)
+    )
+    assert event.metadata["ai_handled"] == len(findings)
+
+
 @pytest.mark.parametrize(
     ("excerpt", "page_text", "expected"),
     [
@@ -1284,7 +1374,9 @@ def test_review_api_permissions_scoping_and_read_only_boundaries(
             "finding_pk": finding.pk,
         },
     )
-    assert client_for(viewer).get(detail_url).status_code == 200
+    viewer_response = client_for(viewer).get(detail_url)
+    assert viewer_response.status_code == 200
+    assert viewer_response.data["handling_status"] == AI_HANDLED
     assert client_for(viewer).post(review_url, {"decision": "accepted"}).status_code == 403
     assert (
         client_for(user)
@@ -1298,6 +1390,7 @@ def test_review_api_permissions_scoping_and_read_only_boundaries(
     )
     assert client_for(user).delete(detail_url).status_code == 405
     payload = client_for(user).get(detail_url).data
+    assert payload["handling_status"] == "human_edited"
     serialized = json.dumps(payload)
     assert "storage_key" not in serialized and '"native_text":' not in serialized
     assert "OPENAI_API_KEY" not in serialized and "normalized_machine_value" not in payload
@@ -1376,6 +1469,10 @@ def test_snapshot_readiness_blocks_incomplete_reviews_and_open_conflicts(
     run = completed_run(revision, user)
     findings = list(materialize_findings(analysis_run=run, actor=user))
     revision.document.project.refresh_from_db()
+    ExtractedFinding.objects.filter(pk=findings[0].pk).update(
+        machine_support=ExtractedFinding.Support.INFERRED
+    )
+    findings[0].refresh_from_db()
     state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
     assert state["eligible"] is False
     assert {item["code"] for item in state["blockers"]} == {"unreviewed"}

@@ -42,6 +42,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - Milestone 1: complete
 - M1-UX-01 — Non-Technical Document Review UX: complete
 - M1-UX-02A — Document Archive / Restore: complete; automated validation and client manual acceptance passed September 5, 2026
+- M1-UX-03 — Smart Human Review: complete; deterministic exception triage passed automated and client manual validation September 6, 2026
 - Milestone 2: not started
 - Working tree: clean
 - Ahead/behind: `0/0`
@@ -122,9 +123,11 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 Milestone 1 is complete. M2-01 is next but has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
 
+Smart Human Review now derives machine handling from persisted evidence without another provider call. A finding is AI handled only when it is explicit or strongly supported, every provider evidence reference remains strictly and completely represented by exact revision/page provenance, it is not an open question, it has no open conflict, and no human review supersedes it. Human-reviewed decisions remain append-only and distinct. Snapshot entry decision `machine_handled` has no `FindingReview`; migration `analysis.0004` makes that honest representation possible. Run 10's current read-only split is 23 AI handled / 7 needing attention / 0 conflicting. Final project-information approval is still an authorized human action.
+
 Staging/UAT must still validate the deployed environment, secrets, network behavior, latency, cost, and monitoring. Known performance work—bounded parallel page analysis, safe reuse/resume, and live x-of-N progress—has not been implemented and must not be assumed.
 
-M1-UX-01 was manually accepted on numeric production Project 2. The UI presents `Uploaded → Prepared → AI Reviewed → Your Review → Approved`, familiar finding categories and decisions, understandable provenance, clear selected-document versus project-wide approval scope, concise collapsed project information versions, and Viewer read-only guidance. Technical run/provider/token/fingerprint information remains available only under collapsed Advanced details. No backend model/API semantics or commercial roadmap totals changed.
+M1-UX-01 was manually accepted on numeric production Project 2. The UI presents `Uploaded → Prepared → AI Review → Your Review → Approved`, familiar finding categories and decisions, understandable provenance, clear selected-document versus project-wide approval scope, concise collapsed project information versions, and Viewer read-only guidance. Technical run/provider/token/fingerprint information remains available only under collapsed Advanced details. No backend model/API semantics or commercial roadmap totals changed.
 
 ## Maintenance
 

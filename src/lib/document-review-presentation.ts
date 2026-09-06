@@ -28,12 +28,13 @@ export const categoryPresentation: Record<string, string> = {
   open_question: "Questions to Follow Up",
 };
 
-export const decisionPresentation: Record<ExtractedFinding["review_status"], string> = {
+export const decisionPresentation: Record<string, string> = {
   unreviewed: "Needs your review",
   accepted: "Confirmed",
   edited_accepted: "Confirmed",
   rejected: "Not relevant",
   needs_clarification: "Needs follow-up",
+  machine_handled: "AI handled",
 };
 
 export const documentReviewScopeCopy = {
@@ -62,7 +63,7 @@ export function categoryLabel(category: string) {
   return categoryPresentation[category] ?? "Project Details";
 }
 
-export function decisionLabel(decision: ExtractedFinding["review_status"] | FindingDecision) {
+export function decisionLabel(decision: ExtractedFinding["review_status"] | FindingDecision | "machine_handled") {
   return decisionPresentation[decision];
 }
 
@@ -71,11 +72,15 @@ export function documentVersionLabel(isCurrent: boolean, revisionLabel: string, 
   return isCurrent ? `Current Version (${label})` : `Older Document Version (${label})`;
 }
 
-export function reviewCounts(findings: Pick<ExtractedFinding, "review_status">[]) {
+export function reviewCounts(findings: Pick<ExtractedFinding, "review_status" | "handling_status">[]) {
   const confirmed = findings.filter((item) => item.review_status === "accepted" || item.review_status === "edited_accepted").length;
   const notRelevant = findings.filter((item) => item.review_status === "rejected").length;
   const followUp = findings.filter((item) => item.review_status === "needs_clarification").length;
   const unreviewed = findings.filter((item) => item.review_status === "unreviewed").length;
+  const aiHandled = findings.filter((item) => item.handling_status === "ai_handled").length;
+  const conflicting = findings.filter((item) => item.handling_status === "conflicting").length;
+  const attention = findings.filter((item) => item.handling_status === "needs_attention" || item.handling_status === "human_needs_follow_up").length;
+  const reviewedByHuman = findings.filter((item) => item.handling_status.startsWith("human_")).length;
   return {
     total: findings.length,
     reviewed: confirmed + notRelevant + followUp,
@@ -83,9 +88,34 @@ export function reviewCounts(findings: Pick<ExtractedFinding, "review_status">[]
     notRelevant,
     followUp,
     unreviewed,
-    needsAttention: followUp + unreviewed,
-    complete: findings.length > 0 && followUp === 0 && unreviewed === 0,
+    aiHandled,
+    conflicting,
+    reviewedByHuman,
+    needsAttention: attention,
+    complete: findings.length > 0 && attention === 0 && conflicting === 0,
   };
+}
+
+export type SmartReviewFilter = "All" | "AI handled" | "Needs your attention" | "Conflicts" | "Reviewed by you";
+
+export function findingMatchesFilter(finding: Pick<ExtractedFinding, "handling_status">, filter: SmartReviewFilter) {
+  if (filter === "All") return true;
+  if (filter === "AI handled") return finding.handling_status === "ai_handled";
+  if (filter === "Needs your attention") return finding.handling_status === "needs_attention" || finding.handling_status === "human_needs_follow_up";
+  if (filter === "Conflicts") return finding.handling_status === "conflicting";
+  return finding.handling_status.startsWith("human_");
+}
+
+export function handlingLabel(status: ExtractedFinding["handling_status"]) {
+  return {
+    ai_handled: "AI handled",
+    needs_attention: "Needs your attention",
+    conflicting: "Conflicting item",
+    human_confirmed: "Confirmed by you",
+    human_edited: "Edited & confirmed",
+    human_rejected: "Not relevant",
+    human_needs_follow_up: "Needs follow-up",
+  }[status];
 }
 
 export function progressPresentation(analysisStarted: boolean, counts: ReturnType<typeof reviewCounts>) {
@@ -96,9 +126,10 @@ export function progressPresentation(analysisStarted: boolean, counts: ReturnTyp
       nextStep: "Review this document with AI.",
     };
   }
+  const remaining = counts.needsAttention + counts.conflicting;
   return {
-    heading: `${counts.reviewed} / ${counts.total}`,
-    detail: "items reviewed",
+    heading: remaining === 0 ? "No items need attention" : `${remaining} need attention`,
+    detail: `${counts.aiHandled} AI handled · ${counts.reviewedByHuman} reviewed by you`,
     nextStep: counts.complete
       ? "Prepare the reviewed project information for approval."
       : "Review the remaining items, then prepare the project information for approval.",
