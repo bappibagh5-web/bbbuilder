@@ -28,7 +28,10 @@ INSTALLED_APPS = [
     "apps.processing",
     "apps.analysis",
     "apps.scope_packages",
+    "apps.contractors",
 ]
+
+CONTRACTOR_DISCOVERY_PROVIDER = env("CONTRACTOR_DISCOVERY_PROVIDER", default="fake")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

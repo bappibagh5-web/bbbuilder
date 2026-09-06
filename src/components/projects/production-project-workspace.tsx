@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { ProductionDocumentsModule } from "@/components/documents/production-documents-module";
 import { ProductionAIReviewModule } from "@/components/ai-review/production-ai-review-module";
 import { ProductionScopesModule } from "@/components/scopes/production-scopes-module";
+import { ProductionContractorsModule } from "@/components/contractors/production-contractors-module";
 import { ProductionProjectForm } from "./production-project-form";
 import { ProductionProjectStatus } from "./production-project-status";
 import { ProjectWorkspaceTabs } from "./project-workspace-tabs";
@@ -89,7 +90,7 @@ function OrganizationProjectWorkspace({ projectId, membership }: { projectId: st
         </div>
         </div>
       </header>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,.06)]"><ProjectWorkspaceTabs projectId={projectId} /><div className="min-w-0 bg-slate-50/35 p-4 sm:p-6">{section === "overview" ? editing && canEdit ? <ProductionProjectForm key={project.updated_at} organizationSlug={membership.organization.slug} project={project} onSaved={(saved) => { setProject(saved); setEditing(false); }} onCancel={() => setEditing(false)} /> : <ProjectMetadata project={project} /> : section === "documents" ? <ProductionDocumentsModule project={project} membership={membership} onProjectDocumentsUploaded={() => setProject((current) => current?.status === "draft" ? { ...current, status: "documents_uploaded" } : current)} /> : section === "ai-review" ? <ProductionAIReviewModule project={project} membership={membership} /> : section === "scopes" ? <ProductionScopesModule project={project} membership={membership} /> : section === "activity" ? <ProductionProjectActivity project={project} membership={membership} /> : futureState ? <FutureWorkflowState {...futureState} /> : <WorkspaceState title="Page not found" detail="This project workspace page is not available." error />}</div></div>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,.06)]"><ProjectWorkspaceTabs projectId={projectId} /><div className="min-w-0 bg-slate-50/35 p-4 sm:p-6">{section === "overview" ? editing && canEdit ? <ProductionProjectForm key={project.updated_at} organizationSlug={membership.organization.slug} project={project} onSaved={(saved) => { setProject(saved); setEditing(false); }} onCancel={() => setEditing(false)} /> : <ProjectMetadata project={project} /> : section === "documents" ? <ProductionDocumentsModule project={project} membership={membership} onProjectDocumentsUploaded={() => setProject((current) => current?.status === "draft" ? { ...current, status: "documents_uploaded" } : current)} /> : section === "ai-review" ? <ProductionAIReviewModule project={project} membership={membership} /> : section === "scopes" ? <ProductionScopesModule project={project} membership={membership} /> : section === "contractors" ? <ProductionContractorsModule project={project} membership={membership} /> : section === "activity" ? <ProductionProjectActivity project={project} membership={membership} /> : futureState ? <FutureWorkflowState {...futureState} /> : <WorkspaceState title="Page not found" detail="This project workspace page is not available." error />}</div></div>
     </div>
   );
 }

@@ -1,0 +1,6 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { canManageContractors, candidatesForScope, readyScopePackages, replaceCandidate } from "./contractor-discovery-state.ts";
+test("Contractors tab limits discovery to Ready packages", () => { const packages = [{ id: 1, current_version: { status: "draft" } }, { id: 2, current_version: { status: "ready" } }] as Parameters<typeof readyScopePackages>[0]; assert.deepEqual(readyScopePackages(packages).map((item) => item.id), [2]); });
+test("candidate results remain scoped and update after shortlist", () => { const rows = [{ id: 1, scope_package: 2, status: "candidate" }, { id: 2, scope_package: 3, status: "candidate" }] as Parameters<typeof candidatesForScope>[0]; assert.equal(candidatesForScope(rows, 2).length, 1); const updated = { ...rows[0], status: "shortlisted" } as Parameters<typeof replaceCandidate>[1]; assert.equal(replaceCandidate(rows, updated)[0].status, "shortlisted"); });
+test("Viewer is read-only while operators can manage", () => { assert.equal(canManageContractors("viewer"), false); assert.equal(canManageContractors("admin"), true); assert.equal(canManageContractors("estimator_operator"), true); });

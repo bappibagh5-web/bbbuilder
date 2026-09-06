@@ -15,6 +15,19 @@ from apps.analysis.models import (
     ProjectIntelligenceSnapshotEntry,
     ProjectIntelligenceSnapshotSource,
 )
+from apps.contractors.models import (
+    Company,
+    Contact,
+    DiscoveryRequest,
+    ScopeContractorCandidate,
+    TradeCapability,
+)
+from apps.contractors.providers import (
+    ContractorResult,
+    FakeContractorDiscoveryProvider,
+    GooglePlacesContractorDiscoveryProvider,
+)
+from apps.contractors.services import dedupe_company, discover_contractors, internal_companies
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
 from apps.projects.models import AuditEvent, Project
@@ -350,3 +363,161 @@ def test_historical_approved_snapshot_binding_is_preserved(project, user, approv
     revise_scope_package(package=package, actor=user, values={"description": "Human edit"})
     package.refresh_from_db()
     assert package.source_snapshot_id == approved_snapshot.pk
+
+
+def test_company_contact_and_trade_capability_are_organization_scoped(organization, user):
+    company = Company.objects.create(
+        organization=organization,
+        display_name="Pacific Mechanical Ltd.",
+        website="https://www.pacific-mech.example/path",
+        phone="(604) 555-0101",
+        city="Vancouver",
+        province="BC",
+        created_by=user,
+        updated_by=user,
+    )
+    Contact.objects.create(
+        company=company, name="Pat Lee", title="Estimator", email="pat@example.com", is_primary=True
+    )
+    capability = TradeCapability.objects.create(
+        company=company,
+        trade_key="hvac-mechanical",
+        keywords=["ductwork"],
+        service_cities=["Vancouver"],
+        province="BC",
+    )
+    assert company.domain == "pacific-mech.example"
+    assert company.normalized_phone == "6045550101"
+    assert capability.company.contacts.get().is_primary
+
+
+def test_internal_network_is_searched_by_trade_and_service_area(organization, user):
+    company = Company.objects.create(
+        organization=organization,
+        display_name="Internal HVAC",
+        city="Vancouver",
+        province="BC",
+        created_by=user,
+        updated_by=user,
+    )
+    TradeCapability.objects.create(
+        company=company, trade_key="hvac-mechanical", service_cities=["Vancouver"], province="BC"
+    )
+    assert internal_companies(
+        organization=organization, trade_key="hvac-mechanical", city="Vancouver", province="BC"
+    ) == [company]
+    assert (
+        internal_companies(
+            organization=organization, trade_key="plumbing", city="Vancouver", province="BC"
+        )
+        == []
+    )
+
+
+def test_dedupe_priority_and_ambiguous_name_do_not_merge(organization, user):
+    known = Company.objects.create(
+        organization=organization,
+        display_name="Known Co",
+        website="https://known.example",
+        phone="6045550102",
+        city="Burnaby",
+        external_provider="fake",
+        external_place_id="place-1",
+        created_by=user,
+        updated_by=user,
+    )
+    assert (
+        dedupe_company(
+            organization,
+            ContractorResult("Different", "Elsewhere", "BC", external_place_id="place-1"),
+            "fake",
+        )
+        == known
+    )
+    Company.objects.create(
+        organization=organization,
+        display_name="Ambiguous Co",
+        city="Surrey",
+        created_by=user,
+        updated_by=user,
+    )
+    Company.objects.create(
+        organization=organization,
+        display_name="Ambiguous Co",
+        city="Surrey",
+        created_by=user,
+        updated_by=user,
+    )
+    assert (
+        dedupe_company(organization, ContractorResult("Ambiguous Co", "Surrey", "BC"), "fake")
+        is None
+    )
+
+
+def test_fake_provider_and_google_shell_make_no_google_request():
+    assert (
+        len(
+            FakeContractorDiscoveryProvider().search(
+                trade_key="plumbing", city="Vancouver", province="BC", radius_km=50, keywords=[]
+            )
+        )
+        == 1
+    )
+    with pytest.raises(RuntimeError, match="not configured"):
+        GooglePlacesContractorDiscoveryProvider().search()
+
+
+def test_discovery_requires_ready_scope_and_is_idempotent(
+    project, user, approved_snapshot, settings
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    with pytest.raises(ValidationError, match="Only Ready"):
+        discover_contractors(
+            project=project, package=package, actor=user, city="Vancouver", province="BC"
+        )
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    first = discover_contractors(
+        project=project,
+        package=package,
+        actor=user,
+        city="Vancouver",
+        province="BC",
+        keywords=["commercial"],
+    )
+    second = discover_contractors(
+        project=project,
+        package=package,
+        actor=user,
+        city="Vancouver",
+        province="BC",
+        keywords=["commercial"],
+    )
+    assert first.result_count == second.result_count == 1
+    assert ScopeContractorCandidate.objects.count() == 1
+    assert DiscoveryRequest.objects.count() == 2
+
+
+def test_candidate_permissions_and_human_shortlist(
+    project, user, membership, approved_snapshot, settings
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    discover_contractors(
+        project=project, package=package, actor=user, city="Vancouver", province="BC"
+    )
+    candidate = ScopeContractorCandidate.objects.get()
+    base = {
+        "organization_slug": project.organization.slug,
+        "project_pk": project.pk,
+        "candidate_pk": candidate.pk,
+    }
+    url = reverse("contractor-candidate-status", kwargs=base)
+    response = client_for(user).patch(url, {"status": "shortlisted"}, format="json")
+    assert response.status_code == 200 and response.data["status"] == "shortlisted"
+    membership.role = Membership.Role.VIEWER
+    membership.save(update_fields=("role",))
+    assert client_for(user).patch(url, {"status": "rejected"}, format="json").status_code == 403

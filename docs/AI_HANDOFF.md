@@ -43,7 +43,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - M1-UX-01 — Non-Technical Document Review UX: complete
 - M1-UX-02A — Document Archive / Restore: complete; automated validation and client manual acceptance passed September 5, 2026
 - M1-UX-03 — Smart Human Review: complete; deterministic exception triage passed automated and client manual validation September 6, 2026
-- Milestone 2: active; M2A-01 deterministic Trade Scope Builder complete, M2B contractor discovery not started
+- Milestone 2: active; M2A-01 deterministic Trade Scope Builder and M2B-01 Contractor Discovery Foundation complete; outreach/M3 not started
 - Working tree: clean
 - Ahead/behind: `0/0`
 
@@ -74,7 +74,11 @@ Document archive controls active workflow membership; it never deletes or rewrit
 
 ### M2A-01 trade scope builder
 
-M2A-01 deterministically converts approved Project Information only into trade bid packages; it never calls an AI provider and never consumes unapproved findings. The controlled taxonomy aggregates the real JD Sports Version 1 into HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements. One approved finding may source more than one package only when its text explicitly applies to multiple trades. Package versions are immutable and append-only: generation creates Draft V1, Edit creates a new Draft version, and Mark Ready creates an explicit Ready version. Repeated generation and repeated Ready actions are idempotent. Untouched legacy category-generated drafts may be superseded during explicit regeneration, while human-edited packages are preserved. All four real JD Sports packages were manually validated Ready. Contractor discovery and M2B have not started.
+M2A-01 deterministically converts approved Project Information only into trade bid packages; it never calls an AI provider and never consumes unapproved findings. The controlled taxonomy aggregates the real JD Sports Version 1 into HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements. One approved finding may source more than one package only when its text explicitly applies to multiple trades. Package versions are immutable and append-only: generation creates Draft V1, Edit creates a new Draft version, and Mark Ready creates an explicit Ready version. Repeated generation and repeated Ready actions are idempotent. Untouched legacy category-generated drafts may be superseded during explicit regeneration, while human-edited packages are preserved. All four real JD Sports packages were manually validated Ready.
+
+### M2B-01 contractor discovery foundation
+
+M2B-01 adds organization-scoped Company, Contact, and TradeCapability records plus project/scope candidate shortlists. Discovery is available only for the current Ready scope-package version, searches the internal network first, and invokes a configured provider only after an explicit user action. Provider access is abstracted behind deterministic fake and inactive Google Places implementations. Deduplication uses external provider ID, website domain, normalized phone, then normalized name plus city; ambiguous matches are preserved rather than silently merged. The fake provider and shortlist workflow were manually validated. Google Places is not active, no provider key is required, and outreach/M3 has not started.
 
 ## M1-11 manual validation
 
@@ -125,7 +129,7 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 ## Next exact action
 
-Milestone 1 is complete. M2A-01 is complete; M2B contractor discovery is next and has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
+Milestone 1 is complete. M2A-01 and M2B-01 are complete; outreach/M3 is next and has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
 
 Smart Human Review now derives machine handling from persisted evidence without another provider call. A finding is AI handled only when it is explicit or strongly supported, every provider evidence reference remains strictly and completely represented by exact revision/page provenance, it is not an open question, it has no open conflict, and no human review supersedes it. Human-reviewed decisions remain append-only and distinct. Snapshot entry decision `machine_handled` has no `FindingReview`; migration `analysis.0004` makes that honest representation possible. Run 10's current read-only split is 23 AI handled / 7 needing attention / 0 conflicting. Final project-information approval is still an authorized human action.
 

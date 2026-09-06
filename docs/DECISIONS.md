@@ -352,6 +352,16 @@ Scope content is append-only. Initial generation creates Draft V1, an estimator 
 
 **Consequence:** Approved M1 intelligence can seed practical bid scopes without another AI call or category-shaped package proliferation. Estimators retain control over edits and readiness, provenance remains traceable, and contractor discovery remains a separate later workflow.
 
+### D-044 — Contractor discovery is internal-first and human-controlled
+
+**Status:** Decided
+
+**Decision:** Contractor discovery operates only against an active scope package whose current immutable version is Ready. Organization-scoped `Company`, `Contact`, and `TradeCapability` records form the internal network. An explicit search evaluates that network before a configured discovery provider and records its exact trade, keywords, location, radius, provider, timestamp, result count, and safe metadata. Provider integration is abstracted: the deterministic fake provider supports development and tests, while Google Places is an inactive configuration shell until a separately approved integration task.
+
+Candidate deduplication is deterministic and ordered: external provider/place ID, normalized website domain, normalized phone, then normalized company name plus city. Ambiguous matches are never silently merged. Candidate, shortlisted, approved-for-outreach, and rejected states are project- and scope-bound, but shortlist and approval are explicit human actions. M2B-01 creates no outreach message, campaign, or send operation; Viewer access remains read-only.
+
+**Consequence:** Estimators can discover and curate contractors for approved Ready bid scopes without losing organization isolation, provenance, or human control. External calls and outreach remain separate, explicitly authorized later work.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology
