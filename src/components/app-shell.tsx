@@ -15,9 +15,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  MonitorPlay,
   PanelLeftClose,
-  Presentation,
   Search,
   Send,
   Settings,
@@ -28,7 +26,6 @@ import { cn } from "@/lib/utils";
 import { roleLabel } from "@/lib/auth";
 import { useAuth } from "@/components/auth/auth-provider";
 import { useOrganization } from "@/components/organizations/organization-provider";
-import { DemoNotice } from "./demo-notice";
 import { Button } from "./ui/button";
 
 const groups = [
@@ -69,36 +66,12 @@ const groups = [
   },
 ];
 
-const guideSteps = [
-  ["1", "Bid Opportunities", "/bid-opportunities"],
-  ["2", "Open Project", "/projects/retail-store-coquitlam"],
-  ["3", "Review Documents", "/projects/retail-store-coquitlam/documents"],
-  ["4", "Review AI Findings", "/projects/retail-store-coquitlam/ai-review"],
-  ["5", "Review Trade Scopes", "/projects/retail-store-coquitlam/scopes"],
-  [
-    "6",
-    "View Subcontractor Discovery",
-    "/projects/retail-store-coquitlam/contractors",
-  ],
-  ["7", "View Outreach", "/projects/retail-store-coquitlam/outreach"],
-  ["8", "Open Bid Inbox", "/projects/retail-store-coquitlam/bids"],
-  [
-    "9",
-    "Compare Electrical Bids",
-    "/projects/retail-store-coquitlam/comparisons",
-  ],
-  ["10", "Review Client Proposal", "/projects/retail-store-coquitlam/proposal"],
-  ["11", "View Award Handoff", "/awarded"],
-] as const;
-
 function Sidebar({
   open,
   onClose,
-  presentation,
 }: {
   open: boolean;
   onClose: () => void;
-  presentation: boolean;
 }) {
   const path = usePathname();
   return (
@@ -186,11 +159,9 @@ function Sidebar({
         </nav>
         <div className="border-t border-white/10 p-4">
           <div className="rounded-lg bg-white/[.06] p-3">
-            <p className="text-xs font-medium">
-              {presentation ? "Presentation Mode" : "Demo Environment"}
-            </p>
+            <p className="text-xs font-medium">Production Workspace</p>
             <p className="mt-1 text-[11px] leading-4 text-sidebar-muted">
-              Project records are persistent. Later workflow data remains simulated.
+              Organization-scoped project and document records.
             </p>
           </div>
         </div>
@@ -205,8 +176,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [presentation, setPresentation] = useState(false);
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Member";
   const initials = displayName
     .split(/\s+/)
@@ -218,7 +187,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar
         open={navOpen}
         onClose={() => setNavOpen(false)}
-        presentation={presentation}
       />
       <div className="lg:pl-[268px]">
         <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
@@ -232,15 +200,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
             <div className="hidden items-center gap-2 text-sm text-slate-500 sm:flex">
               <PanelLeftClose className="h-4 w-4" />
-              <span>
-                {presentation ? "Client Presentation" : "Bid Management"}
-              </span>
+              <span>Bid Management</span>
             </div>
           </div>
           <div className="relative flex items-center gap-2">
-            {!presentation && searchOpen && (
+            {searchOpen && (
               <label className="absolute right-[244px] top-0 hidden sm:block">
-                <span className="sr-only">Search demo</span>
+                <span className="sr-only">Search projects</span>
                 <input
                   autoFocus
                   placeholder="Search projects..."
@@ -248,57 +214,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 />
               </label>
             )}
-            {!presentation && (
+            <Button
+              onClick={() => setSearchOpen((value) => !value)}
+              aria-label={searchOpen ? "Close search" : "Open search"}
+              aria-expanded={searchOpen}
+              className="w-9 px-0"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+            <div className="relative">
               <Button
-                onClick={() => setSearchOpen((value) => !value)}
-                aria-label={searchOpen ? "Close search" : "Open search"}
-                aria-expanded={searchOpen}
-                className="w-9 px-0"
+                onClick={() => setNoticeOpen((value) => !value)}
+                aria-label="View notifications"
+                aria-expanded={noticeOpen}
+                className="relative w-9 px-0"
               >
-                <Search className="h-4 w-4" />
+                <Bell className="h-4 w-4" />
+                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
               </Button>
-            )}
-            {!presentation && (
-              <div className="relative">
-                <Button
-                  onClick={() => setNoticeOpen((value) => !value)}
-                  aria-label="View notifications"
-                  aria-expanded={noticeOpen}
-                  className="relative w-9 px-0"
-                >
-                  <Bell className="h-4 w-4" />
-                  <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
-                </Button>
-                {noticeOpen && (
-                  <div className="absolute right-0 top-12 w-72 rounded-xl border bg-white p-4 shadow-lg">
-                    <p className="text-sm font-semibold">
-                      Items requiring attention
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Five reviews are ready for an estimator on the dashboard.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            <Button
-              onClick={() => setGuideOpen(true)}
-              aria-label="Open demo guide"
-            >
-              <MonitorPlay className="h-4 w-4" />
-              <span className="hidden md:inline">Demo Guide</span>
-            </Button>
-            <Button
-              onClick={() => setPresentation((value) => !value)}
-              aria-pressed={presentation}
-              className={cn(
-                presentation &&
-                  "border-blue-700 bg-blue-700 text-white hover:bg-blue-800",
+              {noticeOpen && (
+                <div className="absolute right-0 top-12 w-72 rounded-xl border bg-white p-4 shadow-lg">
+                  <p className="text-sm font-semibold">Items requiring attention</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Open the dashboard to review current project exceptions.</p>
+                </div>
               )}
-            >
-              <Presentation className="h-4 w-4" />
-              <span className="hidden xl:inline">Presentation Mode</span>
-            </Button>
+            </div>
             <div className="ml-1 hidden items-center gap-2 border-l pl-3 sm:flex">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-[#dce8f0] text-xs font-bold text-[#163451]">
                 {initials}
@@ -323,11 +263,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        {presentation && (
-          <div className="border-b bg-blue-50 px-4 py-2 text-center text-xs font-medium text-blue-900">
-            Presentation Mode · Project records are persistent; later workflows remain demo data.
-          </div>
-        )}
         {memberships.length > 1 && (
           <div className="border-b bg-white px-4 py-2 sm:px-6 lg:px-8">
             <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600">
@@ -351,59 +286,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
-      {guideOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="demo-guide-title"
-          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"
-          onMouseDown={(event) =>
-            event.target === event.currentTarget && setGuideOpen(false)
-          }
-        >
-          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2
-                  id="demo-guide-title"
-                  className="text-lg font-semibold text-slate-900"
-                >
-                  Demo Guide
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Recommended walkthrough for the Retail Store Tenant
-                  Improvement project.
-                </p>
-              </div>
-              <button
-                autoFocus
-                onClick={() => setGuideOpen(false)}
-                aria-label="Close demo guide"
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-700"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <DemoNotice className="mt-4" />
-            <ol className="mt-4 grid gap-2 sm:grid-cols-2">
-              {guideSteps.map(([number, label, href]) => (
-                <li key={number}>
-                  <Link
-                    href={href}
-                    onClick={() => setGuideOpen(false)}
-                    className="flex min-h-12 items-center gap-3 rounded-xl border px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-700"
-                  >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                      {number}
-                    </span>
-                    {label}
-                  </Link>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

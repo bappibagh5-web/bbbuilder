@@ -10,6 +10,7 @@ test("project workflow keeps every established horizontal stage", () => {
   ]);
   assert.equal(labels.includes("AI Review"), false);
   assert.equal(labels.includes("Settings"), false);
+  assert.equal(projectWorkflowNavigation.find((tab) => tab.slug === "ai-review")?.badge, "AI-assisted");
 });
 
 test("numeric and fixture project routes remain isolated by project identity", () => {

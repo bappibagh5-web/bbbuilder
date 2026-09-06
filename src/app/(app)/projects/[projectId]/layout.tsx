@@ -20,5 +20,5 @@ export default async function WorkspaceLayout({ children, params }: { children: 
   const demoProject = getProject(projectId);
   if (!demoProject) return <ProductionProjectWorkspace projectId={projectId} />;
   const details = getProjectDetails(projectId);
-  return <div className="mx-auto max-w-[1500px] space-y-5"><ProjectWorkspaceHeader project={demoProject} /><div className="overflow-x-auto"><ProjectWorkflow stages={details.workflow} /></div><div className="rounded-xl border bg-white"><ProjectWorkspaceTabs projectId={projectId} /><div className="p-4 sm:p-5">{children}</div></div></div>;
+  return <div className="mx-auto max-w-[1500px] space-y-5"><ProjectWorkspaceHeader project={demoProject} /><div className="overflow-x-auto"><ProjectWorkflow stages={details.workflow} /></div><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,.06)]"><ProjectWorkspaceTabs projectId={projectId} /><div className="bg-slate-50/35 p-4 sm:p-6">{children}</div></div></div>;
 }
