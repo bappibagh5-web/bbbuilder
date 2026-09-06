@@ -43,7 +43,7 @@ When the user says **Sync BB Builders**, perform a read-only recovery before pro
 - M1-UX-01 — Non-Technical Document Review UX: complete
 - M1-UX-02A — Document Archive / Restore: complete; automated validation and client manual acceptance passed September 5, 2026
 - M1-UX-03 — Smart Human Review: complete; deterministic exception triage passed automated and client manual validation September 6, 2026
-- Milestone 2: active; M2A-01 and M2B-01 through M2B-03 Contractor Ranking complete; outreach/M3 not started
+- Milestone 2: active; M2A-01 and M2B-01 through M2B-06 complete; outreach/M3 not started
 - Working tree: clean
 - Ahead/behind: `0/0`
 
@@ -87,6 +87,12 @@ M2B-02 activates backend-only Google Places API (New) Text Search behind the exi
 ### M2B-03 deterministic contractor ranking
 
 M2B-03 ranks every visible scope-bound candidate without a provider or AI call. The stable additive score uses exact trade capability (30), project-city match (20), internal BB network status (18), website (5), phone (5), Google rating tiers (up to 12), review-count tiers (up to 10), and existing shortlist status (5), capped at 100. Missing ratings or review counts add nothing and are never interpreted negatively. Best Match is the default, with Internal First, Rating, Review Count, and Company Name alternatives; lower-ranked candidates remain visible. The UI presents `X/100`, deterministic Excellent/Good/Possible fit bands, and an expandable explanation containing every actual contributing signal. Real JD Sports HVAC validation showed 14 Google candidates with Best Match scores and confirmed D.Peppard Mechanical could be added through **Add to Shortlist**, after which its state displayed **Shortlisted ✓**. The unimplemented future-outreach button was removed. Ranking is guidance only—not AI scoring, approval, or outreach.
+
+### M2B-04 through M2B-06 contractor and contact readiness
+
+Trade Coverage now summarizes each Ready JD Sports scope against a configurable shortlist target of three and supports shortlisted-only filtering plus explicit removal from the shortlist. Contractor profiles preserve Google/internal company identity while keeping human-entered contacts separate. Contact readiness requires an active primary contact with an email or phone; Admin and Estimator/Operator manage contacts and Viewer remains read-only.
+
+For Google-discovered companies, **Find Contact Details** performs an explicit, backend-only, bounded lookup starting at the stored public website and following only a few same-site contact/team/about links. Suggestions show their public source and pre-fill the form, but a human must confirm before saving. Duplicate email or normalized-phone submissions are idempotent. Manual entry remains available and no-result behavior is explicit. Reliance Heating produced no suggestion during local validation because its site returned no usable public HTML to the limited client; zero contacts were created. No outreach/M3 functionality exists.
 
 ## M1-11 manual validation
 
@@ -137,7 +143,7 @@ The approved contract is 200 hours / $5,000; commercial totals are canonical in 
 
 ## Next exact action
 
-Milestone 1 is complete. M2A-01 and M2B-01 through M2B-03 are complete; outreach/M3 is next and has not started. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
+Milestone 1 is complete. M2A-01 and M2B-01 through M2B-06 are complete; outreach/M3 is next and has not started. Trade coverage, shortlist readiness and removal, contractor profiles, contact readiness, and public website contact suggestions are implemented without sending outreach. The first controlled live-provider validation is complete: Run 10 succeeded across eight pages and its strict provider-free materialization retained 30 grounded findings with 63 provenance sources. PostgreSQL null-character sanitization, a 240-second OpenAI HTTP timeout, strict whitespace-only source recovery, invalid-evidence filtering, and exact source-page navigation are now part of the implementation.
 
 Smart Human Review now derives machine handling from persisted evidence without another provider call. A finding is AI handled only when it is explicit or strongly supported, every provider evidence reference remains strictly and completely represented by exact revision/page provenance, it is not an open question, it has no open conflict, and no human review supersedes it. Human-reviewed decisions remain append-only and distinct. Snapshot entry decision `machine_handled` has no `FindingReview`; migration `analysis.0004` makes that honest representation possible. Run 10's current read-only split is 23 AI handled / 7 needing attention / 0 conflicting. Final project-information approval is still an authorized human action.
 

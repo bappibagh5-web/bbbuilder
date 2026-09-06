@@ -9,10 +9,24 @@ from apps.documents.views import ProjectDocumentContextMixin
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 from apps.scope_packages.models import ScopePackage
 
-from .models import ScopeContractorCandidate
+from .enrichment import enrich_company_contacts
+from .models import Company, Contact, ScopeContractorCandidate
 from .providers import ContractorProviderError
-from .serializers import CandidateSerializer, CandidateStatusSerializer, SearchSerializer
-from .services import discover_contractors, set_candidate_status
+from .serializers import (
+    CandidateSerializer,
+    CandidateStatusSerializer,
+    CompanyProfileSerializer,
+    ContactSerializer,
+    ContactWriteSerializer,
+    SearchSerializer,
+)
+from .services import (
+    build_trade_coverage,
+    create_contact,
+    discover_contractors,
+    set_candidate_status,
+    update_contact,
+)
 
 
 def candidates(project):
@@ -28,11 +42,107 @@ def candidates(project):
     return queryset
 
 
+def company_for_project(project, company_pk):
+    return get_object_or_404(
+        Company.objects.filter(
+            pk=company_pk,
+            organization=project.organization,
+            project_candidates__project=project,
+            project_candidates__scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE,
+        )
+        .prefetch_related("trade_capabilities", "contacts")
+        .distinct()
+    )
+
+
 class CandidateListView(ProjectDocumentContextMixin, APIView):
     permission_classes = (ActiveOrganizationMember,)
 
     def get(self, request, *args, **kwargs):
         return Response(CandidateSerializer(candidates(self.get_project()), many=True).data)
+
+
+class TradeCoverageView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        return Response(
+            build_trade_coverage(project=project, candidate_queryset=candidates(project))
+        )
+
+
+class CompanyProfileView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        company = company_for_project(project, self.kwargs["company_pk"])
+        return Response(CompanyProfileSerializer(company, context={"project": project}).data)
+
+
+class ContactEnrichmentView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        company = company_for_project(self.get_project(), self.kwargs["company_pk"])
+        return Response(enrich_company_contacts(company))
+
+
+class ContactListCreateView(ProjectDocumentContextMixin, APIView):
+    def get_permissions(self):
+        permission = (
+            ActiveOrganizationMember if self.request.method == "GET" else OrganizationOperator
+        )
+        return [permission()]
+
+    def get(self, request, *args, **kwargs):
+        company = company_for_project(self.get_project(), self.kwargs["company_pk"])
+        return Response(ContactSerializer(company.contacts.all(), many=True).data)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        company = company_for_project(project, self.kwargs["company_pk"])
+        serializer = ContactWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            contact, created = create_contact(
+                company=company,
+                project=project,
+                actor=request.user,
+                values=serializer.validated_data,
+            )
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"detail": error.messages}) from error
+        return Response(
+            ContactSerializer(contact).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ContactDetailView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def patch(self, request, *args, **kwargs):
+        project = self.get_project()
+        company = company_for_project(project, self.kwargs["company_pk"])
+        contact = get_object_or_404(
+            Contact.objects.select_related("company"),
+            pk=self.kwargs["contact_pk"],
+            company=company,
+        )
+        serializer = ContactWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            contact, _ = update_contact(
+                contact=contact,
+                project=project,
+                actor=request.user,
+                values=serializer.validated_data,
+            )
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"detail": error.messages}) from error
+        return Response(ContactSerializer(contact).data)
 
 
 class DiscoverySearchView(ProjectDocumentContextMixin, APIView):

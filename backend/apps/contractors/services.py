@@ -1,4 +1,5 @@
 import re
+from collections import Counter
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -6,10 +7,50 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.projects.audit import record_event
-from apps.scope_packages.models import ScopePackageVersion
+from apps.scope_packages.models import ScopePackage, ScopePackageVersion
 
-from .models import Company, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
+from .models import Company, Contact, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
 from .providers import build_search_queries, provider_for
+
+
+def build_trade_coverage(*, project, candidate_queryset=None, minimum_target=None):
+    target = settings.CONTRACTOR_MIN_SHORTLIST_TARGET if minimum_target is None else minimum_target
+    packages = (
+        ScopePackage.objects.filter(
+            project=project,
+            lifecycle=ScopePackage.Lifecycle.ACTIVE,
+            current_version__status=ScopePackageVersion.Status.READY,
+        )
+        .select_related("current_version")
+        .order_by("trade_category", "id")
+    )
+    queryset = candidate_queryset
+    if queryset is None:
+        queryset = ScopeContractorCandidate.objects.filter(project=project)
+    counts = Counter()
+    shortlisted = Counter()
+    for package_id, status_value in queryset.values_list("scope_package_id", "status"):
+        if status_value != ScopeContractorCandidate.Status.REJECTED:
+            counts[package_id] += 1
+        if status_value == ScopeContractorCandidate.Status.SHORTLISTED:
+            shortlisted[package_id] += 1
+    return {
+        "minimum_shortlist_target": target,
+        "trades": [
+            {
+                "scope_package": package.pk,
+                "trade_key": package.trade_key,
+                "trade_category": package.trade_category,
+                "title": package.current_version.title,
+                "candidates_found": counts[package.pk],
+                "shortlisted_count": shortlisted[package.pk],
+                "coverage_status": (
+                    "ready" if shortlisted[package.pk] >= target else "needs_more_candidates"
+                ),
+            }
+            for package in packages
+        ],
+    }
 
 
 def normalize_domain(value):
@@ -22,6 +63,96 @@ def normalize_domain(value):
 
 def normalize_phone(value):
     return "".join(re.findall(r"\d", value))
+
+
+def contact_is_ready(company):
+    return (
+        company.contacts.filter(is_active=True, is_primary=True)
+        .exclude(email="", phone="")
+        .exists()
+    )
+
+
+@transaction.atomic
+def create_contact(*, company, project, actor, values):
+    email = values.get("email", "").strip()
+    phone = normalize_phone(values.get("phone", ""))
+    existing = None
+    if email:
+        existing = company.contacts.filter(email__iexact=email).first()
+    if existing is None and phone:
+        existing = next(
+            (
+                contact
+                for contact in company.contacts.exclude(phone="")
+                if normalize_phone(contact.phone) == phone
+            ),
+            None,
+        )
+    if existing is not None:
+        return existing, False
+    contact = Contact(company=company, **values)
+    if not contact.is_active:
+        contact.is_primary = False
+    displaced = []
+    if contact.is_primary:
+        displaced = list(
+            company.contacts.filter(is_active=True, is_primary=True).values_list("pk", flat=True)
+        )
+        company.contacts.filter(pk__in=displaced).update(is_primary=False)
+    contact.full_clean()
+    contact.save()
+    record_event(
+        organization=company.organization,
+        project=project,
+        actor=actor,
+        action_code="contractor_contact.created",
+        target=contact,
+        metadata={"company_id": company.pk, "displaced_primary_contact_ids": displaced},
+    )
+    return contact, True
+
+
+@transaction.atomic
+def update_contact(*, contact, project, actor, values):
+    changed_fields = []
+    previous_active = contact.is_active
+    for field, value in values.items():
+        if getattr(contact, field) != value:
+            setattr(contact, field, value)
+            changed_fields.append(field)
+    if not contact.is_active and contact.is_primary:
+        contact.is_primary = False
+        if "is_primary" not in changed_fields:
+            changed_fields.append("is_primary")
+    displaced = []
+    if contact.is_active and contact.is_primary:
+        displaced = list(
+            contact.company.contacts.filter(is_active=True, is_primary=True)
+            .exclude(pk=contact.pk)
+            .values_list("pk", flat=True)
+        )
+        contact.company.contacts.filter(pk__in=displaced).update(is_primary=False)
+    if not changed_fields:
+        return contact, False
+    contact.full_clean()
+    contact.save(update_fields=(*changed_fields, "updated_at"))
+    state_action = "updated"
+    if previous_active != contact.is_active:
+        state_action = "reactivated" if contact.is_active else "deactivated"
+    record_event(
+        organization=contact.company.organization,
+        project=project,
+        actor=actor,
+        action_code=f"contractor_contact.{state_action}",
+        target=contact,
+        metadata={
+            "company_id": contact.company_id,
+            "changed_fields": sorted(changed_fields),
+            "displaced_primary_contact_ids": displaced,
+        },
+    )
+    return contact, True
 
 
 def normalized_name(value):

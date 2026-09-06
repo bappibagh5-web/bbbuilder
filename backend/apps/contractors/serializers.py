@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
-from .models import Company, DiscoveryRequest, ScopeContractorCandidate
+from .models import Company, Contact, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
 from .ranking import rank_candidate
+from .services import contact_is_ready
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -64,6 +65,111 @@ class CandidateSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contact
+        fields = (
+            "id",
+            "name",
+            "title",
+            "email",
+            "phone",
+            "is_primary",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class ContactWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255, required=False)
+    title = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    is_primary = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+    def validate(self, attrs):
+        if not self.partial and not attrs.get("name", "").strip():
+            raise serializers.ValidationError({"name": "This field is required."})
+        return attrs
+
+
+class TradeCapabilitySerializer(serializers.ModelSerializer):
+    trade_label = serializers.CharField(source="get_trade_key_display", read_only=True)
+
+    class Meta:
+        model = TradeCapability
+        fields = (
+            "id",
+            "trade_key",
+            "trade_label",
+            "keywords",
+            "service_cities",
+            "province",
+            "is_active",
+        )
+        read_only_fields = fields
+
+
+class CompanyProfileSerializer(CompanySerializer):
+    trade_capabilities = TradeCapabilitySerializer(many=True, read_only=True)
+    contacts = ContactSerializer(many=True, read_only=True)
+    contact_ready = serializers.SerializerMethodField()
+    shortlist_statuses = serializers.SerializerMethodField()
+    google_rating = serializers.SerializerMethodField()
+    google_review_count = serializers.SerializerMethodField()
+
+    def get_contact_ready(self, company):
+        return contact_is_ready(company)
+
+    def get_shortlist_statuses(self, company):
+        project = self.context["project"]
+        return [
+            {
+                "scope_package": candidate.scope_package_id,
+                "trade_category": candidate.scope_package.trade_category,
+                "status": candidate.status,
+            }
+            for candidate in company.project_candidates.filter(
+                project=project, scope_package__lifecycle="active"
+            ).select_related("scope_package")
+        ]
+
+    @staticmethod
+    def google_quality(company):
+        ratings = []
+        reviews = []
+        for capability in company.trade_capabilities.all():
+            metadata = (
+                capability.source_metadata if isinstance(capability.source_metadata, dict) else {}
+            )
+            rating = metadata.get("rating")
+            review_count = metadata.get("review_count")
+            if isinstance(rating, (int, float)) and not isinstance(rating, bool):
+                ratings.append(float(rating))
+            if isinstance(review_count, int) and not isinstance(review_count, bool):
+                reviews.append(review_count)
+        return max(ratings, default=None), max(reviews, default=None)
+
+    def get_google_rating(self, company):
+        return self.google_quality(company)[0]
+
+    def get_google_review_count(self, company):
+        return self.google_quality(company)[1]
+
+    class Meta(CompanySerializer.Meta):
+        fields = CompanySerializer.Meta.fields + (
+            "trade_capabilities",
+            "contacts",
+            "contact_ready",
+            "shortlist_statuses",
+            "google_rating",
+            "google_review_count",
+        )
 
 
 class DiscoveryRequestSerializer(serializers.ModelSerializer):

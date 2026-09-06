@@ -17,6 +17,7 @@ from apps.analysis.models import (
     ProjectIntelligenceSnapshotEntry,
     ProjectIntelligenceSnapshotSource,
 )
+from apps.contractors.enrichment import enrich_company_contacts
 from apps.contractors.models import (
     Company,
     Contact,
@@ -33,7 +34,12 @@ from apps.contractors.providers import (
     map_google_place,
 )
 from apps.contractors.ranking import rank_candidate
-from apps.contractors.services import dedupe_company, discover_contractors, internal_companies
+from apps.contractors.services import (
+    create_contact,
+    dedupe_company,
+    discover_contractors,
+    internal_companies,
+)
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
 from apps.projects.models import AuditEvent, Project
@@ -739,9 +745,218 @@ def test_candidate_permissions_and_human_shortlist(
     url = reverse("contractor-candidate-status", kwargs=base)
     response = client_for(user).patch(url, {"status": "shortlisted"}, format="json")
     assert response.status_code == 200 and response.data["status"] == "shortlisted"
+    response = client_for(user).patch(url, {"status": "candidate"}, format="json")
+    assert response.status_code == 200 and response.data["status"] == "candidate"
+    response = client_for(user).patch(url, {"status": "candidate"}, format="json")
+    assert response.status_code == 200 and response.data["status"] == "candidate"
     membership.role = Membership.Role.VIEWER
     membership.save(update_fields=("role",))
     assert client_for(user).patch(url, {"status": "rejected"}, format="json").status_code == 403
+
+
+def test_trade_coverage_uses_configured_shortlist_target_and_is_viewer_read_only(
+    project, user, membership, approved_snapshot, settings
+):
+    settings.CONTRACTOR_MIN_SHORTLIST_TARGET = 3
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    for index, candidate_status in enumerate(
+        [
+            ScopeContractorCandidate.Status.SHORTLISTED,
+            ScopeContractorCandidate.Status.SHORTLISTED,
+            ScopeContractorCandidate.Status.CANDIDATE,
+        ],
+        start=1,
+    ):
+        company = Company.objects.create(
+            organization=project.organization,
+            display_name=f"Coverage Contractor {index}",
+            source_type=Company.Source.INTERNAL,
+            created_by=user,
+            updated_by=user,
+        )
+        ScopeContractorCandidate.objects.create(
+            project=project,
+            scope_package=package,
+            company=company,
+            status=candidate_status,
+            created_by=user,
+            updated_by=user,
+        )
+    url = reverse(
+        "contractor-trade-coverage",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    response = client_for(user).get(url)
+    assert response.status_code == 200
+    assert response.data == {
+        "minimum_shortlist_target": 3,
+        "trades": [
+            {
+                "scope_package": package.pk,
+                "trade_key": package.trade_key,
+                "trade_category": package.trade_category,
+                "title": package.current_version.title,
+                "candidates_found": 3,
+                "shortlisted_count": 2,
+                "coverage_status": "needs_more_candidates",
+            }
+        ],
+    }
+    membership.role = Membership.Role.VIEWER
+    membership.save(update_fields=("role",))
+    assert client_for(user).get(url).status_code == 200
+    assert client_for(user).post(url, {}, format="json").status_code == 405
+
+    ScopeContractorCandidate.objects.filter(
+        project=project, scope_package=package, status=ScopeContractorCandidate.Status.CANDIDATE
+    ).update(status=ScopeContractorCandidate.Status.SHORTLISTED)
+    response = client_for(user).get(url)
+    assert response.data["trades"][0]["shortlisted_count"] == 3
+    assert response.data["trades"][0]["coverage_status"] == "ready"
+
+
+def test_contractor_profile_contact_management_readiness_and_permissions(
+    project, user, membership, approved_snapshot
+):
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="Provider Sourced Mechanical",
+        website="https://provider.example",
+        phone="807-555-0100",
+        address="1 Provider Way",
+        city="Thunder Bay",
+        province="Ontario",
+        source_type=Company.Source.DISCOVERED,
+        external_provider="google_places",
+        external_place_id="profile-google-1",
+        created_by=user,
+        updated_by=user,
+    )
+    TradeCapability.objects.create(
+        company=company,
+        trade_key=package.trade_key,
+        source_type=Company.Source.DISCOVERED,
+        source_metadata={"rating": 4.7, "review_count": 91},
+    )
+    candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=company,
+        status=ScopeContractorCandidate.Status.SHORTLISTED,
+        created_by=user,
+        updated_by=user,
+    )
+    profile_url = reverse(
+        "contractor-company-profile",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "company_pk": company.pk,
+        },
+    )
+    contacts_url = reverse(
+        "contractor-contact-list",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "company_pk": company.pk,
+        },
+    )
+    profile = client_for(user).get(profile_url)
+    assert profile.status_code == 200
+    assert profile.data["contact_ready"] is False
+    assert profile.data["google_rating"] == 4.7
+    assert profile.data["google_review_count"] == 91
+    assert profile.data["shortlist_statuses"] == [
+        {
+            "scope_package": package.pk,
+            "trade_category": package.trade_category,
+            "status": "shortlisted",
+        }
+    ]
+
+    original_company = (company.display_name, company.website, company.phone, company.address)
+    first_response = client_for(user).post(
+        contacts_url,
+        {
+            "name": "Alex Estimator",
+            "title": "Estimator",
+            "email": "alex@example.com",
+            "phone": "",
+            "is_primary": True,
+            "is_active": True,
+        },
+        format="json",
+    )
+    assert first_response.status_code == 201
+    first = Contact.objects.get(pk=first_response.data["id"])
+    assert client_for(user).get(profile_url).data["contact_ready"] is True
+
+    second_response = client_for(user).post(
+        contacts_url,
+        {
+            "name": "Morgan Manager",
+            "title": "Project Manager",
+            "phone": "807-555-0111",
+            "is_primary": True,
+            "is_active": True,
+        },
+        format="json",
+    )
+    assert second_response.status_code == 201
+    first.refresh_from_db()
+    assert first.is_primary is False
+    second_id = second_response.data["id"]
+    detail_url = reverse(
+        "contractor-contact-detail",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "company_pk": company.pk,
+            "contact_pk": second_id,
+        },
+    )
+    update_response = client_for(user).patch(
+        detail_url, {"title": "Senior Project Manager"}, format="json"
+    )
+    assert update_response.status_code == 200
+    assert update_response.data["title"] == "Senior Project Manager"
+    deactivate_response = client_for(user).patch(detail_url, {"is_active": False}, format="json")
+    assert deactivate_response.status_code == 200
+    assert deactivate_response.data["is_primary"] is False
+    assert client_for(user).get(profile_url).data["contact_ready"] is False
+    assert client_for(user).delete(detail_url).status_code == 405
+
+    company.refresh_from_db()
+    candidate.refresh_from_db()
+    assert (
+        company.display_name,
+        company.website,
+        company.phone,
+        company.address,
+    ) == original_company
+    assert candidate.status == ScopeContractorCandidate.Status.SHORTLISTED
+    assert AuditEvent.objects.filter(action_code="contractor_contact.created").count() == 2
+    assert AuditEvent.objects.filter(action_code="contractor_contact.updated").count() == 1
+    assert AuditEvent.objects.filter(action_code="contractor_contact.deactivated").count() == 1
+    assert (
+        not AuditEvent.objects.filter(action_code__startswith="contractor_contact.")
+        .exclude(project=project)
+        .exists()
+    )
+    assert not AuditEvent.objects.filter(action_code__contains="outreach").exists()
+
+    membership.role = Membership.Role.VIEWER
+    membership.save(update_fields=("role",))
+    assert client_for(user).get(profile_url).status_code == 200
+    assert client_for(user).get(contacts_url).status_code == 200
+    assert client_for(user).post(contacts_url, {"name": "Denied"}, format="json").status_code == 403
+    assert client_for(user).patch(detail_url, {"is_active": True}, format="json").status_code == 403
 
 
 def test_google_candidate_list_hides_fake_history_but_keeps_internal_and_google(
@@ -945,3 +1160,132 @@ def test_candidate_ranking_caps_at_100_and_explains_lower_quality_tiers(
     capability.source_metadata = {"rating": 5.0, "review_count": 500}
     capability.save(update_fields=("source_metadata", "updated_at"))
     assert rank_candidate(candidate).score == 100
+
+
+def test_contact_enrichment_prefills_from_limited_public_pages_without_saving(
+    project, user, approved_snapshot, settings, monkeypatch
+):
+    settings.CONTACT_ENRICHMENT_MAX_PAGES = 4
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="Public Mechanical",
+        website="https://public.example",
+        source_type=Company.Source.DISCOVERED,
+        external_provider="google_places",
+        created_by=user,
+        updated_by=user,
+    )
+    ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=company,
+        created_by=user,
+        updated_by=user,
+    )
+    pages = {
+        "https://public.example": (
+            "https://public.example",
+            '<a href="/contact">Contact</a>',
+        ),
+        "https://public.example/contact": (
+            "https://public.example/contact",
+            '<a href="mailto:bids@public.example">Taylor Smith</a>'
+            '<a href="tel:+1-807-555-0102">Call estimating</a>',
+        ),
+    }
+    monkeypatch.setattr(
+        "apps.contractors.enrichment._safe_public_url", lambda *args, **kwargs: True
+    )
+    result = enrich_company_contacts(company, fetcher=lambda url: pages.get(url))
+    assert Contact.objects.filter(company=company).count() == 0
+    assert result["pages_checked"] == ["https://public.example", "https://public.example/contact"]
+    assert result["suggestions"] == [
+        {
+            "name": "Taylor Smith",
+            "title": "",
+            "email": "bids@public.example",
+            "phone": "+1-807-555-0102",
+            "is_primary": True,
+            "is_active": True,
+            "sources": [
+                {
+                    "label": "Contact page",
+                    "url": "https://public.example/contact",
+                    "fields": ["email", "phone", "name"],
+                }
+            ],
+        }
+    ]
+
+
+def test_contact_enrichment_no_result_and_viewer_cannot_request_it(
+    project, user, membership, approved_snapshot, monkeypatch
+):
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="No Public Contact Co",
+        website="https://no-contact.example",
+        source_type=Company.Source.DISCOVERED,
+        external_provider="google_places",
+        created_by=user,
+        updated_by=user,
+    )
+    ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        company=company,
+        created_by=user,
+        updated_by=user,
+    )
+    monkeypatch.setattr(
+        "apps.contractors.views.enrich_company_contacts",
+        lambda company: {"suggestions": [], "pages_checked": [company.website]},
+    )
+    url = reverse(
+        "contractor-contact-enrichment",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "company_pk": company.pk,
+        },
+    )
+    response = client_for(user).post(url, {}, format="json")
+    assert response.status_code == 200
+    assert response.data["suggestions"] == []
+    assert Contact.objects.filter(company=company).count() == 0
+    membership.role = Membership.Role.VIEWER
+    membership.save(update_fields=("role",))
+    assert client_for(user).post(url, {}, format="json").status_code == 403
+
+
+def test_confirming_same_suggested_contact_is_idempotent(project, user):
+    company = Company.objects.create(
+        organization=project.organization,
+        display_name="Duplicate Safe Co",
+        created_by=user,
+        updated_by=user,
+    )
+    values = {
+        "name": "Alex Estimator",
+        "title": "Estimator",
+        "email": "estimating@example.com",
+        "phone": "807-555-0100",
+        "is_primary": True,
+        "is_active": True,
+    }
+    first, first_created = create_contact(
+        company=company, project=project, actor=user, values=values
+    )
+    second, second_created = create_contact(
+        company=company,
+        project=project,
+        actor=user,
+        values={**values, "email": "ESTIMATING@example.com"},
+    )
+    assert first_created is True
+    assert second_created is False
+    assert second.pk == first.pk
+    assert Contact.objects.filter(company=company).count() == 1
+    assert AuditEvent.objects.filter(action_code="contractor_contact.created").count() == 1

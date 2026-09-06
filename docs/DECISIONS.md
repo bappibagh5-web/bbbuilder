@@ -382,6 +382,16 @@ All candidates remain visible. Best Match is the default ordering, with Internal
 
 **Consequence:** Estimators can prioritize a large candidate set quickly while retaining visibility, traceability, and judgment. The same persisted inputs always produce the same score and explanation, and missing provider data cannot silently penalize a contractor.
 
+### D-047 — Contractor readiness and public contact enrichment remain human-controlled
+
+**Status:** Decided
+
+**Decision:** Trade coverage is calculated across current Ready scope packages using a configurable minimum shortlist target, defaulting to three. Candidate and shortlisted totals determine Ready or Needs more candidates presentation; filtering and removing a shortlist selection reuse the existing human candidate-state transition and never create outreach.
+
+Contractor company identity and provider-sourced Google fields remain separate from human-managed Contact records. Contact ready means at least one active primary contact has an email or phone. For Google-discovered companies, contact enrichment is an explicit operator action that begins at the stored public website, reads at most a configured small number of public HTML pages, follows only same-site contact/team/staff/people/about links, rejects non-public network destinations, and returns source-labelled suggestions without persistence. A suggestion may pre-fill the Contact form, but only explicit human confirmation creates a Contact. Manual entry remains available, duplicate email or normalized-phone submissions are idempotent, and failure to find public contact information never causes invented data. Viewer is read-only.
+
+**Consequence:** BB Builders can measure shortlist and contact readiness and reduce manual transcription without confusing discovery with approval or outreach. Public enrichment is bounded and auditable at the user interface, Google company data remains intact, and no unverified person or address is automatically added to the system.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

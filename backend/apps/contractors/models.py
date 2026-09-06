@@ -80,6 +80,16 @@ class Contact(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ("-is_primary", "name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("company",),
+                condition=models.Q(is_active=True, is_primary=True),
+                name="contractor_unique_active_primary_contact",
+            )
+        ]
+
 
 class TradeCapability(models.Model):
     company = models.ForeignKey(
