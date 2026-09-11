@@ -1,6 +1,7 @@
 import hashlib
 import json
 import urllib.error
+from collections import Counter
 from types import SimpleNamespace
 
 import pytest
@@ -12,9 +13,11 @@ from apps.analysis.models import (
     AnalysisRun,
     AnalysisTaskRun,
     ExtractedFinding,
+    FindingSource,
     ProjectIntelligenceApproval,
     ProjectIntelligenceSnapshot,
     ProjectIntelligenceSnapshotEntry,
+    ProjectIntelligenceSnapshotProvenance,
     ProjectIntelligenceSnapshotSource,
 )
 from apps.contractors.enrichment import enrich_company_contacts
@@ -43,13 +46,21 @@ from apps.contractors.services import (
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
 from apps.projects.models import AuditEvent, Project
-from apps.scope_packages.models import ScopePackage, ScopePackageSource, ScopePackageVersion
+from apps.scope_packages.models import (
+    ScopeItem,
+    ScopeItemSource,
+    ScopePackage,
+    ScopePackageSource,
+    ScopePackageVersion,
+)
 from apps.scope_packages.services import generate_scope_packages, revise_scope_package
 from apps.scope_packages.taxonomy import (
     FIRE_PROTECTION,
     GENERAL,
     HVAC,
     PLUMBING,
+    SPECIALTY_EQUIPMENT,
+    scope_items_for_entry,
     trades_for_entry,
 )
 
@@ -141,6 +152,15 @@ def approved_snapshot(project, user):
         machine_support=ExtractedFinding.Support.EXPLICIT,
         schema_version="v1",
     )
+    finding_source = FindingSource.objects.create(
+        finding=finding,
+        document_revision=revision,
+        document_page=page,
+        analysis_task_run=task,
+        source_key="c" * 64,
+        evidence_mode=FindingSource.EvidenceMode.NATIVE_TEXT,
+        evidence_excerpt="Provide mechanical ductwork.",
+    )
     snapshot = ProjectIntelligenceSnapshot.objects.create(
         project=project,
         version=1,
@@ -152,7 +172,7 @@ def approved_snapshot(project, user):
     source = ProjectIntelligenceSnapshotSource.objects.create(
         snapshot=snapshot, analysis_run=run, document_revision=revision
     )
-    ProjectIntelligenceSnapshotEntry.objects.create(
+    entry = ProjectIntelligenceSnapshotEntry.objects.create(
         snapshot=snapshot,
         snapshot_source=source,
         finding=finding,
@@ -161,6 +181,13 @@ def approved_snapshot(project, user):
         semantic_key=finding.semantic_key,
         category=finding.category,
         included_in_intelligence=True,
+    )
+    ProjectIntelligenceSnapshotProvenance.objects.create(
+        snapshot_entry=entry,
+        finding_source=finding_source,
+        document_revision=revision,
+        document_page=page,
+        analysis_task_run=task,
     )
     ProjectIntelligenceApproval.objects.create(
         project=project, snapshot=snapshot, approver=user, readiness_result={"eligible": True}
@@ -204,7 +231,18 @@ def test_approved_snapshot_generation_is_idempotent_and_traceable(project, user,
     assert package.trade_category == "HVAC / Mechanical"
     assert package.current_version.inclusions == ["Mechanical: Provide mechanical ductwork."]
     assert package.current_version.sources.count() == 1
+    assert package.current_version.scope_items.count() == 1
+    assert package.current_version.scope_items.get().sources.count() == 1
     assert package.source_snapshot_id == approved_snapshot.pk
+
+
+def test_generation_requires_frozen_snapshot_provenance(project, user, approved_snapshot):
+    ProjectIntelligenceSnapshotProvenance.objects.filter(
+        snapshot_entry__snapshot=approved_snapshot
+    ).delete()
+    with pytest.raises(ValidationError, match="has no frozen provenance"):
+        generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)
+    assert ScopePackage.objects.count() == 0
 
 
 @pytest.mark.parametrize(
@@ -226,7 +264,7 @@ def test_controlled_taxonomy_groups_findings_by_trade(subject, value, expected):
     assert trades_for_entry(entry) == expected
 
 
-def test_regeneration_supersedes_untouched_legacy_draft_but_preserves_human_edit(
+def test_regeneration_supersedes_legacy_generation_but_preserves_human_edit_history(
     project, user, approved_snapshot
 ):
     untouched = ScopePackage.objects.create(
@@ -270,7 +308,7 @@ def test_regeneration_supersedes_untouched_legacy_draft_but_preserves_human_edit
     edited.refresh_from_db()
     assert len(created) == 1
     assert untouched.lifecycle == ScopePackage.Lifecycle.SUPERSEDED
-    assert edited.lifecycle == ScopePackage.Lifecycle.ACTIVE
+    assert edited.lifecycle == ScopePackage.Lifecycle.SUPERSEDED
     assert edited.current_version.description == "Human-reviewed scope"
     assert AuditEvent.objects.filter(action_code="scope_package.generated").count() == 1
 
@@ -294,7 +332,102 @@ def test_edits_and_ready_actions_append_versions_without_rebinding_snapshot(
     assert original.title == "HVAC / Mechanical Scope" and original.status == "draft"
     assert ScopePackageVersion.objects.filter(package=package).count() == 3
     assert ScopePackageSource.objects.filter(package_version__package=package).count() == 3
+    assert ScopeItem.objects.filter(package_version__package=package).count() == 3
+    assert ScopeItemSource.objects.filter(scope_item__package_version__package=package).count() == 3
     assert package.source_snapshot_id == approved_snapshot.pk
+
+
+def test_security_grilles_are_not_misclassified_as_hvac():
+    entry = SimpleNamespace(
+        pk=1,
+        finding=SimpleNamespace(subject="Responsibility Schedule - Mobilflex"),
+        effective_value="MOBILFLEX to install security grilles (JD supply)",
+    )
+    definitions = scope_items_for_entry(entry)
+    assert len(definitions) == 1
+    assert definitions[0].trade == SPECIALTY_EQUIPMENT
+    assert definitions[0].title == "Install owner-supplied security grilles"
+    assert definitions[0].responsibility == "owner_supplied"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("Supply and install the new unit.", "supply_install"),
+        ("Install owner-supplied equipment.", "owner_supplied"),
+        ("Installation only; equipment furnished separately.", "install_only"),
+        ("Landlord-supplied controls package.", "landlord_supplied"),
+        ("Existing diffusers to remain.", "existing_to_remain"),
+        ("Relocate and reuse the existing device.", "relocate_reuse"),
+        ("Final connection by others.", "by_others"),
+        ("Coordinate permit requirements.", "unclear"),
+    ),
+)
+def test_scope_item_responsibility_is_deterministic(value, expected):
+    entry = SimpleNamespace(
+        pk=1,
+        finding=SimpleNamespace(subject="General Contractor - verify dimensions and levels"),
+        effective_value=value,
+    )
+    definitions = scope_items_for_entry(entry)
+    assert definitions
+    assert {definition.responsibility for definition in definitions} == {expected}
+
+
+def test_scope_item_decomposition_creates_multiple_grounded_items():
+    entry = SimpleNamespace(
+        pk=1,
+        finding=SimpleNamespace(subject="Demolition responsibilities"),
+        effective_value="Demolish, dispose and coordinate MEP demolition.",
+    )
+    definitions = scope_items_for_entry(entry)
+    assert len(definitions) == 5
+    assert {item.item_type for item in definitions} == {"demolition", "coordination"}
+
+
+def test_jd_intercity_v2_rules_predict_ten_trades_and_thirty_six_items():
+    subjects = (
+        "Drawing issuance / purpose and dates",
+        "Permit responsibility / scope",
+        "Owner-supplied materials (OSM) handling",
+        "General Contractor - verify dimensions and levels",
+        "Demolition responsibilities",
+        "Controlled substance removal",
+        "Landlord deliverable - vanilla shell",
+        "Survey after demolition timing",
+        "Plumbing fixtures provided",
+        "Shopfront fascia and finishes",
+        "Concealed blocking & bracing",
+        "Footwear ordering screens (owner-supplied)",
+        "Owner-supplied security/AV installers and contacts",
+        "Responsibility Schedule - Citiloc re-keying",
+        "Responsibility Schedule - Mobilflex",
+        "Unistrut and threaded rod for suspended items",
+        "Track lighting mounting",
+    )
+    counts = Counter()
+    for pk, subject in enumerate(subjects, start=1):
+        entry = SimpleNamespace(
+            pk=pk,
+            finding=SimpleNamespace(subject=subject),
+            effective_value=f"Approved source value for {subject}",
+        )
+        for item in scope_items_for_entry(entry):
+            counts[item.trade.label] += 1
+
+    assert counts == {
+        "General Requirements": 10,
+        "Demolition": 5,
+        "Environmental / Hazardous Materials": 1,
+        "Plumbing": 3,
+        "Fire Protection / Sprinkler": 1,
+        "Storefront / Architectural Millwork": 5,
+        "Electrical": 5,
+        "Low Voltage / Security / AV": 4,
+        "Doors / Hardware": 1,
+        "Specialty Equipment / Security Grilles": 1,
+    }
+    assert sum(counts.values()) == 36
 
 
 @pytest.mark.parametrize("role", [Membership.Role.ADMIN, Membership.Role.ESTIMATOR_OPERATOR])
@@ -335,6 +468,47 @@ def test_viewer_is_read_only(project, user, membership, approved_snapshot):
     assert client_for(user).post(generate, {"snapshot_id": approved_snapshot.pk}).status_code == 403
     assert client_for(user).patch(detail, {"title": "No"}, format="json").status_code == 403
     assert client_for(user).delete(detail).status_code == 405
+
+
+def test_default_list_hides_superseded_generation_and_history_can_be_requested(
+    project, user, membership, approved_snapshot
+):
+    legacy = ScopePackage.objects.create(
+        organization=project.organization,
+        project=project,
+        source_snapshot=approved_snapshot,
+        trade_key="legacy-mechanical",
+        trade_category="Legacy Mechanical",
+        generation_rule_version=1,
+        created_by=user,
+        updated_by=user,
+    )
+    legacy.current_version = ScopePackageVersion.objects.create(
+        package=legacy,
+        version=1,
+        title="Historical human-edited scope",
+        description="Preserve this content.",
+        created_by=user,
+    )
+    legacy.save(update_fields=("current_version", "updated_at"))
+    generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)
+    legacy.refresh_from_db()
+
+    url = reverse(
+        "scope-package-list",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    current = client_for(user).get(url)
+    history = client_for(user).get(url, {"include_history": "true"})
+
+    assert current.status_code == 200
+    assert len(current.data) == 1
+    assert current.data[0]["lifecycle"] == ScopePackage.Lifecycle.ACTIVE
+    assert current.data[0]["current_version"]["scope_items"][0]["sources"][0]["page_number"] == 1
+    assert history.status_code == 200
+    assert len(history.data) == 2
+    assert legacy.lifecycle == ScopePackage.Lifecycle.SUPERSEDED
+    assert legacy.current_version.description == "Preserve this content."
 
 
 def test_cross_organization_scope_isolation(project, user, membership, approved_snapshot):

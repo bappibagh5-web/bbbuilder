@@ -119,7 +119,10 @@ class NewDocumentUploadSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=255)
     category = serializers.ChoiceField(choices=Document.Category, default=Document.Category.UNKNOWN)
     discipline = serializers.ChoiceField(
-        choices=Document.Discipline, required=False, allow_blank=True, default=""
+        choices=Document.Discipline,
+        required=False,
+        allow_blank=True,
+        default=Document.Discipline.UNKNOWN,
     )
     description = serializers.CharField(required=False, allow_blank=True, default="")
     revision_label = serializers.CharField(

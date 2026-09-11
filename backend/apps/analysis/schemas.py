@@ -36,7 +36,7 @@ class MachineCandidate(BaseModel):
     subject: str = Field(min_length=1, max_length=200)
     value: str = Field(min_length=1, max_length=2000)
     support: SupportLevel
-    evidence: list[EvidenceReference] = Field(min_length=1, max_length=10)
+    evidence: list[EvidenceReference] = Field(min_length=1, max_length=100)
 
 
 class PageAnalysisResult(BaseModel):
@@ -53,7 +53,7 @@ class DocumentAnalysisResult(BaseModel):
 
     document_type_candidate: str = Field(max_length=100)
     document_summary: str = Field(max_length=3000)
-    candidates: list[MachineCandidate] = Field(max_length=500)
+    candidates: list[MachineCandidate] = Field(max_length=1000)
     unresolved_questions: list[str] = Field(max_length=100)
 
 

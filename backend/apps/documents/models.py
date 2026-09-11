@@ -149,18 +149,24 @@ class Document(ImmutableFieldsMixin):
         SCHEDULE = "schedule", "Schedule"
         SPREADSHEET = "spreadsheet", "Spreadsheet"
         IMAGE_REFERENCE = "image_reference", "Image / reference"
+        NARRATIVE = "narrative", "Narrative"
         OTHER = "other", "Other"
         UNKNOWN = "unknown", "Unknown"
 
     class Discipline(models.TextChoices):
-        GENERAL = "general", "General"
+        GENERAL = "general", "General / Multi-discipline"
         ARCHITECTURAL = "architectural", "Architectural"
         STRUCTURAL = "structural", "Structural"
-        CIVIL = "civil", "Civil"
+        CIVIL = "civil", "Civil / Site"
         MECHANICAL = "mechanical", "Mechanical"
         PLUMBING = "plumbing", "Plumbing"
         ELECTRICAL = "electrical", "Electrical"
-        FIRE_PROTECTION = "fire_protection", "Fire protection"
+        FIRE_PROTECTION = "fire_protection", "Fire Protection / Sprinkler"
+        LOW_VOLTAGE = "low_voltage", "Low Voltage / Data"
+        SECURITY = "security", "Security"
+        AV = "av", "AV"
+        SIGNAGE = "signage", "Signage"
+        ROOFING = "roofing", "Roofing"
         INTERIORS = "interiors", "Interiors"
         LANDSCAPE = "landscape", "Landscape"
         OTHER = "other", "Other"
@@ -169,7 +175,9 @@ class Document(ImmutableFieldsMixin):
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="documents")
     title = models.CharField(max_length=255)
     category = models.CharField(max_length=40, choices=Category, default=Category.UNKNOWN)
-    discipline = models.CharField(max_length=40, choices=Discipline, blank=True)
+    discipline = models.CharField(
+        max_length=40, choices=Discipline, default=Discipline.UNKNOWN, blank=True
+    )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     current_revision = models.ForeignKey(
@@ -206,6 +214,52 @@ class Document(ImmutableFieldsMixin):
 
     def __str__(self):
         return self.title
+
+
+class ProjectDocumentSelection(ImmutableFieldsMixin):
+    project = models.ForeignKey(
+        Project, on_delete=models.PROTECT, related_name="document_set_selections"
+    )
+    document = models.OneToOneField(
+        Document, on_delete=models.PROTECT, related_name="estimating_selection"
+    )
+    selected_revision = models.ForeignKey(
+        "DocumentRevision",
+        on_delete=models.PROTECT,
+        related_name="estimating_set_selections",
+    )
+    is_included = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_project_document_selections",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    immutable_fields = ("project_id", "document_id", "created_at")
+
+    class Meta:
+        ordering = ("document__category", "document__discipline", "document__title")
+
+    def clean(self):
+        super().clean()
+        if self.document_id and self.project_id and self.document.project_id != self.project_id:
+            raise ValidationError(
+                {"document": "The selected document must belong to this project."}
+            )
+        if (
+            self.selected_revision_id
+            and self.document_id
+            and self.selected_revision.document_id != self.document_id
+        ):
+            raise ValidationError(
+                {"selected_revision": "The selected revision must belong to this document."}
+            )
+
+    def __str__(self):
+        state = "Included" if self.is_included else "Excluded"
+        return f"{self.project} — {self.document.title} — {state}"
 
 
 class DocumentRevision(ImmutableFieldsMixin):

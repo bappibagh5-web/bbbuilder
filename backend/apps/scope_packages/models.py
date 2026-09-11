@@ -51,7 +51,7 @@ class ScopePackage(models.Model):
         ordering = ("trade_category", "id")
         constraints = [
             models.UniqueConstraint(
-                fields=("project", "source_snapshot", "trade_key"),
+                fields=("project", "source_snapshot", "trade_key", "generation_rule_version"),
                 name="scope_unique_project_snapshot_trade",
             )
         ]
@@ -159,4 +159,116 @@ class ScopePackageSource(ImmutableFieldsMixin):
         if not self.snapshot_entry.included_in_intelligence:
             raise ValidationError(
                 {"snapshot_entry": "Only approved included information can source a scope."}
+            )
+
+
+class ScopeItem(ImmutableFieldsMixin):
+    class ItemType(models.TextChoices):
+        DEMOLITION = "demolition", "Demolition"
+        SUPPLY_INSTALL = "supply_install", "Supply / install"
+        CONTROLS = "controls", "Controls"
+        TESTING = "testing", "Testing"
+        PERMITS = "permits", "Permits"
+        COORDINATION = "coordination", "Coordination"
+        SUBMITTALS = "submittals", "Submittals"
+        CLOSEOUT = "closeout", "Closeout"
+        EQUIPMENT = "equipment", "Equipment-specific work"
+        GENERAL = "general", "General requirement"
+
+    class Responsibility(models.TextChoices):
+        SUPPLY_INSTALL = "supply_install", "Supply & Install"
+        INSTALL_ONLY = "install_only", "Install Only"
+        OWNER_SUPPLIED = "owner_supplied", "Owner Supplied"
+        LANDLORD_SUPPLIED = "landlord_supplied", "Landlord Supplied"
+        EXISTING_TO_REMAIN = "existing_to_remain", "Existing to Remain"
+        RELOCATE_REUSE = "relocate_reuse", "Relocate-Reuse"
+        BY_OTHERS = "by_others", "By Others"
+        UNCLEAR = "unclear", "Unclear"
+
+    package_version = models.ForeignKey(
+        ScopePackageVersion, on_delete=models.PROTECT, related_name="scope_items"
+    )
+    item_key = models.SlugField(max_length=160)
+    item_type = models.CharField(max_length=30, choices=ItemType)
+    responsibility = models.CharField(
+        max_length=30,
+        choices=Responsibility,
+        default=Responsibility.UNCLEAR,
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(max_length=2000)
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "package_version_id",
+        "item_key",
+        "item_type",
+        "responsibility",
+        "title",
+        "description",
+        "sequence",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("sequence", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("package_version", "item_key"), name="scope_unique_item_key_per_version"
+            ),
+            models.UniqueConstraint(
+                fields=("package_version", "sequence"),
+                name="scope_unique_item_sequence_per_version",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.package_version} — {self.title}"
+
+
+class ScopeItemSource(ImmutableFieldsMixin):
+    scope_item = models.ForeignKey(ScopeItem, on_delete=models.PROTECT, related_name="sources")
+    snapshot_entry = models.ForeignKey(
+        ProjectIntelligenceSnapshotEntry,
+        on_delete=models.PROTECT,
+        related_name="scope_item_sources",
+    )
+    snapshot_provenance = models.ForeignKey(
+        "analysis.ProjectIntelligenceSnapshotProvenance",
+        on_delete=models.PROTECT,
+        related_name="scope_item_sources",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "scope_item_id",
+        "snapshot_entry_id",
+        "snapshot_provenance_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("scope_item_id", "snapshot_provenance_id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("scope_item", "snapshot_provenance"),
+                name="scope_unique_item_snapshot_provenance",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        package = self.scope_item.package_version.package
+        if self.snapshot_entry.snapshot_id != package.source_snapshot_id:
+            raise ValidationError(
+                {"snapshot_entry": "Source entry must belong to the package snapshot."}
+            )
+        if self.snapshot_provenance.snapshot_entry_id != self.snapshot_entry_id:
+            raise ValidationError(
+                {"snapshot_provenance": "Provenance must belong to the source entry."}
+            )
+        if not self.snapshot_entry.included_in_intelligence:
+            raise ValidationError(
+                {"snapshot_entry": "Only approved included information can source a scope item."}
             )

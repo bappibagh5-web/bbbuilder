@@ -1,6 +1,36 @@
 import { apiRequest } from "@/lib/api-client";
 
 export type ScopePackageStatus = "draft" | "ready";
+export type ScopeItemSource = {
+  id: number;
+  snapshot_entry: number;
+  finding_id: number;
+  document_id: number;
+  document_title: string;
+  document_revision: number;
+  revision_label: string;
+  page_number: number;
+  sheet_number: string;
+  evidence_excerpt: string;
+};
+export type ScopeItem = {
+  id: number;
+  item_key: string;
+  item_type: string;
+  responsibility:
+    | "supply_install"
+    | "install_only"
+    | "owner_supplied"
+    | "landlord_supplied"
+    | "existing_to_remain"
+    | "relocate_reuse"
+    | "by_others"
+    | "unclear";
+  title: string;
+  description: string;
+  sequence: number;
+  sources: ScopeItemSource[];
+};
 export type ScopePackageSource = {
   id: number;
   snapshot_entry: number;
@@ -21,6 +51,7 @@ export type ScopePackageVersion = {
   created_by: string;
   created_at: string;
   sources: ScopePackageSource[];
+  scope_items: ScopeItem[];
 };
 export type ScopePackage = {
   id: number;
@@ -50,8 +81,9 @@ function projectPath(slug: string, projectId: string | number) {
 }
 
 export const scopePackagesApi = {
-  list(slug: string, projectId: string | number, signal?: AbortSignal) {
-    return apiRequest<ScopePackage[]>(`${projectPath(slug, projectId)}/`, { signal });
+  list(slug: string, projectId: string | number, signal?: AbortSignal, includeHistory = false) {
+    const query = includeHistory ? "?include_history=true" : "";
+    return apiRequest<ScopePackage[]>(`${projectPath(slug, projectId)}/${query}`, { signal });
   },
   generate(slug: string, projectId: string | number, snapshotId: number) {
     return apiRequest<{ created_count: number; existing_count: number; packages: ScopePackage[] }>(

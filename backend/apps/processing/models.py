@@ -14,6 +14,7 @@ class ProcessingJob(ImmutableFieldsMixin):
     class JobType(models.TextChoices):
         SOURCE_VERIFICATION = "source_verification", "Source verification"
         PDF_INDEXING = "pdf_indexing", "PDF indexing"
+        PRESENTATION_INDEXING = "presentation_indexing", "Presentation indexing"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -33,6 +34,8 @@ class ProcessingJob(ImmutableFieldsMixin):
         PDF_ENCRYPTED = "pdf_encrypted", "PDF encrypted"
         PDF_CORRUPT = "pdf_corrupt", "PDF corrupt"
         INDEXING_ERROR = "indexing_error", "Indexing error"
+        NOT_PRESENTATION = "not_presentation", "Not a presentation"
+        PRESENTATION_CORRUPT = "presentation_corrupt", "Presentation corrupt"
 
     document_revision = models.ForeignKey(
         DocumentRevision, on_delete=models.PROTECT, related_name="processing_jobs"

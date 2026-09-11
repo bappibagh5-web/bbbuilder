@@ -11,6 +11,7 @@ export type DocumentCategoryCode =
   | "schedule"
   | "spreadsheet"
   | "image_reference"
+  | "narrative"
   | "other"
   | "unknown";
 
@@ -24,6 +25,11 @@ export type DocumentDisciplineCode =
   | "plumbing"
   | "electrical"
   | "fire_protection"
+  | "low_voltage"
+  | "security"
+  | "av"
+  | "signage"
+  | "roofing"
   | "interiors"
   | "landscape"
   | "other"
@@ -94,7 +100,7 @@ export type ProcessingJobStatus = "queued" | "running" | "succeeded" | "failed";
 export type ProcessingJob = {
   id: number;
   document_revision: number;
-  job_type: "source_verification" | "pdf_indexing";
+  job_type: "source_verification" | "pdf_indexing" | "presentation_indexing";
   status: ProcessingJobStatus;
   attempt_count: number;
   max_attempts: number;
@@ -114,7 +120,9 @@ export type ProcessingJob = {
     | "not_pdf"
     | "pdf_encrypted"
     | "pdf_corrupt"
-    | "indexing_error";
+    | "indexing_error"
+    | "not_presentation"
+    | "presentation_corrupt";
   error_message: string;
   result_metadata: {
     verified_byte_size?: number;
@@ -122,12 +130,14 @@ export type ProcessingJob = {
     checksum_match?: boolean;
     verified_at?: string;
     page_count?: number;
+    slide_count?: number;
     pages_with_native_text?: number;
     pages_without_native_text?: number;
     drawing_sheet_candidates?: number;
     parser_name?: string;
     parser_version?: string;
     indexed_at?: string;
+    ocr_requested?: boolean;
   };
   created_at: string;
   updated_at: string;
@@ -154,6 +164,63 @@ export type DocumentPageIndex = {
   } | null;
 };
 
+export type ProjectDocumentSetEntry = {
+  document_id: number;
+  document_title: string;
+  category: DocumentCategoryCode;
+  category_label: string;
+  discipline: DocumentDisciplineCode;
+  discipline_label: string;
+  current_revision_id: number | null;
+  revision_label: string;
+  selected_revision_id: number | null;
+  selected_page_count: number;
+  selected_pages: Array<{
+    document_page_id: number;
+    page_number: number;
+    page_label: string;
+  }>;
+  included: boolean;
+  preparation_status: "prepared" | "preparing" | "failed" | "not_prepared" | "not_supported";
+  processing_job_id: number | null;
+  page_count: number;
+  warnings: Array<{ code: "duplicate_source" | "selected_revision_superseded"; message: string }>;
+};
+
+export type ProjectDocumentSet = {
+  project_id: number;
+  groups: Array<{
+    category: DocumentCategoryCode;
+    category_label: string;
+    discipline: DocumentDisciplineCode;
+    discipline_label: string;
+    documents: ProjectDocumentSetEntry[];
+  }>;
+  included_document_count: number;
+  included_page_count: number;
+  source_manifest: Array<{
+    document_id: number;
+    document_revision_id: number;
+    page_count: number;
+    pages: Array<{
+      document_page_id: number;
+      page_number: number;
+      page_label: string;
+    }>;
+  }>;
+  coordination: {
+    selected_disciplines: DocumentDisciplineCode[];
+    responsibility_label: string;
+    flags: Array<{
+      code: "related_discipline_not_selected" | "responsibility_schedule_not_selected";
+      source_discipline: string;
+      related_discipline: string;
+      related_trade_label?: string;
+      message: string;
+    }>;
+  };
+};
+
 function projectPath(slug: string, projectId: string | number) {
   return `/organizations/${encodeURIComponent(slug)}/projects/${encodeURIComponent(String(projectId))}`;
 }
@@ -164,6 +231,22 @@ function append(form: FormData, key: string, value: string | boolean | number | 
 }
 
 export const documentsApi = {
+  documentSet(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<ProjectDocumentSet>(`${projectPath(slug, projectId)}/document-set/`, {
+      signal,
+    });
+  },
+  setDocumentIncluded(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    included: boolean,
+  ) {
+    return apiRequest<ProjectDocumentSet>(`${projectPath(slug, projectId)}/document-set/`, {
+      method: "POST",
+      body: JSON.stringify({ document_id: documentId, included }),
+    });
+  },
   list(slug: string, projectId: string | number, signal?: AbortSignal) {
     return apiRequest<PaginatedDocuments>(`${projectPath(slug, projectId)}/documents/`, {
       signal,
@@ -301,6 +384,17 @@ export const documentsApi = {
       { method: "POST", body: JSON.stringify({}) },
     );
   },
+  requestPresentationIndexing(
+    slug: string,
+    projectId: string | number,
+    documentId: number,
+    revisionId: number,
+  ) {
+    return apiRequest<ProcessingJob>(
+      `${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/index-presentation/`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
   pages(
     slug: string,
     projectId: string | number,
@@ -333,20 +427,25 @@ export const documentCategoryOptions: Array<[DocumentCategoryCode, string]> = [
   ["schedule", "Schedule"],
   ["spreadsheet", "Spreadsheet"],
   ["image_reference", "Image / reference"],
+  ["narrative", "Narrative"],
   ["other", "Other"],
 ];
 
 export const documentDisciplineOptions: Array<[DocumentDisciplineCode, string]> = [
-  ["", "Not classified"],
   ["unknown", "Unknown"],
-  ["general", "General"],
+  ["general", "General / Multi-discipline"],
   ["architectural", "Architectural"],
   ["structural", "Structural"],
-  ["civil", "Civil"],
+  ["civil", "Civil / Site"],
   ["mechanical", "Mechanical"],
   ["plumbing", "Plumbing"],
   ["electrical", "Electrical"],
-  ["fire_protection", "Fire protection"],
+  ["fire_protection", "Fire Protection / Sprinkler"],
+  ["low_voltage", "Low Voltage / Data"],
+  ["security", "Security"],
+  ["av", "AV"],
+  ["signage", "Signage"],
+  ["roofing", "Roofing"],
   ["interiors", "Interiors"],
   ["landscape", "Landscape"],
   ["other", "Other"],

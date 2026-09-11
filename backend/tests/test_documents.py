@@ -221,9 +221,30 @@ def test_document_defaults_allow_unclassified_intake(project, user):
     )
 
     assert document.category == Document.Category.UNKNOWN
-    assert document.discipline == ""
+    assert document.discipline == Document.Discipline.UNKNOWN
     assert document.current_revision is None
     assert document.is_active is True
+
+
+@pytest.mark.parametrize(
+    ("category", "discipline"),
+    [
+        (Document.Category.NARRATIVE, Document.Discipline.MECHANICAL),
+        (Document.Category.DRAWINGS, Document.Discipline.LOW_VOLTAGE),
+        (Document.Category.IMAGE_REFERENCE, Document.Discipline.SIGNAGE),
+        (Document.Category.OTHER, Document.Discipline.ROOFING),
+    ],
+)
+def test_document_supports_independent_type_and_discipline(project, user, category, discipline):
+    document = Document.objects.create(
+        project=project,
+        title="Classified source",
+        category=category,
+        discipline=discipline,
+        created_by=user,
+    )
+    assert document.category == category
+    assert document.discipline == discipline
 
 
 def test_document_project_identity_is_immutable(organization, user, project):

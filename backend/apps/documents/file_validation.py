@@ -13,6 +13,7 @@ ALLOWED_UPLOAD_TYPES = {
     ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     ".doc": {"application/msword", "application/octet-stream"},
     ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    ".pptx": {"application/vnd.openxmlformats-officedocument.presentationml.presentation"},
     ".xls": {"application/vnd.ms-excel", "application/octet-stream"},
     ".csv": {"text/csv", "application/csv", "text/plain", "application/vnd.ms-excel"},
     ".txt": {"text/plain"},
@@ -26,6 +27,7 @@ DETECTED_MIME_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".doc": "application/msword",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xls": "application/vnd.ms-excel",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -74,6 +76,8 @@ def _ooxml_kind(uploaded_file):
                 return ".docx"
             if any(name.startswith("xl/") for name in names):
                 return ".xlsx"
+            if any(name.startswith("ppt/") for name in names):
+                return ".pptx"
     except (OSError, zipfile.BadZipFile):
         return None
     finally:

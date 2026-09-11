@@ -19,6 +19,7 @@ class AnalysisTaskRunSerializer(serializers.ModelSerializer):
     document_page = serializers.IntegerField(source="document_page_id", read_only=True)
     page_number = serializers.IntegerField(source="document_page.page_number", read_only=True)
     sheet_number = serializers.SerializerMethodField()
+    reused_from = serializers.IntegerField(source="reused_from_id", read_only=True)
 
     class Meta:
         model = AnalysisTaskRun
@@ -40,6 +41,7 @@ class AnalysisTaskRunSerializer(serializers.ModelSerializer):
             "input_metadata",
             "structured_result",
             "usage_metadata",
+            "reused_from",
             "queued_at",
             "started_at",
             "finished_at",
@@ -63,12 +65,14 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
     requested_by = serializers.CharField(source="requested_by.email", read_only=True)
     predecessor = serializers.IntegerField(source="predecessor_id", read_only=True)
     task_counts = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
     input_manifest = serializers.SerializerMethodField()
 
     class Meta:
         model = AnalysisRun
         fields = (
             "id",
+            "run_kind",
             "document_revision",
             "document",
             "requested_by",
@@ -83,6 +87,7 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
             "result_summary",
             "usage_metadata",
             "task_counts",
+            "progress",
             "queued_at",
             "started_at",
             "finished_at",
@@ -94,21 +99,64 @@ class AnalysisRunSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_task_counts(self, obj):
-        counts = {"total": 0, "queued": 0, "running": 0, "succeeded": 0, "failed": 0}
+        counts = {
+            "total": 0,
+            "queued": 0,
+            "running": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
         for task in obj.task_runs.all():
             counts["total"] += 1
             counts[task.status] += 1
         return counts
 
-    def get_input_manifest(self, obj):
+    def get_progress(self, obj):
+        tasks = list(obj.task_runs.all())
+        pages = [task for task in tasks if task.task_type == AnalysisTaskRun.TaskType.PAGE_ANALYSIS]
+        synthesis = next(
+            (
+                task
+                for task in tasks
+                if task.task_type == AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS
+            ),
+            None,
+        )
         return {
+            "completed": sum(task.status == AnalysisTaskRun.Status.SUCCEEDED for task in pages),
+            "total": len(pages),
+            "active": sum(task.status == AnalysisTaskRun.Status.RUNNING for task in pages),
+            "queued": sum(task.status == AnalysisTaskRun.Status.QUEUED for task in pages),
+            "failed": sum(task.status == AnalysisTaskRun.Status.FAILED for task in pages),
+            "cancelled": sum(task.status == AnalysisTaskRun.Status.CANCELLED for task in pages),
+            "active_pages": [
+                task.document_page.page_number
+                for task in pages
+                if task.status == AnalysisTaskRun.Status.RUNNING
+            ],
+            "synthesis": synthesis.status if synthesis else "not_created",
+        }
+
+    def get_input_manifest(self, obj):
+        manifest = {
             "document_revision_id": obj.input_manifest.get("document_revision_id"),
             "page_ids": obj.input_manifest.get("page_ids", []),
             "page_count": obj.input_manifest.get("page_count", 0),
         }
+        if obj.run_kind == AnalysisRun.RunKind.PROJECT_SET:
+            manifest.update(
+                {
+                    "project_id": obj.input_manifest.get("project_id"),
+                    "document_revision_ids": obj.input_manifest.get("document_revision_ids", []),
+                    "documents": obj.input_manifest.get("documents", []),
+                }
+            )
+        return manifest
 
 
 class FindingSourceSerializer(serializers.ModelSerializer):
+    document = serializers.IntegerField(source="document_revision.document_id", read_only=True)
     document_title = serializers.CharField(
         source="document_revision.document.title", read_only=True
     )
@@ -128,6 +176,7 @@ class FindingSourceSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "document_revision",
+            "document",
             "document_page",
             "document_title",
             "revision_label",

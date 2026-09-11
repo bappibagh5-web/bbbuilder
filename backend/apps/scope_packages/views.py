@@ -23,22 +23,26 @@ def api_validation_error(error):
     return serializers.ValidationError({"detail": error.messages})
 
 
-def package_queryset(project):
-    return (
-        ScopePackage.objects.filter(project=project, lifecycle=ScopePackage.Lifecycle.ACTIVE)
-        .select_related(
-            "project",
-            "organization",
-            "source_snapshot__approval",
-            "created_by",
-            "updated_by",
-            "current_version__created_by",
-        )
-        .prefetch_related(
-            "versions__created_by",
-            "versions__sources__snapshot_entry__finding",
-            "versions__sources__snapshot_entry__provenance",
-        )
+def package_queryset(project, *, include_history=False):
+    queryset = ScopePackage.objects.filter(project=project)
+    if not include_history:
+        queryset = queryset.filter(lifecycle=ScopePackage.Lifecycle.ACTIVE)
+    return queryset.select_related(
+        "project",
+        "organization",
+        "source_snapshot__approval",
+        "created_by",
+        "updated_by",
+        "current_version__created_by",
+    ).prefetch_related(
+        "versions__created_by",
+        "versions__sources__snapshot_entry__finding",
+        "versions__sources__snapshot_entry__provenance",
+        "versions__scope_items__sources__snapshot_entry",
+        "versions__scope_items__sources__snapshot_provenance__document_revision__document",
+        "versions__scope_items__sources__snapshot_provenance__document_page",
+        "versions__scope_items__sources__snapshot_provenance__drawing_sheet",
+        "versions__scope_items__sources__snapshot_provenance__finding_source",
     )
 
 
@@ -46,9 +50,11 @@ class ScopePackageListView(ProjectDocumentContextMixin, APIView):
     permission_classes = (ActiveOrganizationMember,)
 
     def get(self, request, *args, **kwargs):
-        return Response(
-            ScopePackageSerializer(package_queryset(self.get_project()), many=True).data
+        queryset = package_queryset(
+            self.get_project(),
+            include_history=request.query_params.get("include_history") == "true",
         )
+        return Response(ScopePackageSerializer(queryset, many=True).data)
 
 
 class ScopePackageGenerateView(ProjectDocumentContextMixin, APIView):

@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.error
+import zipfile
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ from apps.analysis.providers import (
 from apps.analysis.rendering import PageRenderFailure, render_page_data_url
 from apps.analysis.sanitization import sanitize_provider_value
 from apps.analysis.schemas import validate_result
+from apps.analysis.serializers import AnalysisRunSerializer
 from apps.analysis.services import (
     AI_HANDLED,
     CONFLICTING,
@@ -43,12 +45,15 @@ from apps.analysis.services import (
     HUMAN_NEEDS_FOLLOW_UP,
     NEEDS_ATTENTION,
     _claim_run,
+    _filter_synthesis_evidence,
     _grounded_excerpt,
     approve_intelligence_snapshot,
+    cancel_analysis_run,
     create_intelligence_snapshot,
     detect_conflicts,
     dispatch_analysis_run,
     execute_analysis_run,
+    execute_analysis_task,
     finding_handling_status,
     materialize_findings,
     recover_stale_analysis_runs,
@@ -446,7 +451,11 @@ def test_unsupported_non_pdf_is_rejected(revision, user):
 
 class InvalidProvider:
     def analyze(self, **kwargs):
-        return ProviderResult({"not": "the schema"})
+        return ProviderResult(
+            {"not": "the schema"},
+            "invalid-response-request",
+            {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+        )
 
 
 @override_settings(AI_PROVIDER_CLASS="tests.test_analysis.InvalidProvider")
@@ -456,7 +465,72 @@ def test_invalid_structured_output_fails_without_persisting_result(revision, use
     run.refresh_from_db()
     assert run.status == "failed" and run.failure_code == "invalid_structured_response"
     assert not run.result_summary
-    assert run.task_runs.filter(status="failed", structured_result={}).exists()
+    failed = run.task_runs.get(status="failed", structured_result={})
+    assert failed.provider_request_id == "invalid-response-request"
+    assert failed.usage_metadata["total_tokens"] == 6
+
+
+def test_synthesis_filters_invalid_evidence_without_losing_grounded_candidates(revision, user):
+    page1 = revision.pages.get(page_number=1)
+    run = request_analysis_run(revision=revision, requested_by=user)
+    run.task_runs.filter(task_type="page_analysis").update(status="succeeded")
+    synthesis = run.task_runs.get(task_type="document_synthesis")
+    exact = {
+        "document_page_id": page1.pk,
+        "page_number": 1,
+        "drawing_sheet_id": None,
+        "sheet_number": "",
+        "evidence_excerpt": "Bid closes September 15.",
+        "visual_evidence_description": "",
+    }
+    whitespace = {**exact, "evidence_excerpt": "Bid closes\nSeptember 15."}
+    invalid = {**exact, "document_page_id": 999999}
+    wrong_sheet = {**exact, "drawing_sheet_id": 999999, "sheet_number": "WRONG"}
+    paraphrased = {**exact, "evidence_excerpt": "The bid is due in September."}
+    result = {
+        "document_type_candidate": "drawings",
+        "document_summary": "Summary",
+        "unresolved_questions": [],
+        "candidates": [
+            {
+                "category": "date_deadline",
+                "subject": "Bid deadline",
+                "value": "September 15",
+                "support": "explicit",
+                "evidence": [exact, invalid, wrong_sheet, paraphrased],
+            },
+            {
+                "category": "project_fact",
+                "subject": "Recovered source",
+                "value": "Confirmed",
+                "support": "strongly_supported",
+                "evidence": [whitespace],
+            },
+            {
+                "category": "open_question",
+                "subject": "Ungrounded",
+                "value": "Unknown",
+                "support": "uncertain",
+                "evidence": [invalid],
+            },
+        ],
+    }
+    original = deepcopy(result)
+
+    filtered, counts = _filter_synthesis_evidence(synthesis, result)
+
+    assert len(filtered["candidates"]) == 2
+    assert filtered["candidates"][0]["evidence"] == [exact]
+    assert filtered["candidates"][1]["evidence"][0]["evidence_excerpt"] == (
+        "Bid closes September 15."
+    )
+    assert counts == {
+        "accepted": 1,
+        "recovered_whitespace": 1,
+        "rejected": 4,
+        "skipped": 1,
+    }
+    assert result == original
 
 
 class TimeoutProvider:
@@ -491,6 +565,84 @@ def test_transient_retry_is_bounded_and_retry_creates_new_run(render, revision, 
     assert run.status == "failed" and provider.calls == 2
     replacement = retry_analysis_run(run=run, requested_by=user)
     assert replacement.predecessor_id == run.pk and run.status == "failed"
+
+
+def test_cancel_preserves_succeeded_pages_and_closes_outstanding_work(revision, user, membership):
+    run = request_analysis_run(revision=revision, requested_by=user)
+    completed = run.task_runs.filter(task_type="page_analysis").first()
+    completed.status = AnalysisTaskRun.Status.SUCCEEDED
+    completed.structured_result = {"candidates": []}
+    completed.save(update_fields=("status", "structured_result", "updated_at"))
+
+    cancelled, created = cancel_analysis_run(run=run, actor=user)
+
+    assert created and cancelled.status == AnalysisRun.Status.CANCELLED
+    completed.refresh_from_db()
+    assert completed.status == AnalysisTaskRun.Status.SUCCEEDED
+    assert not cancelled.task_runs.filter(status__in=("queued", "running")).exists()
+    assert AuditEvent.objects.filter(
+        action_code="analysis.cancelled", target_id=str(run.pk)
+    ).exists()
+
+
+def test_retry_reuses_only_compatible_successful_page_results(revision, user):
+    run = request_analysis_run(revision=revision, requested_by=user)
+    source = run.task_runs.filter(task_type="page_analysis").first()
+    source.status = AnalysisTaskRun.Status.SUCCEEDED
+    source.structured_result = {"candidates": []}
+    source.finished_at = timezone.now()
+    source.save(update_fields=("status", "structured_result", "finished_at", "updated_at"))
+    AnalysisRun.objects.filter(pk=run.pk).update(status=AnalysisRun.Status.FAILED)
+    run.refresh_from_db()
+
+    replacement = retry_analysis_run(run=run, requested_by=user)
+    reused = replacement.task_runs.get(document_page=source.document_page)
+
+    assert reused.status == AnalysisTaskRun.Status.SUCCEEDED
+    assert reused.reused_from_id == source.pk
+    assert reused.structured_result == source.structured_result
+    assert reused.attempt_count == 0
+
+
+def test_synthesis_waits_for_every_page_task(revision, user):
+    run = request_analysis_run(revision=revision, requested_by=user)
+    synthesis = run.task_runs.get(task_type=AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS)
+    outcome = execute_analysis_task(synthesis.pk, AnalysisTaskRun.TaskType.DOCUMENT_SYNTHESIS)
+    synthesis.refresh_from_db()
+    assert outcome == {"outcome": "waiting"}
+    assert synthesis.status == AnalysisTaskRun.Status.QUEUED
+
+
+@patch("apps.analysis.tasks.process_analysis_page_task.apply_async")
+def test_dispatch_publishes_one_durable_task_per_queued_page(apply_async, revision, user):
+    apply_async.side_effect = [SimpleNamespace(id="page-1"), SimpleNamespace(id="page-2")]
+    run = request_analysis_run(revision=revision, requested_by=user)
+
+    assert dispatch_analysis_run(run.pk) is True
+    assert apply_async.call_count == 2
+    assert {call.kwargs["args"][0] for call in apply_async.call_args_list} == set(
+        run.task_runs.filter(task_type="page_analysis").values_list("pk", flat=True)
+    )
+
+
+def test_run_progress_counts_pages_separately_from_synthesis(revision, user):
+    run = request_analysis_run(revision=revision, requested_by=user)
+    first = run.task_runs.filter(task_type="page_analysis").first()
+    first.status = AnalysisTaskRun.Status.SUCCEEDED
+    first.save(update_fields=("status", "updated_at"))
+    run = AnalysisRun.objects.prefetch_related("task_runs__document_page").get(pk=run.pk)
+
+    progress = AnalysisRunSerializer(run).data["progress"]
+    assert progress == {
+        "completed": 1,
+        "total": 2,
+        "active": 0,
+        "queued": 1,
+        "failed": 0,
+        "cancelled": 0,
+        "active_pages": [],
+        "synthesis": "queued",
+    }
 
 
 def test_operator_api_can_request_viewer_can_only_read(revision, user, membership):
@@ -593,6 +745,77 @@ class ReadStorage:
 
     def open(self, key):
         return io.BytesIO(self.content)
+
+
+def picture_presentation():
+    presentation = (
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>'
+        '<p:sldSz cx="12192000" cy="6858000"/></p:presentation>'
+    )
+    presentation_rels = (
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Target="slides/slide3.xml"/></Relationships>'
+    )
+    pictures = []
+    relationships = []
+    for number in range(1, 5):
+        pictures.append(
+            f'<p:pic><p:blipFill><a:blip r:embed="rId{number}"/></p:blipFill>'
+            f'<p:spPr><a:xfrm><a:off x="{number * 100000}" y="{number * 100000}"/>'
+            '<a:ext cx="1000000" cy="600000"/></a:xfrm></p:spPr></p:pic>'
+        )
+        relationships.append(
+            f'<Relationship Id="rId{number}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="../media/image{number}.png"/>'
+        )
+    slide = (
+        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f"<p:cSld><p:spTree>{''.join(pictures)}</p:spTree></p:cSld></p:sld>"
+    )
+    slide_rels = (
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f"{''.join(relationships)}</Relationships>"
+    )
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20), False)
+    pixmap.clear_with(0x336699)
+    image = pixmap.tobytes("png")
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("ppt/presentation.xml", presentation)
+        archive.writestr("ppt/_rels/presentation.xml.rels", presentation_rels)
+        archive.writestr("ppt/slides/slide3.xml", slide)
+        archive.writestr("ppt/slides/_rels/slide3.xml.rels", slide_rels)
+        for number in range(1, 5):
+            archive.writestr(f"ppt/media/image{number}.png", image)
+    return stream.getvalue()
+
+
+def test_presentation_vision_slide_composes_embedded_images(revision):
+    page = revision.pages.get(page_number=1)
+    asset = revision.project_file.file_asset
+    type(asset).objects.filter(pk=asset.pk).update(
+        detected_mime_type=(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
+        original_filename="Plinth Layout - INCTY.pptx",
+    )
+    page = type(page).objects.get(pk=page.pk)
+
+    with patch(
+        "apps.analysis.rendering.get_object_storage",
+        return_value=ReadStorage(picture_presentation()),
+    ):
+        data_url, metadata = render_page_data_url(page)
+
+    assert data_url.startswith("data:image/png;base64,")
+    assert metadata["render_format"] == "png"
+    assert metadata["render_width"] <= 2048
+    assert metadata["render_height"] <= 2048
 
 
 def test_exact_page_render_is_bounded_and_temp_files_are_cleaned(revision):
@@ -852,7 +1075,7 @@ def test_stale_recovery_is_bounded_idempotent_and_does_not_steal_live_run(revisi
 
 def test_dispatch_failure_preserves_queue_and_redispatch_is_idempotent(revision, user):
     run = request_analysis_run(revision=revision, requested_by=user)
-    with patch("apps.analysis.tasks.process_analysis_run.apply_async", side_effect=OSError()):
+    with patch("apps.analysis.tasks.process_analysis_page_task.apply_async", side_effect=OSError()):
         assert dispatch_analysis_run(run.pk) is False
     run.refresh_from_db()
     assert run.status == "queued" and run.last_dispatched_at is None
@@ -1269,6 +1492,7 @@ def test_conflict_detection_is_conservative_and_idempotent(revision, user, membe
     original.category = "responsibility"
     original.semantic_key = "responsibility.fixture_supply"
     original.source_candidate_key = "responsibility-a"
+    original.subject = "Fixture supply"
     original.pk = None
     original._state.adding = True
     original.save(force_insert=True)
@@ -1287,11 +1511,71 @@ def test_conflict_detection_is_conservative_and_idempotent(revision, user, membe
     )
     original.normalized_machine_value = "general contractor"
     ExtractedFinding.objects.filter(pk=original.pk).update(
-        normalized_machine_value="general contractor", machine_value="General contractor"
+        normalized_machine_value="general contractor",
+        machine_value="General contractor",
+        subject="Fixture supply",
     )
     created = detect_conflicts(analysis_run=run, actor=user)
     assert len(created) == 1
     assert set(created[0].findings.values_list("pk", flat=True)) == {original.pk, second.pk}
+    assert detect_conflicts(analysis_run=run, actor=user) == []
+
+
+def test_conflict_detection_does_not_compare_quote_terms_with_contact_information(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    task = run.task_runs.get(task_type="document_synthesis")
+    common = dict(
+        analysis_run=run,
+        analysis_task_run=task,
+        document_revision=revision,
+        semantic_key="commercial.electrical.commercial",
+        category="commercial",
+        subject="Electrical commercial requirement",
+        machine_support="explicit",
+        schema_version=run.schema_version,
+    )
+    for key, value in (
+        ("commercial-payment", "Quotation is Net 30 with delivery included."),
+        ("commercial-contact", "Design contact email is lighting@example.invalid."),
+    ):
+        ExtractedFinding.objects.create(
+            **common,
+            source_candidate_key=key,
+            machine_value=value,
+            normalized_machine_value=value.casefold(),
+        )
+
+    assert detect_conflicts(analysis_run=run, actor=user) == []
+
+
+def test_conflict_detection_does_not_compare_project_issue_with_product_revision(
+    revision, user, membership
+):
+    run = completed_run(revision, user)
+    task = run.task_runs.get(task_type="document_synthesis")
+    common = dict(
+        analysis_run=run,
+        analysis_task_run=task,
+        document_revision=revision,
+        semantic_key="date_deadline.electrical.date.deadline",
+        category="date_deadline",
+        subject="Electrical date",
+        machine_support="explicit",
+        schema_version=run.schema_version,
+    )
+    for key, value in (
+        ("project-ifc-date", "Issued for construction on 2026-04-10."),
+        ("product-revision-date", "Manufacturer product data revision 2022-06-01."),
+    ):
+        ExtractedFinding.objects.create(
+            **common,
+            source_candidate_key=key,
+            machine_value=value,
+            normalized_machine_value=value.casefold(),
+        )
+
     assert detect_conflicts(analysis_run=run, actor=user) == []
 
 

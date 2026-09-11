@@ -5,6 +5,17 @@ export function scopePackageCounts(packages: Pick<ScopePackage, "current_version
   return { total: packages.length, ready, draft: packages.length - ready };
 }
 
+export function scopeItemCount(packages: Pick<ScopePackage, "current_version">[]) {
+  return packages.reduce((total, item) => total + item.current_version.scope_items.length, 0);
+}
+
+export function scopePackageGenerations(packages: ScopePackage[]) {
+  return {
+    active: packages.filter((item) => item.lifecycle === "active"),
+    historical: packages.filter((item) => item.lifecycle === "superseded"),
+  };
+}
+
 export function linesToItems(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }

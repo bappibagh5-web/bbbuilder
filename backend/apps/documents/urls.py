@@ -6,6 +6,7 @@ from .views import (
     DocumentRevisionViewSet,
     DocumentViewSet,
     NewDocumentUploadView,
+    ProjectDocumentSetView,
     RevisionDownloadView,
     RevisionUploadView,
     SetCurrentRevisionView,
@@ -19,6 +20,11 @@ revision_collection = DocumentRevisionViewSet.as_view({"get": "list"})
 revision_detail = DocumentRevisionViewSet.as_view({"get": "retrieve"})
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/document-set/",
+        ProjectDocumentSetView.as_view(),
+        name="project-document-set",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/",
         document_collection,

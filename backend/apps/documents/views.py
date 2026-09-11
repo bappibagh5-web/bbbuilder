@@ -19,6 +19,7 @@ from apps.projects.audit import record_event
 from apps.projects.models import Project
 from apps.projects.views import ProjectDomainPagination
 
+from .document_sets import project_document_set, set_document_included
 from .models import Document, DocumentRevision
 from .serializers import (
     DocumentRevisionSerializer,
@@ -77,6 +78,33 @@ class ProjectDocumentContextMixin:
         return self.project
 
 
+class ProjectDocumentSetView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationReadWritePermission,)
+
+    def get(self, request, *args, **kwargs):
+        return Response(project_document_set(self.get_project()))
+
+    def post(self, request, *args, **kwargs):
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["document_id"] = serializers.IntegerField(min_value=1)
+        serializer.fields["included"] = serializers.BooleanField()
+        serializer.is_valid(raise_exception=True)
+        project = self.get_project()
+        document = get_object_or_404(
+            document_queryset(project), pk=serializer.validated_data["document_id"]
+        )
+        try:
+            set_document_included(
+                project=project,
+                document=document,
+                included=serializer.validated_data["included"],
+                actor=request.user,
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(project_document_set(project))
+
+
 class DocumentViewSet(
     ProjectDocumentContextMixin,
     mixins.ListModelMixin,
@@ -104,11 +132,16 @@ class DocumentViewSet(
         after = {field: getattr(document, field) for field in fields}
         changed = [field for field in fields if before[field] != after[field]]
         if changed:
+            classification_fields = {"category", "discipline"}
             record_event(
                 organization=document.project.organization,
                 project=document.project,
                 actor=self.request.user,
-                action_code="document.updated",
+                action_code=(
+                    "document.classification_updated"
+                    if set(changed).issubset(classification_fields)
+                    else "document.updated"
+                ),
                 target=document,
                 metadata={"changed_fields": changed, "before": before, "after": after},
             )

@@ -136,17 +136,28 @@ AI_PROVIDER = env("AI_PROVIDER", default="openai")
 AI_MODEL = env("AI_MODEL", default="gpt-5-mini")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 AI_AUTO_DISPATCH = env.bool("AI_AUTO_DISPATCH", default=True)
-AI_MAX_PAGES_PER_RUN = env.int("AI_MAX_PAGES_PER_RUN", default=50)
+AI_MAX_PAGES_PER_RUN = env.int("AI_MAX_PAGES_PER_RUN", default=150)
 AI_MAX_NATIVE_TEXT_CHARS = env.int("AI_MAX_NATIVE_TEXT_CHARS", default=30000)
 AI_RENDER_MAX_DIMENSION = env.int("AI_RENDER_MAX_DIMENSION", default=2048)
 AI_TASK_MAX_ATTEMPTS = env.int("AI_TASK_MAX_ATTEMPTS", default=3)
 AI_RETRY_BASE_SECONDS = env.int("AI_RETRY_BASE_SECONDS", default=30)
+AI_RETRY_MAX_SECONDS = env.int("AI_RETRY_MAX_SECONDS", default=15 * 60)
 AI_RUN_LEASE_SECONDS = env.int("AI_RUN_LEASE_SECONDS", default=30 * 60)
+AI_PAGE_CONCURRENCY = env.int("AI_PAGE_CONCURRENCY", default=3)
+AI_PAGE_RATE_LIMIT = env("AI_PAGE_RATE_LIMIT", default="30/m")
 AI_PROVIDER_CLASS = env(
     "AI_PROVIDER_CLASS", default="apps.analysis.providers.OpenAIAnalysisProvider"
 )
 AI_FAKE_MODE = env("AI_FAKE_MODE", default="success")
 AI_FAKE_INCLUDE_USAGE = env.bool("AI_FAKE_INCLUDE_USAGE", default=True)
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_ROUTES = {
+    "apps.analysis.tasks.process_analysis_page_task": {"queue": "analysis-pages"},
+    "apps.analysis.tasks.process_analysis_synthesis_task": {"queue": "analysis-synthesis"},
+}
+CELERY_TASK_ANNOTATIONS = {
+    "apps.analysis.tasks.process_analysis_page_task": {"rate_limit": AI_PAGE_RATE_LIMIT}
+}
 
 FRONTEND_ORIGIN = env("FRONTEND_ORIGIN", default="")
 CORS_ALLOWED_ORIGINS = env.list(

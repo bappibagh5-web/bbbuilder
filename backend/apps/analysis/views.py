@@ -1,4 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.db.models import Exists, OuterRef, Prefetch, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
@@ -10,7 +12,10 @@ from apps.organizations.permissions import ActiveOrganizationMember, Organizatio
 
 from .models import (
     AnalysisRun,
+    AnalysisTaskRun,
     ExtractedFinding,
+    FindingReview,
+    FindingSource,
     IntelligenceConflict,
     ProjectIntelligenceApproval,
     ProjectIntelligenceSnapshot,
@@ -33,10 +38,12 @@ from .serializers import (
 from .services import (
     AI_HANDLED,
     approve_intelligence_snapshot,
+    cancel_analysis_run,
     create_intelligence_snapshot,
     finding_handling_status,
     materialize_findings,
     request_analysis_run,
+    request_project_set_analysis_run,
     resolve_conflict,
     retry_analysis_run,
     review_finding,
@@ -48,9 +55,143 @@ from .services import (
 def run_queryset(project):
     return (
         AnalysisRun.objects.filter(document_revision__document__project=project)
-        .select_related("document_revision__document", "requested_by", "predecessor")
+        .select_related(
+            "document_revision__document", "project_context", "requested_by", "predecessor"
+        )
         .prefetch_related("task_runs")
     )
+
+
+def latest_project_review_run(project):
+    runs = (
+        run_queryset(project)
+        .filter(run_kind=AnalysisRun.RunKind.PROJECT_SET)
+        .order_by("-created_at", "-id")
+    )
+    return runs.filter(status=AnalysisRun.Status.SUCCEEDED).first() or runs.first()
+
+
+def summary_finding_queryset(project):
+    source_queryset = FindingSource.objects.select_related(
+        "document_page__drawing_sheet", "document_revision__document", "analysis_task_run"
+    )
+    review_queryset = FindingReview.objects.select_related("reviewer")
+    return (
+        ExtractedFinding.objects.filter(analysis_run__document_revision__document__project=project)
+        .select_related("analysis_run")
+        .prefetch_related(
+            Prefetch("sources", queryset=source_queryset),
+            Prefetch("reviews", queryset=review_queryset),
+        )
+    )
+
+
+def project_review_summary_rows(project, run):
+    latest_review = FindingReview.objects.filter(finding_id=OuterRef("pk")).order_by(
+        "-created_at", "-id"
+    )
+    return list(
+        ExtractedFinding.objects.filter(
+            analysis_run=run,
+            analysis_run__document_revision__document__project=project,
+        )
+        .annotate(
+            latest_review_decision=Subquery(latest_review.values("decision")[:1]),
+            has_source=Exists(FindingSource.objects.filter(finding_id=OuterRef("pk"))),
+        )
+        .values(
+            "id",
+            "source_candidate_key",
+            "category",
+            "machine_support",
+            "latest_review_decision",
+            "has_source",
+        )
+    )
+
+
+def finding_matches_review_filter(finding, review_filter, *, open_conflict_finding_ids):
+    handling = finding_handling_status(finding, open_conflict_finding_ids=open_conflict_finding_ids)
+    if review_filter == "ai_handled":
+        return handling == AI_HANDLED
+    if review_filter == "needs_attention":
+        return handling in {"needs_attention", "human_needs_follow_up"}
+    if review_filter == "conflicts":
+        return handling == "conflicting"
+    if review_filter == "reviewed_by_you":
+        return handling.startswith("human_")
+    return True
+
+
+def summary_handling_status(row, open_conflict_finding_ids):
+    if row["id"] in open_conflict_finding_ids:
+        return "conflicting"
+    decision = row["latest_review_decision"]
+    if decision:
+        return {
+            "accepted": "human_confirmed",
+            "edited_accepted": "human_edited",
+            "rejected": "human_rejected",
+            "needs_clarification": "human_needs_follow_up",
+        }[decision]
+    if row["category"] == ExtractedFinding.Category.OPEN_QUESTION:
+        return "needs_attention"
+    if row["machine_support"] not in {
+        ExtractedFinding.Support.EXPLICIT,
+        ExtractedFinding.Support.STRONGLY_SUPPORTED,
+    }:
+        return "needs_attention"
+    return AI_HANDLED if row["has_source"] else "needs_attention"
+
+
+def project_review_summary(run, findings, *, open_conflict_finding_ids):
+    counts = {
+        "total": len(findings),
+        "confirmed": 0,
+        "not_relevant": 0,
+        "follow_up": 0,
+        "unreviewed": 0,
+        "ai_handled": 0,
+        "conflicting": 0,
+        "reviewed_by_human": 0,
+        "needs_attention": 0,
+    }
+    filter_keys = ("all", "ai_handled", "needs_attention", "conflicts", "reviewed_by_you")
+    trades = {}
+    trade_map = (
+        run.usage_metadata.get("reconciliation", {}).get("finding_trades", {}) if run else {}
+    )
+    for finding in findings:
+        review_status = finding["latest_review_decision"] or "unreviewed"
+        handling = summary_handling_status(finding, open_conflict_finding_ids)
+        counts["confirmed"] += review_status in {"accepted", "edited_accepted"}
+        counts["not_relevant"] += review_status == "rejected"
+        counts["follow_up"] += review_status == "needs_clarification"
+        counts["unreviewed"] += review_status == "unreviewed"
+        counts["ai_handled"] += handling == AI_HANDLED
+        counts["conflicting"] += handling == "conflicting"
+        counts["reviewed_by_human"] += handling.startswith("human_")
+        counts["needs_attention"] += handling in {
+            "needs_attention",
+            "human_needs_follow_up",
+        }
+        trade = trade_map.get(finding["source_candidate_key"], "General Requirements")
+        trade_counts = trades.setdefault(trade, {key: 0 for key in filter_keys})
+        trade_counts["all"] += 1
+        trade_counts["ai_handled"] += handling == AI_HANDLED
+        trade_counts["needs_attention"] += handling in {
+            "needs_attention",
+            "human_needs_follow_up",
+        }
+        trade_counts["conflicts"] += handling == "conflicting"
+        trade_counts["reviewed_by_you"] += handling.startswith("human_")
+    counts["reviewed"] = counts["confirmed"] + counts["not_relevant"] + counts["follow_up"]
+    counts["complete"] = bool(findings) and not (counts["needs_attention"] or counts["conflicting"])
+    return {
+        "counts": counts,
+        "trade_counts": dict(sorted(trades.items())),
+        "materialized": bool(findings),
+    }
 
 
 class RevisionAnalysisContextMixin(ProjectDocumentContextMixin):
@@ -87,6 +228,134 @@ class RevisionAnalysisRunListView(RevisionAnalysisContextMixin, APIView):
         return Response(AnalysisRunSerializer(run).data, status=status.HTTP_201_CREATED)
 
 
+class ProjectSetAnalysisRunListView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        runs = run_queryset(self.get_project()).filter(run_kind=AnalysisRun.RunKind.PROJECT_SET)
+        return Response(AnalysisRunSerializer(runs, many=True).data)
+
+    def post(self, request, *args, **kwargs):
+        if not OrganizationOperator().has_permission(request, self):
+            self.permission_denied(request)
+        try:
+            run = request_project_set_analysis_run(
+                project=self.get_project(), requested_by=request.user
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        run = run_queryset(self.get_project()).get(pk=run.pk)
+        return Response(AnalysisRunSerializer(run).data, status=status.HTTP_201_CREATED)
+
+
+class ProjectReviewStateView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        with transaction.atomic():
+            current = latest_project_review_run(project)
+            findings = (
+                project_review_summary_rows(project, current)
+                if current and current.status == AnalysisRun.Status.SUCCEEDED
+                else []
+            )
+            open_conflicts = IntelligenceConflict.objects.none()
+            if current and current.status == AnalysisRun.Status.SUCCEEDED:
+                open_conflicts = IntelligenceConflict.objects.filter(
+                    project=project,
+                    analysis_run=current,
+                    status=IntelligenceConflict.Status.OPEN,
+                    superseded_by__isnull=True,
+                )
+            open_conflict_finding_ids = set(open_conflicts.values_list("findings__id", flat=True))
+            summary = project_review_summary(
+                current, findings, open_conflict_finding_ids=open_conflict_finding_ids
+            )
+            current_data = AnalysisRunSerializer(current).data if current is not None else None
+            if current_data is not None:
+                current_data["result_summary"] = {}
+                current_data["usage_metadata"] = {
+                    key: value
+                    for key, value in current_data["usage_metadata"].items()
+                    if key != "reconciliation"
+                }
+            return Response(
+                {
+                    "current_run": current_data,
+                    **summary,
+                    "open_conflict_group_count": open_conflicts.count(),
+                }
+            )
+
+
+class ProjectReviewFindingListView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        current = latest_project_review_run(project)
+        if current is None or current.status != AnalysisRun.Status.SUCCEEDED:
+            return Response({"count": 0, "page": 1, "page_size": 25, "results": []})
+
+        trade = request.query_params.get("trade", "").strip()
+        review_filter = request.query_params.get("filter", "all").strip()
+        try:
+            page = max(1, int(request.query_params.get("page", "1")))
+            page_size = min(50, max(1, int(request.query_params.get("page_size", "25"))))
+        except ValueError:
+            page, page_size = 1, 25
+
+        queryset = finding_queryset(project).filter(analysis_run=current)
+        trade_map = current.usage_metadata.get("reconciliation", {}).get("finding_trades", {})
+        if trade:
+            candidate_keys = [key for key, value in trade_map.items() if value == trade]
+            queryset = queryset.filter(source_candidate_key__in=candidate_keys)
+
+        start = (page - 1) * page_size
+        if review_filter == "all":
+            count = queryset.count()
+            results = list(queryset[start : start + page_size])
+            return Response(
+                {
+                    "count": count,
+                    "page": page,
+                    "page_size": page_size,
+                    "results": ExtractedFindingSerializer(results, many=True).data,
+                }
+            )
+
+        findings = list(queryset)
+        open_conflict_finding_ids = set(
+            IntelligenceConflict.objects.filter(
+                project=project,
+                analysis_run=current,
+                status=IntelligenceConflict.Status.OPEN,
+                superseded_by__isnull=True,
+            ).values_list("findings__id", flat=True)
+        )
+        if review_filter != "all":
+            findings = [
+                finding
+                for finding in findings
+                if finding_matches_review_filter(
+                    finding,
+                    review_filter,
+                    open_conflict_finding_ids=open_conflict_finding_ids,
+                )
+            ]
+        count = len(findings)
+        results = findings[start : start + page_size]
+        return Response(
+            {
+                "count": count,
+                "page": page,
+                "page_size": page_size,
+                "results": ExtractedFindingSerializer(results, many=True).data,
+            }
+        )
+
+
 class AnalysisRunDetailView(ProjectDocumentContextMixin, APIView):
     permission_classes = (ActiveOrganizationMember,)
 
@@ -115,14 +384,23 @@ class RetryAnalysisRunView(AnalysisRunDetailView):
         return Response(AnalysisRunSerializer(run).data, status=status.HTTP_201_CREATED)
 
 
+class CancelAnalysisRunView(AnalysisRunDetailView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        try:
+            run, _created = cancel_analysis_run(run=self.get_run(), actor=request.user)
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        run = run_queryset(self.get_project()).get(pk=run.pk)
+        return Response(AnalysisRunSerializer(run).data)
+
+
 def finding_queryset(project):
     return (
-        ExtractedFinding.objects.filter(analysis_run__document_revision__document__project=project)
-        .select_related("analysis_run", "analysis_task_run", "document_revision__document")
+        summary_finding_queryset(project)
+        .select_related("analysis_task_run", "document_revision__document")
         .prefetch_related(
-            "sources__document_page__drawing_sheet",
-            "sources__document_revision__document",
-            "reviews__reviewer",
             "conflicts__superseded_by",
         )
     )
@@ -305,6 +583,7 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
             candidates.append(
                 {
                     "id": run.pk,
+                    "run_kind": run.run_kind,
                     "document_id": run.document_revision.document_id,
                     "document_title": run.document_revision.document.title,
                     "document_revision_id": run.document_revision_id,
@@ -319,6 +598,15 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
                     ),
                     "needs_clarification_count": statuses.count("needs_clarification"),
                     "created_at": run.created_at,
+                    "document_count": len(run.input_manifest.get("documents", []))
+                    if run.run_kind == AnalysisRun.RunKind.PROJECT_SET
+                    else 1,
+                    "page_count": run.task_runs.filter(
+                        task_type=AnalysisTaskRun.TaskType.PAGE_ANALYSIS
+                    ).count(),
+                    "covered_document_revision_ids": run.input_manifest.get(
+                        "document_revision_ids", [run.document_revision_id]
+                    ),
                 }
             )
         return Response({"candidate_runs": candidates})

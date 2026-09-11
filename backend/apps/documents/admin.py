@@ -8,6 +8,7 @@ from .models import (
     DocumentRevision,
     DrawingSheet,
     FileAsset,
+    ProjectDocumentSelection,
     ProjectFile,
 )
 from .services import set_current_revision
@@ -16,6 +17,15 @@ from .services import set_current_revision
 class NoDeleteAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ProjectDocumentSelection)
+class ProjectDocumentSelectionAdmin(NoDeleteAdmin):
+    list_display = ("project", "document", "selected_revision", "is_included", "updated_by")
+    list_filter = ("project__organization", "is_included")
+    search_fields = ("project__project_number", "document__title")
+    autocomplete_fields = ("project", "document", "selected_revision", "updated_by")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(FileAsset)

@@ -118,6 +118,24 @@ export function handlingLabel(status: ExtractedFinding["handling_status"]) {
   }[status];
 }
 
+export function projectFindingTrade(
+  finding: Pick<ExtractedFinding, "subject" | "machine_value" | "sources">,
+  reconciledTrade?: string,
+) {
+  if (reconciledTrade) return reconciledTrade;
+  const text = `${finding.subject} ${finding.machine_value} ${finding.sources.map((source) => source.document_title).join(" ")}`.toLowerCase();
+  const rules: Array<[string, string[]]> = [
+    ["Fire Protection / Sprinkler", ["sprinkler", "fire protection", "nfpa 13"]],
+    ["Plumbing", ["plumbing", "lavatory", "water closet", "sanitary", "floor drain"]],
+    ["HVAC / Mechanical", ["hvac", "mechanical", "duct", "ventilation", "diffuser", "thermostat"]],
+    ["Electrical", ["electrical", "lighting", "luminaire", "receptacle", "panelboard", "power"]],
+    ["Security / Low Voltage", ["security", "cctv", "access control", "low voltage", "data cabling", "eas"]],
+    ["Structural", ["structural", "steel", "beam", "column", "seismic"]],
+    ["Architectural / Interiors", ["architectural", "partition", "ceiling", "flooring", "millwork", "door"]],
+  ];
+  return rules.find(([, terms]) => terms.some((term) => text.includes(term)))?.[0] ?? "General Requirements";
+}
+
 export function progressPresentation(analysisStarted: boolean, counts: ReturnType<typeof reviewCounts>) {
   if (!analysisStarted && counts.total === 0) {
     return {
@@ -156,6 +174,7 @@ export function plainAnalysisStatus(status: AnalysisRun["status"] | undefined) {
   if (status === "running") return "AI is reviewing your document";
   if (status === "succeeded") return "Document review complete";
   if (status === "failed") return "We couldn't finish reviewing this document";
+  if (status === "cancelled") return "Document review cancelled";
   return "Ready for AI review";
 }
 

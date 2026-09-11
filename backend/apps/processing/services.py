@@ -147,14 +147,57 @@ def request_pdf_indexing(
     )
 
 
-def chain_pdf_indexing_after_source_verification(job):
-    from apps.documents.pdf_indexing import is_pdf_asset
+def request_presentation_indexing(
+    *,
+    revision,
+    requested_by,
+    audit_action="presentation_indexing.requested",
+    dispatch=True,
+    audit_metadata=None,
+):
+    from apps.documents.presentation_indexing import is_presentation_asset
 
-    if not is_pdf_asset(job.document_revision.project_file.file_asset):
+    asset = revision.project_file.file_asset
+    if not is_presentation_asset(asset):
+        raise ValidationError("This revision is not an eligible validated presentation.")
+    if not ProcessingJob.objects.filter(
+        document_revision=revision,
+        job_type=ProcessingJob.JobType.SOURCE_VERIFICATION,
+        status=ProcessingJob.Status.SUCCEEDED,
+    ).exists():
+        raise ValidationError("Source verification must succeed before presentation indexing.")
+    if ProcessingJob.objects.filter(
+        document_revision=revision,
+        job_type=ProcessingJob.JobType.PRESENTATION_INDEXING,
+        status=ProcessingJob.Status.SUCCEEDED,
+    ).exists():
+        raise ValidationError("This revision already has a completed presentation index.")
+    return _request_processing_job(
+        revision=revision,
+        requested_by=requested_by,
+        job_type=ProcessingJob.JobType.PRESENTATION_INDEXING,
+        audit_action=audit_action,
+        dispatch=dispatch,
+        audit_metadata=audit_metadata,
+    )
+
+
+def chain_page_indexing_after_source_verification(job):
+    from apps.documents.pdf_indexing import is_pdf_asset
+    from apps.documents.presentation_indexing import is_presentation_asset
+
+    asset = job.document_revision.project_file.file_asset
+    if is_pdf_asset(asset):
+        job_type = ProcessingJob.JobType.PDF_INDEXING
+        request = request_pdf_indexing
+    elif is_presentation_asset(asset):
+        job_type = ProcessingJob.JobType.PRESENTATION_INDEXING
+        request = request_presentation_indexing
+    else:
         return None
     if ProcessingJob.objects.filter(
         document_revision=job.document_revision,
-        job_type=ProcessingJob.JobType.PDF_INDEXING,
+        job_type=job_type,
         status__in=(
             ProcessingJob.Status.QUEUED,
             ProcessingJob.Status.RUNNING,
@@ -163,14 +206,14 @@ def chain_pdf_indexing_after_source_verification(job):
     ).exists():
         return None
     try:
-        return request_pdf_indexing(
+        return request(
             revision=job.document_revision,
             requested_by=job.requested_by,
             audit_metadata={"triggered_by_processing_job_id": job.pk},
         )
     except ValidationError:
         logger.info(
-            "PDF indexing chain was already satisfied or became ineligible.",
+            "Page indexing chain was already satisfied or became ineligible.",
             extra={"processing_job_id": job.pk},
         )
         return None
@@ -184,6 +227,12 @@ def retry_processing_job(*, job, requested_by):
             revision=job.document_revision,
             requested_by=requested_by,
             audit_action="pdf_indexing.retry_requested",
+        )
+    if job.job_type == ProcessingJob.JobType.PRESENTATION_INDEXING:
+        return request_presentation_indexing(
+            revision=job.document_revision,
+            requested_by=requested_by,
+            audit_action="presentation_indexing.retry_requested",
         )
     return request_source_verification(
         revision=job.document_revision,
@@ -326,11 +375,23 @@ def execute_processing_job(job_id):
     try:
         if job.job_type == ProcessingJob.JobType.SOURCE_VERIFICATION:
             result = verify_source(job)
+            from apps.documents.image_indexing import is_image_asset, persist_image_page
+
+            if is_image_asset(job.document_revision.project_file.file_asset):
+                result.update(persist_image_page(job))
         elif job.job_type == ProcessingJob.JobType.PDF_INDEXING:
             from apps.documents.pdf_indexing import parse_pdf_job, persist_page_index
 
             parsed_pages = parse_pdf_job(job, heartbeat_callback=heartbeat)
             result = persist_page_index(job, parsed_pages)
+        elif job.job_type == ProcessingJob.JobType.PRESENTATION_INDEXING:
+            from apps.documents.presentation_indexing import (
+                parse_presentation_job,
+                persist_slide_index,
+            )
+
+            parsed_slides = parse_presentation_job(job, heartbeat_callback=heartbeat)
+            result = persist_slide_index(job, parsed_slides)
         else:
             raise SourceVerificationFailure(
                 ProcessingJob.ErrorCode.PROCESSING_ERROR,
@@ -346,9 +407,13 @@ def execute_processing_job(job_id):
         _log("Processing job failed.", job, error_code=error.code)
         return {"outcome": "failed", "error_code": error.code}
     except Exception as error:
+        from apps.documents.image_indexing import ImagePreparationFailure
         from apps.documents.pdf_indexing import PdfIndexingFailure
+        from apps.documents.presentation_indexing import PresentationIndexingFailure
 
-        if isinstance(error, PdfIndexingFailure):
+        if isinstance(
+            error, (ImagePreparationFailure, PdfIndexingFailure, PresentationIndexingFailure)
+        ):
             finish_job(
                 job.pk,
                 status=ProcessingJob.Status.FAILED,
@@ -382,12 +447,20 @@ def execute_processing_job(job_id):
             status=ProcessingJob.Status.FAILED,
             error_code=(
                 ProcessingJob.ErrorCode.INDEXING_ERROR
-                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                if job.job_type
+                in {
+                    ProcessingJob.JobType.PDF_INDEXING,
+                    ProcessingJob.JobType.PRESENTATION_INDEXING,
+                }
                 else ProcessingJob.ErrorCode.PROCESSING_ERROR
             ),
             error_message=(
-                "PDF indexing could not be completed safely."
-                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                "Document indexing could not be completed safely."
+                if job.job_type
+                in {
+                    ProcessingJob.JobType.PDF_INDEXING,
+                    ProcessingJob.JobType.PRESENTATION_INDEXING,
+                }
                 else "Source verification could not be completed safely."
             ),
         )
@@ -395,14 +468,18 @@ def execute_processing_job(job_id):
             "outcome": "failed",
             "error_code": (
                 "indexing_error"
-                if job.job_type == ProcessingJob.JobType.PDF_INDEXING
+                if job.job_type
+                in {
+                    ProcessingJob.JobType.PDF_INDEXING,
+                    ProcessingJob.JobType.PRESENTATION_INDEXING,
+                }
                 else "processing_error"
             ),
         }
     finish_job(job.pk, status=ProcessingJob.Status.SUCCEEDED, result_metadata=result)
     _log("Processing job succeeded.", job, status="succeeded")
     if job.job_type == ProcessingJob.JobType.SOURCE_VERIFICATION:
-        chain_pdf_indexing_after_source_verification(job)
+        chain_page_indexing_after_source_verification(job)
     return {"outcome": "succeeded"}
 
 

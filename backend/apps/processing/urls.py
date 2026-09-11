@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     RequestPdfIndexingView,
+    RequestPresentationIndexingView,
     RequestSourceVerificationView,
     RetryProcessingJobView,
     RevisionPageDetailView,
@@ -24,6 +25,11 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/revisions/<int:revision_pk>/index-pdf/",
         RequestPdfIndexingView.as_view(),
         name="revision-request-pdf-indexing",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/revisions/<int:revision_pk>/index-presentation/",
+        RequestPresentationIndexingView.as_view(),
+        name="revision-request-presentation-indexing",
     ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/documents/<int:document_pk>/revisions/<int:revision_pk>/pages/",

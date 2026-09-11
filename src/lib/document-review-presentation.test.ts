@@ -10,6 +10,7 @@ import {
   handlingLabel,
   documentVersionLabel,
   plainAnalysisStatus,
+  projectFindingTrade,
   progressPresentation,
   reviewCounts,
   reviewStages,
@@ -20,6 +21,8 @@ import {
   versionDetailsInitiallyExpanded,
 } from "./document-review-presentation.ts";
 
+const source = (document_title: string) => ({ document_title }) as never;
+
 test("maps technical categories and decisions to client language", () => {
   assert.equal(categoryLabel("submittal_closeout"), "Submittal / Closeout Requirements");
   assert.equal(categoryLabel("open_question"), "Questions to Follow Up");
@@ -28,6 +31,13 @@ test("maps technical categories and decisions to client language", () => {
   assert.equal(decisionLabel("needs_clarification"), "Needs follow-up");
   assert.equal(decisionLabel("machine_handled"), "AI handled");
   assert.equal(handlingLabel("ai_handled"), "AI handled");
+});
+
+test("project findings group deterministically by trade context", () => {
+  assert.equal(projectFindingTrade({ subject: "Existing duct conflict", machine_value: "Coordinate relocation", sources: [source("Mechanical IFC")] }), "HVAC / Mechanical");
+  assert.equal(projectFindingTrade({ subject: "Sprinkler permit", machine_value: "Submit permit", sources: [source("Fire Protection IFC")] }), "Fire Protection / Sprinkler");
+  assert.equal(projectFindingTrade({ subject: "Confirm dimensions", machine_value: "Verify on site", sources: [source("General RFI")] }), "General Requirements");
+  assert.equal(projectFindingTrade({ subject: "Generic item", machine_value: "Coordinate work", sources: [source("General RFI")] }, "Security"), "Security");
 });
 
 test("distinguishes selected-document review from project-wide approval", () => {

@@ -11,7 +11,12 @@ from apps.organizations.permissions import ActiveOrganizationMember, Organizatio
 
 from .models import ProcessingJob
 from .serializers import ProcessingJobSerializer
-from .services import request_pdf_indexing, request_source_verification, retry_processing_job
+from .services import (
+    request_pdf_indexing,
+    request_presentation_indexing,
+    request_source_verification,
+    retry_processing_job,
+)
 
 
 def api_validation_error(error):
@@ -100,6 +105,22 @@ class RequestPdfIndexingView(RevisionProcessingContextMixin, APIView):
             )
         try:
             job = request_pdf_indexing(revision=revision, requested_by=request.user)
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(ProcessingJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+
+class RequestPresentationIndexingView(RevisionProcessingContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        revision = self.get_revision()
+        if not revision.document.project.is_active or not revision.document.is_active:
+            raise serializers.ValidationError(
+                {"detail": "Archived projects or documents cannot start presentation indexing."}
+            )
+        try:
+            job = request_presentation_indexing(revision=revision, requested_by=request.user)
         except DjangoValidationError as error:
             raise api_validation_error(error) from error
         return Response(ProcessingJobSerializer(job).data, status=status.HTTP_201_CREATED)

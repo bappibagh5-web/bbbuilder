@@ -224,6 +224,25 @@ def test_admin_and_estimator_can_upload_new_document(
     assert response.data["revision_count"] == 1
 
 
+def test_upload_persists_document_type_and_discipline_independently(
+    user, membership, project, fake_storage
+):
+    response = authenticated_client(user).post(
+        upload_url(project),
+        new_document_payload(
+            category=Document.Category.NARRATIVE,
+            discipline=Document.Discipline.ELECTRICAL,
+        ),
+        format="multipart",
+    )
+    assert response.status_code == 201
+    document = Document.objects.get()
+    assert document.category == Document.Category.NARRATIVE
+    assert document.discipline == Document.Discipline.ELECTRICAL
+    assert response.data["category"] == Document.Category.NARRATIVE
+    assert response.data["discipline"] == Document.Discipline.ELECTRICAL
+
+
 def test_first_upload_audits_records_and_advances_draft_project(
     user, membership, project, fake_storage
 ):
@@ -478,6 +497,37 @@ def test_valid_ooxml_document_is_accepted(user, membership, project, fake_storag
     assert FileAsset.objects.get().detected_mime_type.endswith("wordprocessingml.document")
 
 
+def test_valid_pptx_is_stored_unchanged_and_keeps_user_classification(
+    user, membership, project, fake_storage
+):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("ppt/presentation.xml", "<presentation />")
+    content = stream.getvalue()
+    upload = SimpleUploadedFile(
+        "Plinth Layout - INCTY.pptx",
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+    response = authenticated_client(user).post(
+        upload_url(project),
+        new_document_payload(
+            file=upload,
+            category=Document.Category.OTHER,
+            discipline=Document.Discipline.ARCHITECTURAL,
+        ),
+        format="multipart",
+    )
+    assert response.status_code == 201, response.data
+    document = Document.objects.get()
+    asset = FileAsset.objects.get()
+    assert document.category == Document.Category.OTHER
+    assert document.discipline == Document.Discipline.ARCHITECTURAL
+    assert asset.detected_mime_type.endswith("presentationml.presentation")
+    assert fake_storage.objects[asset.storage_key] == content
+
+
 def test_user_filename_cannot_control_storage_key(user, membership, project, fake_storage):
     response = authenticated_client(user).post(
         upload_url(project),
@@ -646,6 +696,65 @@ def test_document_metadata_permissions_archive_and_audit(user, membership, proje
 
     set_role(membership, Membership.Role.VIEWER)
     assert client.patch(detail_url, {"title": "No"}, format="json").status_code == 403
+
+
+@pytest.mark.parametrize("role", [Membership.Role.ADMIN, Membership.Role.ESTIMATOR_OPERATOR])
+def test_document_classification_update_is_metadata_only_and_audited(
+    user, membership, project, fake_storage, role
+):
+    set_role(membership, role)
+    client = authenticated_client(user)
+    document = create_document_via_api(client, project, fake_storage)
+    document.category = Document.Category.UNKNOWN
+    document.discipline = Document.Discipline.UNKNOWN
+    document.save(update_fields=("category", "discipline", "updated_at"))
+    revision_ids = list(document.revisions.values_list("id", flat=True))
+    current_revision_id = document.current_revision_id
+    object_keys = set(fake_storage.objects)
+    detail_url = reverse(
+        "document-detail",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "pk": document.pk,
+        },
+    )
+
+    response = client.patch(
+        detail_url,
+        {"category": Document.Category.DRAWINGS, "discipline": Document.Discipline.MECHANICAL},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["category"] == Document.Category.DRAWINGS
+    assert response.data["discipline"] == Document.Discipline.MECHANICAL
+    document.refresh_from_db()
+    assert document.current_revision_id == current_revision_id
+    assert list(document.revisions.values_list("id", flat=True)) == revision_ids
+    assert set(fake_storage.objects) == object_keys
+    event = AuditEvent.objects.get(
+        action_code="document.classification_updated", target_id=str(document.pk)
+    )
+    assert event.actor == user
+    assert event.metadata["changed_fields"] == ["category", "discipline"]
+    assert event.metadata["before"]["category"] == Document.Category.UNKNOWN
+    assert event.metadata["before"]["discipline"] == Document.Discipline.UNKNOWN
+    assert event.metadata["after"]["category"] == Document.Category.DRAWINGS
+    assert event.metadata["after"]["discipline"] == Document.Discipline.MECHANICAL
+
+    duplicate = client.patch(
+        detail_url,
+        {"category": Document.Category.DRAWINGS, "discipline": Document.Discipline.MECHANICAL},
+        format="json",
+    )
+    assert duplicate.status_code == 200
+    assert (
+        AuditEvent.objects.filter(
+            action_code="document.classification_updated", target_id=str(document.pk)
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.parametrize("role", [Membership.Role.ADMIN, Membership.Role.ESTIMATOR_OPERATOR])

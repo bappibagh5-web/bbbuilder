@@ -1,6 +1,6 @@
 import { apiRequest } from "@/lib/api-client";
 
-export type AnalysisStatus = "queued" | "running" | "succeeded" | "failed";
+export type AnalysisStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type EvidenceReference = {
   document_page_id: number;
   page_number: number;
@@ -24,6 +24,7 @@ export type MachineAnalysisResult = {
 };
 export type AnalysisRun = {
   id: number;
+  run_kind: "document" | "project_set";
   document_revision: number;
   document: number;
   requested_by: string;
@@ -34,10 +35,33 @@ export type AnalysisRun = {
   prompt_version: string;
   schema_version: string;
   analysis_version: string;
-  input_manifest: { page_count?: number; page_ids?: number[] };
+  input_manifest: {
+    project_id?: number;
+    document_revision_id?: number;
+    document_revision_ids?: number[];
+    page_count?: number;
+    page_ids?: number[];
+    documents?: Array<{
+      document_id: number;
+      document_revision_id: number;
+      title: string;
+      category: string;
+      discipline: string;
+      source_priority: string;
+      page_ids: number[];
+    }>;
+  };
   result_summary: MachineAnalysisResult;
-  usage_metadata: { input_tokens?: number; output_tokens?: number; total_tokens?: number; request_count?: number; vision_page_count?: number };
+  usage_metadata: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    request_count?: number;
+    vision_page_count?: number;
+    reconciliation?: { finding_trades?: Record<string, string> };
+  };
   task_counts: Record<"total" | AnalysisStatus, number>;
+  progress: { completed: number; total: number; active: number; queued: number; failed: number; cancelled: number; active_pages: number[]; synthesis: AnalysisStatus | "not_created" };
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -57,7 +81,7 @@ export type FindingHandlingStatus =
   | "human_rejected"
   | "human_needs_follow_up";
 export type FindingSource = {
-  id: number; document_revision: number; document_page: number; document_title: string;
+  id: number; document: number; document_revision: number; document_page: number; document_title: string;
   revision_label: string; page_number: number; drawing_sheet: number | null;
   sheet_number: string; sheet_title: string; analysis_task_run: number;
   relation: string; evidence_mode: string; evidence_excerpt: string;
@@ -82,11 +106,30 @@ export type IntelligenceConflict = {
   resolved_by: string | null; resolution_note: string; resolved_at: string | null;
   supersedes: number | null; created_at: string;
 };
+export type ProjectReviewState = {
+  current_run: AnalysisRun | null;
+  counts: ProjectReviewCounts;
+  trade_counts: Record<string, ProjectReviewFilterCounts>;
+  open_conflict_group_count: number;
+  materialized: boolean;
+};
+export type ProjectReviewFilterKey = "all" | "ai_handled" | "needs_attention" | "conflicts" | "reviewed_by_you";
+export type ProjectReviewFilterCounts = Record<ProjectReviewFilterKey, number>;
+export type ProjectReviewCounts = {
+  total: number; reviewed: number; confirmed: number; not_relevant: number;
+  follow_up: number; unreviewed: number; ai_handled: number; conflicting: number;
+  reviewed_by_human: number; needs_attention: number; complete: boolean;
+};
+export type ProjectReviewFindingPage = {
+  count: number; page: number; page_size: number; results: ExtractedFinding[];
+};
 export type IntelligenceBlocker = { code: string; message: string; count: number };
 export type IntelligenceCandidateRun = {
-  id: number; document_id: number; document_title: string; document_revision_id: number;
+  id: number; run_kind: "document" | "project_set";
+  document_id: number; document_title: string; document_revision_id: number;
   revision_label: string; is_current_revision: boolean; finding_count: number;
   unreviewed_count: number; needs_clarification_count: number; created_at: string;
+  document_count: number; page_count: number; covered_document_revision_ids: number[];
 };
 export type IntelligenceReadiness = {
   eligible: boolean; blockers: IntelligenceBlocker[]; fingerprint: string;
@@ -122,6 +165,36 @@ function projectPath(slug: string, projectId: string | number) {
 }
 
 export const analysisApi = {
+  projectReviewState(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<ProjectReviewState>(`${projectPath(slug, projectId)}/project-review-state/`, {
+      signal,
+    });
+  },
+  projectReviewFindings(
+    slug: string,
+    projectId: string | number,
+    options: { trade: string; filter: ProjectReviewFilterKey; page?: number; pageSize?: number },
+    signal?: AbortSignal,
+  ) {
+    const params = new URLSearchParams({
+      trade: options.trade,
+      filter: options.filter,
+      page: String(options.page ?? 1),
+      page_size: String(options.pageSize ?? 25),
+    });
+    return apiRequest<ProjectReviewFindingPage>(`${projectPath(slug, projectId)}/project-review-findings/?${params}`, { signal });
+  },
+  projectSetRuns(slug: string, projectId: string | number, signal?: AbortSignal) {
+    return apiRequest<AnalysisRun[]>(`${projectPath(slug, projectId)}/project-set-analysis-runs/`, {
+      signal,
+    });
+  },
+  requestProjectSetRun(slug: string, projectId: string | number) {
+    return apiRequest<AnalysisRun>(`${projectPath(slug, projectId)}/project-set-analysis-runs/`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
   list(slug: string, projectId: string | number, documentId: number, revisionId: number, signal?: AbortSignal) {
     return apiRequest<AnalysisRun[]>(`${projectPath(slug, projectId)}/documents/${documentId}/revisions/${revisionId}/analysis-runs/`, { signal });
   },
@@ -133,6 +206,9 @@ export const analysisApi = {
   },
   retry(slug: string, projectId: string | number, runId: number) {
     return apiRequest<AnalysisRun>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/retry/`, { method: "POST", body: JSON.stringify({}) });
+  },
+  cancel(slug: string, projectId: string | number, runId: number) {
+    return apiRequest<AnalysisRun>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/cancel/`, { method: "POST", body: JSON.stringify({}) });
   },
   findings(slug: string, projectId: string | number, runId: number, signal?: AbortSignal) {
     return apiRequest<ExtractedFinding[]>(`${projectPath(slug, projectId)}/analysis-runs/${runId}/findings/`, { signal });

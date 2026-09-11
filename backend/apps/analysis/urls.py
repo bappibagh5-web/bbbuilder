@@ -4,6 +4,7 @@ from .views import (
     AnalysisRunDetailView,
     AnalysisRunFindingListView,
     AnalysisRunTaskListView,
+    CancelAnalysisRunView,
     ConflictListView,
     FindingDetailView,
     FindingReviewListView,
@@ -13,12 +14,30 @@ from .views import (
     IntelligenceSnapshotDetailView,
     IntelligenceSnapshotListView,
     MaterializeAnalysisRunView,
+    ProjectReviewFindingListView,
+    ProjectReviewStateView,
+    ProjectSetAnalysisRunListView,
     ResolveConflictView,
     RetryAnalysisRunView,
     RevisionAnalysisRunListView,
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-review-state/",
+        ProjectReviewStateView.as_view(),
+        name="project-review-state",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-review-findings/",
+        ProjectReviewFindingListView.as_view(),
+        name="project-review-finding-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-set-analysis-runs/",
+        ProjectSetAnalysisRunListView.as_view(),
+        name="project-set-analysis-run-list",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/intelligence-readiness/",
         IntelligenceReadinessView.as_view(),
@@ -58,6 +77,11 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/retry/",
         RetryAnalysisRunView.as_view(),
         name="analysis-run-retry",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/cancel/",
+        CancelAnalysisRunView.as_view(),
+        name="analysis-run-cancel",
     ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/analysis-runs/<int:run_pk>/findings/",

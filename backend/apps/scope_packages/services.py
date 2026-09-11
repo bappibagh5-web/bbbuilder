@@ -7,8 +7,14 @@ from django.db.models import Max
 from apps.analysis.models import ProjectIntelligenceApproval, ProjectIntelligenceSnapshot
 from apps.projects.audit import record_event
 
-from .models import ScopePackage, ScopePackageSource, ScopePackageVersion
-from .taxonomy import CURRENT_RULE_VERSION, trades_for_entry
+from .models import (
+    ScopeItem,
+    ScopeItemSource,
+    ScopePackage,
+    ScopePackageSource,
+    ScopePackageVersion,
+)
+from .taxonomy import CURRENT_RULE_VERSION, scope_items_for_entry
 
 
 def _inclusion(entry):
@@ -23,7 +29,7 @@ def generate_scope_packages(*, project, snapshot, actor):
         raise ValidationError("Scope packages cannot be generated for an archived project.")
     snapshot = (
         ProjectIntelligenceSnapshot.objects.select_related("project")
-        .prefetch_related("entries__finding")
+        .prefetch_related("entries__finding", "entries__provenance")
         .get(pk=snapshot.pk)
     )
     if snapshot.project_id != locked_project.pk:
@@ -34,8 +40,8 @@ def generate_scope_packages(*, project, snapshot, actor):
     groups = defaultdict(list)
     for entry in snapshot.entries.all():
         if entry.included_in_intelligence and entry.effective_value:
-            for trade in trades_for_entry(entry):
-                groups[(trade.key, trade.label)].append(entry)
+            for item in scope_items_for_entry(entry):
+                groups[(item.trade.key, item.trade.label)].append((entry, item))
     if not groups:
         raise ValidationError("Approved project information has no included scope content.")
 
@@ -46,6 +52,7 @@ def generate_scope_packages(*, project, snapshot, actor):
             project=locked_project,
             source_snapshot=snapshot,
             trade_key=trade_key,
+            generation_rule_version=CURRENT_RULE_VERSION,
             lifecycle=ScopePackage.Lifecycle.ACTIVE,
         ).first()
         if package:
@@ -61,7 +68,8 @@ def generate_scope_packages(*, project, snapshot, actor):
             created_by=actor,
             updated_by=actor,
         )
-        inclusions = list(dict.fromkeys(_inclusion(entry) for entry in entries))
+        source_entries = list(dict.fromkeys(entry for entry, _ in entries))
+        inclusions = list(dict.fromkeys(_inclusion(entry) for entry in source_entries))
         version = ScopePackageVersion.objects.create(
             package=package,
             version=1,
@@ -77,8 +85,36 @@ def generate_scope_packages(*, project, snapshot, actor):
             created_by=actor,
         )
         ScopePackageSource.objects.bulk_create(
-            [ScopePackageSource(package_version=version, snapshot_entry=entry) for entry in entries]
+            [
+                ScopePackageSource(package_version=version, snapshot_entry=entry)
+                for entry in source_entries
+            ]
         )
+        for sequence, (entry, item_definition) in enumerate(entries, start=1):
+            provenance_rows = list(entry.provenance.all())
+            if not provenance_rows:
+                raise ValidationError(
+                    f"Approved entry {entry.pk} has no frozen provenance for scope generation."
+                )
+            scope_item = ScopeItem.objects.create(
+                package_version=version,
+                item_key=item_definition.key,
+                item_type=item_definition.item_type,
+                responsibility=item_definition.responsibility,
+                title=item_definition.title,
+                description=item_definition.description,
+                sequence=sequence,
+            )
+            ScopeItemSource.objects.bulk_create(
+                [
+                    ScopeItemSource(
+                        scope_item=scope_item,
+                        snapshot_entry=entry,
+                        snapshot_provenance=provenance,
+                    )
+                    for provenance in provenance_rows
+                ]
+            )
         package.current_version = version
         package.save(update_fields=("current_version", "updated_at"))
         record_event(
@@ -93,28 +129,23 @@ def generate_scope_packages(*, project, snapshot, actor):
 
     legacy_packages = ScopePackage.objects.filter(
         project=locked_project,
-        source_snapshot=snapshot,
         lifecycle=ScopePackage.Lifecycle.ACTIVE,
-        generation_rule_version__lt=CURRENT_RULE_VERSION,
-    ).select_related("current_version")
+    ).exclude(pk__in=[package.pk for package in (*created, *existing)])
     for legacy in legacy_packages:
-        if (
-            legacy.current_version
-            and legacy.current_version.version == 1
-            and legacy.current_version.status == ScopePackageVersion.Status.DRAFT
-            and legacy.versions.count() == 1
-        ):
-            legacy.lifecycle = ScopePackage.Lifecycle.SUPERSEDED
-            legacy.updated_by = actor
-            legacy.save(update_fields=("lifecycle", "updated_by", "updated_at"))
-            record_event(
-                organization=legacy.organization,
-                project=legacy.project,
-                actor=actor,
-                action_code="scope_package.superseded",
-                target=legacy,
-                metadata={"replacement_rule_version": CURRENT_RULE_VERSION},
-            )
+        legacy.lifecycle = ScopePackage.Lifecycle.SUPERSEDED
+        legacy.updated_by = actor
+        legacy.save(update_fields=("lifecycle", "updated_by", "updated_at"))
+        record_event(
+            organization=legacy.organization,
+            project=legacy.project,
+            actor=actor,
+            action_code="scope_package.superseded",
+            target=legacy,
+            metadata={
+                "replacement_rule_version": CURRENT_RULE_VERSION,
+                "replacement_snapshot_id": snapshot.pk,
+            },
+        )
     return created, existing
 
 
@@ -154,6 +185,26 @@ def revise_scope_package(*, package, actor, values, mark_ready=False):
             for source_id in current.sources.values_list("snapshot_entry_id", flat=True)
         ]
     )
+    for item in current.scope_items.prefetch_related("sources").all():
+        copied = ScopeItem.objects.create(
+            package_version=version,
+            item_key=item.item_key,
+            item_type=item.item_type,
+            responsibility=item.responsibility,
+            title=item.title,
+            description=item.description,
+            sequence=item.sequence,
+        )
+        ScopeItemSource.objects.bulk_create(
+            [
+                ScopeItemSource(
+                    scope_item=copied,
+                    snapshot_entry_id=source.snapshot_entry_id,
+                    snapshot_provenance_id=source.snapshot_provenance_id,
+                )
+                for source in item.sources.all()
+            ]
+        )
     package.current_version = version
     package.updated_by = actor
     package.save(update_fields=("current_version", "updated_by", "updated_at"))

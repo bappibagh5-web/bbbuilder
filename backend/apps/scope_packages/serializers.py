@@ -1,6 +1,73 @@
 from rest_framework import serializers
 
-from .models import ScopePackage, ScopePackageSource, ScopePackageVersion
+from .models import (
+    ScopeItem,
+    ScopeItemSource,
+    ScopePackage,
+    ScopePackageSource,
+    ScopePackageVersion,
+)
+
+
+class ScopeItemSourceSerializer(serializers.ModelSerializer):
+    finding_id = serializers.IntegerField(source="snapshot_entry.finding_id", read_only=True)
+    document_id = serializers.IntegerField(
+        source="snapshot_provenance.document_revision.document_id", read_only=True
+    )
+    document_title = serializers.CharField(
+        source="snapshot_provenance.document_revision.document.title", read_only=True
+    )
+    document_revision = serializers.IntegerField(
+        source="snapshot_provenance.document_revision_id", read_only=True
+    )
+    revision_label = serializers.CharField(
+        source="snapshot_provenance.document_revision.revision_label", read_only=True
+    )
+    page_number = serializers.IntegerField(
+        source="snapshot_provenance.document_page.page_number", read_only=True
+    )
+    sheet_number = serializers.CharField(
+        source="snapshot_provenance.drawing_sheet.sheet_number", read_only=True, default=""
+    )
+    evidence_excerpt = serializers.CharField(
+        source="snapshot_provenance.finding_source.evidence_excerpt",
+        read_only=True,
+        default="",
+    )
+
+    class Meta:
+        model = ScopeItemSource
+        fields = (
+            "id",
+            "snapshot_entry",
+            "finding_id",
+            "document_id",
+            "document_title",
+            "document_revision",
+            "revision_label",
+            "page_number",
+            "sheet_number",
+            "evidence_excerpt",
+        )
+        read_only_fields = fields
+
+
+class ScopeItemSerializer(serializers.ModelSerializer):
+    sources = ScopeItemSourceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ScopeItem
+        fields = (
+            "id",
+            "item_key",
+            "item_type",
+            "responsibility",
+            "title",
+            "description",
+            "sequence",
+            "sources",
+        )
+        read_only_fields = fields
 
 
 class ScopePackageSourceSerializer(serializers.ModelSerializer):
@@ -20,6 +87,7 @@ class ScopePackageSourceSerializer(serializers.ModelSerializer):
 class ScopePackageVersionSerializer(serializers.ModelSerializer):
     created_by = serializers.EmailField(source="created_by.email", read_only=True)
     sources = ScopePackageSourceSerializer(many=True, read_only=True)
+    scope_items = ScopeItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = ScopePackageVersion
@@ -35,6 +103,7 @@ class ScopePackageVersionSerializer(serializers.ModelSerializer):
             "created_by",
             "created_at",
             "sources",
+            "scope_items",
         )
         read_only_fields = fields
 

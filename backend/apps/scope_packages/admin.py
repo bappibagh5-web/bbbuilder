@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import ScopePackage, ScopePackageSource, ScopePackageVersion
+from .models import (
+    ScopeItem,
+    ScopeItemSource,
+    ScopePackage,
+    ScopePackageSource,
+    ScopePackageVersion,
+)
 
 
 @admin.register(ScopePackage)
@@ -48,6 +54,37 @@ class ScopePackageVersionAdmin(admin.ModelAdmin):
 class ScopePackageSourceAdmin(admin.ModelAdmin):
     list_display = ("id", "package_version", "snapshot_entry", "created_at")
     readonly_fields = tuple(field.name for field in ScopePackageSource._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ScopeItem)
+class ScopeItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "package_version", "sequence", "item_type", "title")
+    list_filter = ("item_type",)
+    readonly_fields = tuple(field.name for field in ScopeItem._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ScopeItemSource)
+class ScopeItemSourceAdmin(admin.ModelAdmin):
+    list_display = ("id", "scope_item", "snapshot_entry", "snapshot_provenance")
+    readonly_fields = tuple(field.name for field in ScopeItemSource._meta.fields)
 
     def has_add_permission(self, request):
         return False

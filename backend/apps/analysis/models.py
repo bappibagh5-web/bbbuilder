@@ -11,11 +11,16 @@ from apps.documents.models import DocumentPage, DocumentRevision, ImmutableField
 
 
 class AnalysisRun(ImmutableFieldsMixin):
+    class RunKind(models.TextChoices):
+        DOCUMENT = "document", "Document review"
+        PROJECT_SET = "project_set", "Project document-set review"
+
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
 
     class ErrorCode(models.TextChoices):
         SOURCE_NOT_VERIFIED = "source_not_verified", "Source not verified"
@@ -32,10 +37,19 @@ class AnalysisRun(ImmutableFieldsMixin):
         PAGE_RENDER_FAILED = "page_render_failed", "Page render failed"
         ANALYSIS_FAILED = "analysis_failed", "Analysis failed"
         WORKER_LOST = "worker_lost", "Worker lost"
+        ANALYSIS_CANCELLED = "analysis_cancelled", "Analysis cancelled"
 
     document_revision = models.ForeignKey(
         DocumentRevision, on_delete=models.PROTECT, related_name="analysis_runs"
     )
+    project_context = models.ForeignKey(
+        "projects.Project",
+        on_delete=models.PROTECT,
+        related_name="project_set_analysis_runs",
+        null=True,
+        blank=True,
+    )
+    run_kind = models.CharField(max_length=20, choices=RunKind, default=RunKind.DOCUMENT)
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -67,6 +81,8 @@ class AnalysisRun(ImmutableFieldsMixin):
 
     immutable_fields = (
         "document_revision_id",
+        "project_context_id",
+        "run_kind",
         "requested_by_id",
         "predecessor_id",
         "provider",
@@ -83,15 +99,20 @@ class AnalysisRun(ImmutableFieldsMixin):
         constraints = [
             models.UniqueConstraint(
                 fields=("document_revision",),
-                condition=Q(status__in=("queued", "running")),
+                condition=Q(status__in=("queued", "running"), run_kind="document"),
                 name="analysis_unique_active_revision_run",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("project_context",),
+                condition=Q(status__in=("queued", "running"), run_kind="project_set"),
+                name="analysis_unique_active_project_set_run",
+            ),
         ]
         indexes = [models.Index(fields=("status", "lease_expires_at"))]
 
     @property
     def project(self):
-        return self.document_revision.document.project
+        return self.project_context or self.document_revision.document.project
 
     @property
     def organization(self):
@@ -110,6 +131,13 @@ class AnalysisRun(ImmutableFieldsMixin):
             and self.predecessor.document_revision_id != self.document_revision_id
         ):
             raise ValidationError({"predecessor": "A predecessor must target the same revision."})
+        if self.run_kind == self.RunKind.PROJECT_SET:
+            if not self.project_context_id:
+                raise ValidationError({"project_context": "Project-set review requires a project."})
+            if self.document_revision.document.project_id != self.project_context_id:
+                raise ValidationError(
+                    {"document_revision": "Anchor revision must belong to project."}
+                )
         if self.status == self.Status.SUCCEEDED and self.failure_code:
             raise ValidationError({"failure_code": "A successful run cannot contain a failure."})
 
@@ -133,6 +161,7 @@ class AnalysisTaskRun(ImmutableFieldsMixin):
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
 
     analysis_run = models.ForeignKey(
         AnalysisRun, on_delete=models.PROTECT, related_name="task_runs"
@@ -157,6 +186,9 @@ class AnalysisTaskRun(ImmutableFieldsMixin):
     structured_result = models.JSONField(default=dict, blank=True)
     provider_request_id = models.CharField(max_length=255, blank=True)
     usage_metadata = models.JSONField(default=dict, blank=True)
+    reused_from = models.ForeignKey(
+        "self", on_delete=models.PROTECT, related_name="reuse_successors", null=True, blank=True
+    )
     queued_at = models.DateTimeField(default=timezone.now)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -176,6 +208,7 @@ class AnalysisTaskRun(ImmutableFieldsMixin):
         "prompt_version",
         "schema_version",
         "input_metadata",
+        "reused_from_id",
         "created_at",
     )
 
@@ -199,14 +232,33 @@ class AnalysisTaskRun(ImmutableFieldsMixin):
             raise ValidationError({"document_page": "Page analysis requires an exact page."})
         if self.task_type == self.TaskType.DOCUMENT_SYNTHESIS and self.document_page_id:
             raise ValidationError({"document_page": "Document synthesis is not page scoped."})
-        if (
-            self.document_page_id
-            and self.document_page.document_revision_id != self.analysis_run.document_revision_id
-        ):
-            raise ValidationError({"document_page": "The page must belong to the run revision."})
+        if self.document_page_id:
+            run = self.analysis_run
+            if run.run_kind == AnalysisRun.RunKind.PROJECT_SET:
+                if self.document_page_id not in run.input_manifest.get("page_ids", []):
+                    raise ValidationError({"document_page": "The page must belong to frozen set."})
+            elif self.document_page.document_revision_id != run.document_revision_id:
+                raise ValidationError(
+                    {"document_page": "The page must belong to the run revision."}
+                )
         for field in ("input_metadata", "structured_result", "usage_metadata"):
             if not isinstance(getattr(self, field), dict):
                 raise ValidationError({field: "This value must be an object."})
+        if self.reused_from_id:
+            source = self.reused_from
+            if source.status != self.Status.SUCCEEDED:
+                raise ValidationError(
+                    {"reused_from": "Only successful task results can be reused."}
+                )
+            if (
+                source.document_page_id != self.document_page_id
+                or source.task_type != self.task_type
+                or source.provider != self.provider
+                or source.model != self.model
+                or source.prompt_version != self.prompt_version
+                or source.schema_version != self.schema_version
+            ):
+                raise ValidationError({"reused_from": "The reused task must be fully compatible."})
 
     def __str__(self):
         return f"{self.get_task_type_display()} #{self.pk} — {self.status}"
@@ -278,11 +330,23 @@ class ExtractedFinding(ImmutableFieldsMixin):
         super().clean()
         if self.analysis_task_run.analysis_run_id != self.analysis_run_id:
             raise ValidationError({"analysis_task_run": "The task must belong to the run."})
-        if self.document_revision_id != self.analysis_run.document_revision_id:
+        if self.analysis_run.run_kind == AnalysisRun.RunKind.PROJECT_SET:
+            if self.document_revision_id not in self.analysis_run.input_manifest.get(
+                "document_revision_ids", []
+            ):
+                raise ValidationError({"document_revision": "Revision must belong to frozen set."})
+        elif self.document_revision_id != self.analysis_run.document_revision_id:
             raise ValidationError({"document_revision": "The revision must belong to the run."})
 
     @property
     def effective_review(self):
+        cached_reviews = getattr(self, "_prefetched_objects_cache", {}).get("reviews")
+        if cached_reviews is not None:
+            return max(
+                cached_reviews,
+                key=lambda review: (review.created_at, review.pk),
+                default=None,
+            )
         return self.reviews.order_by("-created_at", "-id").first()
 
     @property
@@ -365,7 +429,10 @@ class FindingSource(ImmutableFieldsMixin):
     def clean(self):
         super().clean()
         run = self.finding.analysis_run
-        if self.document_revision_id != run.document_revision_id:
+        if run.run_kind == AnalysisRun.RunKind.PROJECT_SET:
+            if self.document_revision_id not in run.input_manifest.get("document_revision_ids", []):
+                raise ValidationError({"document_revision": "Source revision must be in set."})
+        elif self.document_revision_id != run.document_revision_id:
             raise ValidationError({"document_revision": "Source revision must match the run."})
         if self.document_page.document_revision_id != self.document_revision_id:
             raise ValidationError({"document_page": "Source page must belong to the revision."})
