@@ -1833,6 +1833,73 @@ def test_snapshot_multi_run_selection_and_same_revision_guard(revision, user, me
     assert "duplicate_revision_run" in {item["code"] for item in state["blockers"]}
 
 
+def test_snapshot_single_run_allows_distinct_values_under_same_semantic_key(
+    revision, user, membership
+):
+    run, findings = snapshot_ready_run(revision, user)
+    ExtractedFinding.objects.filter(pk=findings[0].pk).update(
+        semantic_key="responsibility.shared", machine_value="Supply by owner"
+    )
+    ExtractedFinding.objects.filter(pk=findings[1].pk).update(
+        semantic_key="responsibility.shared", machine_value="Install by contractor"
+    )
+
+    state = snapshot_readiness(project=revision.document.project, run_ids=[run.pk])
+
+    assert state["eligible"] is True
+    assert "cross_run_conflict" not in {item["code"] for item in state["blockers"]}
+
+
+def test_snapshot_distinct_runs_still_block_contradictory_values(revision, user, membership):
+    first_run, first_findings = snapshot_ready_run(revision, user)
+    other_revision = second_document_revision(revision, user)
+    second_run, second_findings = snapshot_ready_run(other_revision, user)
+    ExtractedFinding.objects.filter(pk=first_findings[0].pk).update(
+        semantic_key="responsibility.fixture", machine_value="Supply by owner"
+    )
+    ExtractedFinding.objects.filter(pk=second_findings[0].pk).update(
+        semantic_key="responsibility.fixture", machine_value="Supply by contractor"
+    )
+
+    state = snapshot_readiness(
+        project=revision.document.project, run_ids=[first_run.pk, second_run.pk]
+    )
+
+    assert state["eligible"] is False
+    assert "cross_run_conflict" in {item["code"] for item in state["blockers"]}
+
+
+def test_intelligence_candidates_keep_latest_project_set_run_stable(
+    revision, user, membership, organization
+):
+    run, findings = snapshot_ready_run(revision, user)
+    AnalysisRun.objects.filter(pk=run.pk).update(
+        run_kind=AnalysisRun.RunKind.PROJECT_SET,
+        project_context=revision.document.project,
+        input_manifest={
+            **run.input_manifest,
+            "documents": [{"document_revision_id": revision.pk}],
+            "document_revision_ids": [revision.pk],
+        },
+    )
+    endpoint = reverse(
+        "intelligence-readiness",
+        kwargs={
+            "organization_slug": organization.slug,
+            "project_pk": revision.document.project_id,
+        },
+    )
+
+    first = client_for(user).get(endpoint)
+    second = client_for(user).get(endpoint)
+
+    assert first.status_code == second.status_code == 200
+    assert [item["id"] for item in first.data["candidate_runs"]] == [run.pk]
+    assert first.data == second.data
+    assert first.data["candidate_runs"][0]["finding_count"] == len(findings)
+    assert first.data["candidate_runs"][0]["unreviewed_count"] == 0
+
+
 def test_historical_revision_cannot_create_new_snapshot(revision, user, membership):
     run, _ = snapshot_ready_run(revision, user)
     replacement = second_document_revision(revision, user)

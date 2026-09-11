@@ -1999,7 +1999,7 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
         "needs_attention": 0,
         "conflicting": 0,
     }
-    accepted_by_key = defaultdict(set)
+    accepted_by_key_and_run = defaultdict(lambda: defaultdict(set))
     for run in runs:
         project_set_revision_ids = (
             run.input_manifest.get("document_revision_ids", [])
@@ -2129,7 +2129,7 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
             run_entries.append(entry)
             all_entries.append(entry)
             if effective_value:
-                accepted_by_key[finding.semantic_key].add(
+                accepted_by_key_and_run[finding.semantic_key][run.pk].add(
                     _normalized_value(finding.category, effective_value)
                 )
                 approved_entries.append(entry)
@@ -2156,7 +2156,12 @@ def _snapshot_state(*, project, run_ids, require_active_documents):
                 "findings": run_entries,
             }
         )
-    cross_run_conflicts = sorted(key for key, values in accepted_by_key.items() if len(values) > 1)
+    cross_run_conflicts = sorted(
+        key
+        for key, values_by_run in accepted_by_key_and_run.items()
+        if len(values_by_run) > 1
+        and len({value for values in values_by_run.values() for value in values}) > 1
+    )
     if cross_run_conflicts:
         blockers.append(
             _snapshot_block(

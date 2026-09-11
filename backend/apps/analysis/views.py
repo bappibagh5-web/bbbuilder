@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Prefetch, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
@@ -108,6 +108,49 @@ def project_review_summary_rows(project, run):
             "has_source",
         )
     )
+
+
+def intelligence_candidate_rows(project, runs):
+    """Return bounded finding state for candidate summaries without N+1 queries."""
+    run_ids = [run.pk for run in runs]
+    if not run_ids:
+        return {}, {}
+    latest_review = FindingReview.objects.filter(finding_id=OuterRef("pk")).order_by(
+        "-created_at", "-id"
+    )
+    rows_by_run = {run_id: [] for run_id in run_ids}
+    rows = (
+        ExtractedFinding.objects.filter(
+            analysis_run_id__in=run_ids,
+            analysis_run__document_revision__document__project=project,
+        )
+        .annotate(
+            latest_review_decision=Subquery(latest_review.values("decision")[:1]),
+            has_source=Exists(FindingSource.objects.filter(finding_id=OuterRef("pk"))),
+        )
+        .values(
+            "id",
+            "analysis_run_id",
+            "category",
+            "machine_support",
+            "latest_review_decision",
+            "has_source",
+        )
+    )
+    for row in rows:
+        rows_by_run[row["analysis_run_id"]].append(row)
+
+    open_conflicts_by_run = {run_id: set() for run_id in run_ids}
+    conflict_rows = IntelligenceConflict.objects.filter(
+        project=project,
+        analysis_run_id__in=run_ids,
+        status=IntelligenceConflict.Status.OPEN,
+        superseded_by__isnull=True,
+    ).values_list("analysis_run_id", "findings__id")
+    for run_id, finding_id in conflict_rows:
+        if finding_id is not None:
+            open_conflicts_by_run[run_id].add(finding_id)
+    return rows_by_run, open_conflicts_by_run
 
 
 def finding_matches_review_filter(finding, review_filter, *, open_conflict_finding_ids):
@@ -566,20 +609,36 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
 
     def get(self, request, *args, **kwargs):
         project = self.get_project()
-        runs = (
-            run_queryset(project)
-            .filter(
+        runs = list(
+            AnalysisRun.objects.filter(
+                document_revision__document__project=project,
                 status=AnalysisRun.Status.SUCCEEDED,
-                findings__isnull=False,
                 document_revision__document__is_active=True,
             )
-            .distinct()
+            .select_related("document_revision__document", "project_context")
+            .annotate(
+                has_findings=Exists(
+                    ExtractedFinding.objects.filter(analysis_run_id=OuterRef("pk"))
+                ),
+                candidate_page_count=Count(
+                    "task_runs",
+                    filter=Q(task_runs__task_type=AnalysisTaskRun.TaskType.PAGE_ANALYSIS),
+                ),
+            )
+            .filter(
+                has_findings=True,
+            )
+            .order_by("-created_at", "-id")
         )
+        rows_by_run, open_conflicts_by_run = intelligence_candidate_rows(project, runs)
         candidates = []
         for run in runs:
-            findings = list(run.findings.all())
-            statuses = [finding.review_status for finding in findings]
-            handling_statuses = [finding_handling_status(finding) for finding in findings]
+            findings = rows_by_run[run.pk]
+            statuses = [finding["latest_review_decision"] or "unreviewed" for finding in findings]
+            handling_statuses = [
+                summary_handling_status(finding, open_conflicts_by_run[run.pk])
+                for finding in findings
+            ]
             candidates.append(
                 {
                     "id": run.pk,
@@ -601,9 +660,7 @@ class IntelligenceReadinessView(ProjectDocumentContextMixin, APIView):
                     "document_count": len(run.input_manifest.get("documents", []))
                     if run.run_kind == AnalysisRun.RunKind.PROJECT_SET
                     else 1,
-                    "page_count": run.task_runs.filter(
-                        task_type=AnalysisTaskRun.TaskType.PAGE_ANALYSIS
-                    ).count(),
+                    "page_count": run.candidate_page_count,
                     "covered_document_revision_ids": run.input_manifest.get(
                         "document_revision_ids", [run.document_revision_id]
                     ),

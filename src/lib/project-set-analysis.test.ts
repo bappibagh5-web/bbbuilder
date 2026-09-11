@@ -67,3 +67,13 @@ test("Document Review defaults to one project-wide review with document drill-do
   assert.match(review, /analysisApi\.projectReviewState/);
   assert.match(review, /requestId !== projectReviewRequest\.current/);
 });
+
+test("project information loads candidates and history independently without false empty state", () => {
+  assert.match(review, /loadCandidates/);
+  assert.match(review, /loadSnapshots/);
+  assert.match(review, /Promise\.allSettled\(\[loadCandidates\(\), loadSnapshots\(\)\]\)/);
+  assert.match(review, /Loading current project review…/);
+  assert.match(review, /Loading project information versions…/);
+  assert.match(review, /authoritativeRunId=\{run\?\.id\}/);
+  assert.match(review, /candidate\.id === authoritativeRunId/);
+});
