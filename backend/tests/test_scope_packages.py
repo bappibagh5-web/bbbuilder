@@ -46,6 +46,14 @@ from apps.contractors.services import (
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
 from apps.projects.models import AuditEvent, Project
+from apps.scope_packages.coverage_preview import (
+    PREVIEW_RULE_VERSION,
+    _atomic_values,
+    _classify,
+    _client_title,
+    _responsibility,
+    build_scope_coverage_preview,
+)
 from apps.scope_packages.models import (
     ScopeItem,
     ScopeItemSource,
@@ -199,6 +207,370 @@ def client_for(user):
     client = APIClient()
     client.force_authenticate(user)
     return client
+
+
+def preview_entry(subject, value, *, category="scope_trade", discipline="general"):
+    entry = SimpleNamespace(
+        category=category,
+        effective_value=value,
+        finding=SimpleNamespace(subject=subject),
+    )
+    provenance = [
+        SimpleNamespace(
+            document_revision=SimpleNamespace(
+                document=SimpleNamespace(title="Project source", discipline=discipline)
+            ),
+            finding_source=SimpleNamespace(evidence_excerpt=value, visual_evidence_description=""),
+        )
+    ]
+    return entry, provenance
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        ("Provide miscellaneous metal steel angles.", "Miscellaneous Metals"),
+        ("Supply steel stud partition framing.", "Steel Stud Framing"),
+        ("Provide plywood backing and blocking.", "Backing / Blocking"),
+        ("Install gypsum board drywall.", "Drywall"),
+        ("Tape joints with joint compound.", "Mudding & Taping"),
+        ("Install suspended acoustic ceiling tile.", "T-Bar / ACT Ceilings"),
+        ("Provide door frames and door hardware.", "Doors / Frames / Hardware"),
+        ("Install glazing at the storefront.", "Glazing / Storefront"),
+        ("Provide millwork and casework.", "Millwork"),
+        ("Install floor tile and carpet flooring.", "Flooring"),
+        ("Apply painting and wall finish.", "Painting / Finishes"),
+        ("Install washroom accessory specialties.", "Specialties"),
+        ("Connect domestic water plumbing.", "Plumbing"),
+        ("Install HVAC duct and diffuser.", "HVAC / Mechanical"),
+        ("Relocate fire protection sprinklers.", "Fire Protection / Sprinklers"),
+        ("Install lighting luminaires.", "Lighting"),
+        ("Connect the fire alarm shutdown interface.", "Fire Alarm"),
+        ("Provide low voltage data cabling.", "Low Voltage / Data"),
+        ("Install CCTV security cameras.", "Security"),
+        ("Provide audio visual speakers.", "AV"),
+        ("Connect illuminated signage.", "Signage"),
+        ("Patch roof membrane around roof curb.", "Roofing"),
+        ("Firestop the rated penetration.", "Firestopping"),
+        ("Complete civil site trenching.", "Civil / Site Work"),
+        ("Provide structural equipment supports.", "Structural"),
+        ("Demolish and remove existing partition.", "Demolition"),
+        ("Submit closeout warranty and as-built records.", "Closeout"),
+        ("Provide electrical feeder and disconnect.", "Electrical Power"),
+    ),
+)
+def test_scope_coverage_preview_taxonomy(text, expected):
+    entry, provenance = preview_entry(expected, text)
+    destinations, _ = _classify(entry, provenance)
+    assert expected in {label for _, label in destinations}
+
+
+def test_scope_coverage_preview_avoids_substring_false_matches():
+    entry, provenance = preview_entry("Controls", "Provide controlled access sequence.")
+    destinations, _ = _classify(entry, provenance)
+    assert "Lighting" not in {label for _, label in destinations}
+
+
+def test_scope_coverage_preview_splits_only_explicit_bulleted_obligations():
+    value = "Paint existing ducts to match ceiling\n- Provide copper branch conductors"
+    assert _atomic_values(value) == [
+        "Paint existing ducts to match ceiling",
+        "Provide copper branch conductors",
+    ]
+
+
+def test_scope_coverage_preview_replaces_internal_subject_with_obligation_title():
+    entry, _ = preview_entry(
+        "Electrical: bid_condition",
+        "Provide 24-hour power and data connection for screens",
+        category="bid_condition",
+    )
+    assert _client_title(entry, entry.effective_value) == entry.effective_value
+
+
+def test_scope_coverage_preview_keeps_passive_fire_rating_work_out_of_sprinklers():
+    entry, provenance = preview_entry(
+        "Fire protection and refurbishment",
+        "Restore beam fire protection after stud installation",
+        category="scope_trade",
+    )
+    destinations, _ = _classify(entry, provenance)
+    labels = {label for _, label in destinations}
+    assert "Fire Protection / Sprinklers" not in labels
+    assert "General Requirements" in labels
+
+
+@pytest.mark.parametrize(
+    ("subject", "value"),
+    (
+        ("Electrical: project_fact", "Do not scale drawing."),
+        ("Drawing issue - For Construction", "For Construction"),
+        ("Electrical: project_fact", "The GC shall verify dimensions on site."),
+    ),
+)
+def test_scope_coverage_preview_does_not_infer_electrical_from_source_discipline(subject, value):
+    entry, provenance = preview_entry(
+        subject, value, category="project_fact", discipline="electrical"
+    )
+    destinations, _ = _classify(entry, provenance)
+    assert "Electrical Power" not in {label for _, label in destinations}
+
+
+@pytest.mark.parametrize(
+    ("subject", "value", "expected"),
+    (
+        ("Directional security cameras", "Owner supplied cameras installed by Nutech", "Security"),
+        (
+            "Door cylinders",
+            "Cylinders supplied and installed by locksmith",
+            "Doors / Frames / Hardware",
+        ),
+        ("55-inch Digital screens", "Digital screens provided by JD", "AV"),
+        ("Wall-mounted lightbox", "Lightbox LB1 provided by Property", "Signage"),
+        ("Security sensors", "Owner supplied security sensors", "Security"),
+        ("Sliding shutter", "Supply and install new Aeroflex sliding shutter", "Specialties"),
+        ("Architectural / Interiors: project_fact", "Install gypsum board drywall", "Drywall"),
+    ),
+)
+def test_scope_coverage_preview_classifies_by_effective_scope(subject, value, expected):
+    entry, provenance = preview_entry(subject, value, category="project_fact")
+    destinations, _ = _classify(entry, provenance)
+    assert expected in {label for _, label in destinations}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        ("G.C. to provide all wood blocking and plywood", "supply_install"),
+        ("G.C. is responsible for installation of backing", "supply_install"),
+        ("By landlord", "landlord_supplied"),
+        ("Owner supplied", "owner_supplied"),
+        ("This contractor shall provide the equipment", "supply_install"),
+        ("Structural engineer to confirm support height", "by_others"),
+    ),
+)
+def test_scope_coverage_preview_extracts_explicit_responsibility(text, expected):
+    assert _responsibility(_normalized_for_test(text)) == expected
+
+
+def test_scope_coverage_preview_recognizes_electrical_contractor_cost_responsibility():
+    assert _responsibility("costs charged to the electrical contractor.") == "supply_install"
+
+
+def test_scope_coverage_preview_keeps_structural_field_review_out_of_hvac():
+    entry, provenance = preview_entry(
+        "HVAC / Mechanical: project_fact",
+        "Do not cover framing with finishes until RJC field review is complete. "
+        "Contractor shall notify RJC for field review.",
+        category="project_fact",
+        discipline="mechanical",
+    )
+    destinations, _ = _classify(entry, provenance)
+    labels = {label for _, label in destinations}
+    assert "Structural" in labels
+    assert "HVAC / Mechanical" not in labels
+
+
+def _normalized_for_test(value):
+    return " ".join(value.casefold().split())
+
+
+def test_scope_coverage_preview_preserves_uncertainty_and_multitrade_coordination():
+    entry, provenance = preview_entry(
+        "RTU coordination",
+        "Coordinate RTU ductwork, electrical feeder, structural roof opening, "
+        "fire alarm shutdown interface, and roof membrane flashing; responsibility TBC.",
+        category="open_question",
+    )
+    destinations, text = _classify(entry, provenance)
+    labels = {label for _, label in destinations}
+    assert {
+        "HVAC / Mechanical",
+        "Electrical Power",
+        "Structural",
+        "Fire Alarm",
+        "Roofing",
+    } <= labels
+    assert _responsibility(text) == "unclear"
+
+
+def test_scope_coverage_preview_reports_unmapped_instead_of_manufacturing_scope():
+    entry, provenance = preview_entry(
+        "Unclassified requirement", "Confirm unusual project condition.", category="project_fact"
+    )
+    destinations, _ = _classify(entry, provenance)
+    assert destinations == ()
+
+
+def test_scope_coverage_preview_is_read_only_and_repeatable(
+    project, user, membership, approved_snapshot
+):
+    url = reverse(
+        "scope-coverage-preview",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    before = (
+        ScopePackage.objects.count(),
+        ScopePackageVersion.objects.count(),
+        ScopeItem.objects.count(),
+    )
+    first = client_for(user).get(url)
+    second = client_for(user).get(url)
+    assert first.status_code == second.status_code == 200
+    assert first.data == second.data
+    assert first.data["source_snapshot_id"] == approved_snapshot.pk
+    assert first.data["taxonomy_version"] == PREVIEW_RULE_VERSION
+    assert first.data["proposed_package_count"] == 1
+    assert first.data["packages"][0]["name"] == "HVAC / Mechanical"
+    provenance = first.data["packages"][0]["items"][0]["provenance"][0]
+    assert provenance["page_number"] == 1
+    assert provenance["evidence_excerpt"] == "Provide mechanical ductwork."
+    assert before == (
+        ScopePackage.objects.count(),
+        ScopePackageVersion.objects.count(),
+        ScopeItem.objects.count(),
+    )
+    assert client_for(user).post(url, {}).status_code == 405
+
+
+def test_scope_coverage_preview_selects_latest_approved_not_newer_unapproved(
+    project, user, approved_snapshot
+):
+    ProjectIntelligenceSnapshot.objects.create(
+        project=project,
+        version=2,
+        fingerprint="d" * 64,
+        manifest={"test": "must not be consumed"},
+        summary_counts={"included": 0},
+        created_by=user,
+    )
+    preview = build_scope_coverage_preview(project)
+    assert preview["source_snapshot_id"] == approved_snapshot.pk
+    assert preview["source_snapshot_version"] == 1
+
+
+def test_scope_coverage_preview_consolidates_equivalent_permit_obligations_with_all_sources(
+    project, user, approved_snapshot
+):
+    snapshot_source = approved_snapshot.sources.get()
+    revision = snapshot_source.document_revision
+    page = revision.pages.get(page_number=1)
+    task = AnalysisTaskRun.objects.get(analysis_run=snapshot_source.analysis_run)
+    for index, wording in enumerate(
+        (
+            "Obtain landlord review and permit approval.",
+            "Coordinate required landlord permit review and approval.",
+        ),
+        start=1,
+    ):
+        finding = ExtractedFinding.objects.create(
+            analysis_run=snapshot_source.analysis_run,
+            analysis_task_run=task,
+            document_revision=revision,
+            source_candidate_key=str(index) * 64,
+            semantic_key=f"landlord-permit-{index}",
+            category=ExtractedFinding.Category.PERMIT_INSPECTION,
+            subject="Landlord permit approval",
+            machine_value=wording,
+            normalized_machine_value=wording.casefold(),
+            machine_support=ExtractedFinding.Support.EXPLICIT,
+            schema_version="v1",
+        )
+        finding_source = FindingSource.objects.create(
+            finding=finding,
+            document_revision=revision,
+            document_page=page,
+            analysis_task_run=task,
+            source_key=str(index + 2) * 64,
+            evidence_mode=FindingSource.EvidenceMode.NATIVE_TEXT,
+            evidence_excerpt="Provide mechanical ductwork.",
+        )
+        entry = ProjectIntelligenceSnapshotEntry.objects.create(
+            snapshot=approved_snapshot,
+            snapshot_source=snapshot_source,
+            finding=finding,
+            decision=ProjectIntelligenceSnapshotEntry.Decision.MACHINE_HANDLED,
+            effective_value=wording,
+            semantic_key=finding.semantic_key,
+            category=finding.category,
+            included_in_intelligence=True,
+        )
+        ProjectIntelligenceSnapshotProvenance.objects.create(
+            snapshot_entry=entry,
+            finding_source=finding_source,
+            document_revision=revision,
+            document_page=page,
+            analysis_task_run=task,
+        )
+
+    preview = build_scope_coverage_preview(project)
+    general = preview["project_wide_requirements"]
+    permit = next(
+        item
+        for item in general["items"]
+        if item["item_key"] == "coordinate-landlord-review-and-permit-approval"
+    )
+    assert len(permit["approved_entry_ids"]) == 2
+    assert len(permit["provenance"]) == 2
+    assert preview["duplicate_obligations_consolidated"] == 1
+    assert preview["project_wide_requirement_count"] == general["scope_item_count"]
+    assert all(item["trade_key"] != "general-requirements" for item in preview["packages"])
+    assert preview["proposed_package_count"] == len(preview["packages"])
+
+
+def test_scope_coverage_preview_selects_newest_approved_version(project, user, approved_snapshot):
+    newest = ProjectIntelligenceSnapshot.objects.create(
+        project=project,
+        version=2,
+        fingerprint="e" * 64,
+        manifest={"test": "newest approved"},
+        summary_counts={"included": 0},
+        created_by=user,
+    )
+    ProjectIntelligenceApproval.objects.create(
+        project=project,
+        snapshot=newest,
+        approver=user,
+        readiness_result={"eligible": True},
+    )
+    preview = build_scope_coverage_preview(project)
+    assert preview["source_snapshot_id"] == newest.pk
+    assert preview["source_snapshot_version"] == 2
+
+
+def test_scope_coverage_preview_requires_approved_information(project, user, membership):
+    url = reverse(
+        "scope-coverage-preview",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    response = client_for(user).get(url)
+    assert response.status_code == 409
+    assert "Approved project information" in response.data["detail"]
+
+
+def test_scope_coverage_preview_is_viewer_readable_and_organization_scoped(
+    project, approved_snapshot, django_user_model
+):
+    viewer = django_user_model.objects.create_user(
+        email="scope-preview-viewer@example.com", password="not-a-secret"
+    )
+    Membership.objects.create(
+        user=viewer, organization=project.organization, role=Membership.Role.VIEWER
+    )
+    url = reverse(
+        "scope-coverage-preview",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    assert client_for(viewer).get(url).status_code == 200
+    assert client_for(viewer).post(url, {}).status_code == 405
+
+    other = Organization.objects.create(name="Other Scope Org", slug="other-scope-org")
+    Membership.objects.create(user=viewer, organization=other, role=Membership.Role.VIEWER)
+    wrong_org_url = reverse(
+        "scope-coverage-preview",
+        kwargs={"organization_slug": other.slug, "project_pk": project.pk},
+    )
+    assert client_for(viewer).get(wrong_org_url).status_code == 404
 
 
 def test_generation_requires_approved_project_information(project, user, approved_snapshot):

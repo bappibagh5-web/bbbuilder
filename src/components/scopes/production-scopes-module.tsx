@@ -27,12 +27,15 @@ import {
 } from "@/lib/scope-package-state";
 import {
   scopePackagesApi,
+  type ScopeCoveragePreview,
+  type ScopeCoveragePreviewSource,
   type ScopeItemSource,
   type ScopePackage,
   type ScopePackageEdit,
 } from "@/lib/scope-packages";
 import { documentsApi } from "@/lib/documents";
 import { sourcePdfViewerUrl } from "@/lib/document-source-navigation";
+import { cn } from "@/lib/utils";
 import { canEditProjects } from "@/components/organizations/organization-provider";
 import { Card } from "@/components/ui/card";
 
@@ -53,6 +56,8 @@ export function ProductionScopesModule({
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [preview, setPreview] = useState<ScopeCoveragePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -122,6 +127,40 @@ export function ProductionScopesModule({
           ? reason.message
           : "The source document could not be opened.",
       );
+    }
+  }
+
+  async function viewPreviewSource(source: ScopeCoveragePreviewSource) {
+    const previewWindow = window.open("about:blank", "_blank");
+    if (previewWindow) previewWindow.opener = null;
+    setError(null);
+    try {
+      const blob = await documentsApi.download(
+        slug,
+        project.id,
+        source.document_id,
+        source.document_revision_id,
+      );
+      const url = URL.createObjectURL(blob);
+      if (previewWindow) {
+        previewWindow.location.href = sourcePdfViewerUrl(url, source.page_number);
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (reason) {
+      previewWindow?.close();
+      setError(reason instanceof Error ? reason.message : "The preview source could not be opened.");
+    }
+  }
+
+  async function loadPreview() {
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      setPreview(await scopePackagesApi.preview(slug, project.id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Scope coverage preview could not be loaded.");
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -241,6 +280,13 @@ export function ProductionScopesModule({
       </div>
       {error && <Notice tone="error" message={error} />}
       {notice && <Notice tone="success" message={notice} />}
+      <ScopeCoveragePreviewPanel
+        preview={preview}
+        loading={previewLoading}
+        currentPackageCount={activePackages.length}
+        onLoad={() => void loadPreview()}
+        onViewSource={(source) => void viewPreviewSource(source)}
+      />
       <section aria-label="Scope status" className="grid gap-3 sm:grid-cols-4">
         <Metric
           label="Current trade packages"
@@ -330,6 +376,97 @@ export function ProductionScopesModule({
       </section>
     </div>
   );
+}
+
+function ScopeCoveragePreviewPanel({
+  preview,
+  loading,
+  currentPackageCount,
+  onLoad,
+  onViewSource,
+}: {
+  preview: ScopeCoveragePreview | null;
+  loading: boolean;
+  currentPackageCount: number;
+  onLoad: () => void;
+  onViewSource: (source: ScopeCoveragePreviewSource) => void;
+}) {
+  return (
+    <section className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-blue-50 p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-violet-700">Read-only planning preview</p>
+          <h2 className="mt-2 text-xl font-semibold text-slate-950">Preview New Scope Coverage</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Compare proposed trade packages from the latest approved Project Information with the current scope generation. Previewing does not create or supersede scope records.</p>
+        </div>
+        <button type="button" onClick={onLoad} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-lg bg-violet-700 px-4 text-sm font-semibold text-white disabled:opacity-50">
+          {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {loading ? "Building preview…" : "Preview New Scope Coverage"}
+        </button>
+      </div>
+      {!preview ? <p className="mt-4 text-sm text-slate-500">Current scope generation: {currentPackageCount} trade packages. Run the preview to compare without changing it.</p> : <div className="mt-5 space-y-4">
+        <div className="rounded-xl border border-blue-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wider text-blue-700">New scope coverage from Project Information V{preview.source_snapshot_version}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <Metric label="Trade scopes identified" value={preview.proposed_package_count} tone="blue" />
+            <Metric label="Detailed work items" value={preview.proposed_scope_item_count} tone="blue" />
+            <Metric label="Project-wide requirements" value={preview.project_wide_requirement_count} tone="blue" />
+            <Metric label="Project Information represented" value={`${preview.source_coverage_percent}%`} tone="green" />
+            <Metric label="Responsibility not stated" value={`${preview.responsibility_not_stated_count} of ${preview.total_requirement_count}`} tone="amber" />
+            <Metric label="Expected scopes not found" value={preview.expected_scope_coverage.filter((scope) => scope.status === "not_found").length} tone="amber" />
+          </div>
+          <p className="mt-4 text-sm text-slate-600">The documents identify the work below. Missing responsibility means the source documents did not name who performs it—not that the work itself is uncertain.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="Responsibility stated" value={preview.responsibility_explicit_count} tone="green" />
+          <Metric label="Responsibility not stated" value={preview.responsibility_not_stated_count} tone="amber" />
+          <Metric label="Owner, landlord, or by others" value={preview.external_responsibility_count} tone="blue" />
+          <Metric label="Coordination required" value={preview.coordination_entry_count} tone="amber" />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <h3 className="text-sm font-semibold text-emerald-900">New coverage beyond the current generation</h3>
+            <p className="mt-1 text-xs text-emerald-800">{preview.new_package_names.length ? preview.new_package_names.join(" · ") : "No additional trade destinations detected."}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+            <h3 className="text-sm font-semibold text-amber-900">Current packages without Version {preview.source_snapshot_version} support</h3>
+            <p className="mt-1 text-xs text-amber-800">{preview.historical_packages_no_longer_supported.length ? preview.historical_packages_no_longer_supported.join(" · ") : "Every current package retains supporting project information."}</p>
+          </div>
+        </div>
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">Trade scopes</h3>
+          <p className="mt-1 text-sm text-slate-600">Open a trade to review its proposed work and supporting source documents.</p>
+          <div className="mt-3 space-y-2">
+            {preview.packages.map((item) => <PreviewPackageDetails key={item.trade_key} item={item} onViewSource={onViewSource} />)}
+          </div>
+        </div>
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">Project-wide requirements</h3>
+          <p className="mt-1 text-sm text-slate-600">Requirements that apply across the project, such as permits, site rules, landlord coordination, inspections, and general construction obligations.</p>
+          <div className="mt-3"><PreviewPackageDetails item={preview.project_wide_requirements} onViewSource={onViewSource} /></div>
+        </div>
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="text-base font-semibold text-slate-950">Scope coverage check</h3>
+          <p className="mt-1 text-sm text-slate-600">“Not found” means the reviewed documents did not provide enough evidence. It does not guarantee that the trade is unnecessary.</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{preview.expected_scope_coverage.map((scope) => <div key={scope.trade_key} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"><span className="text-sm font-medium text-slate-800">{scope.name}</span><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold uppercase", scope.status === "found" ? "bg-emerald-100 text-emerald-700" : scope.status === "limited" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700")}>{scope.status === "found" ? "Found" : scope.status === "limited" ? "Limited evidence" : "Not found"}</span></div>)}</div>
+        </section>
+        <details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Advanced details</summary><div className="mt-3 space-y-4 border-t pt-3"><div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-600"><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.mapped_entry_count} / {preview.total_approved_entries} Project Information items represented</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.non_scope_informational_count} informational</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.unmapped_entry_count} unclassified</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.bundled_findings_split} bundled findings separated</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.non_actionable_clauses_removed} non-actionable clauses removed</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.trade_assignments_refined} clause-level trade assignments refined</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.passive_fire_items_removed_from_sprinklers} passive-fire items kept outside sprinkler scope</span><span className="rounded-full bg-slate-100 px-3 py-1.5">{preview.duplicate_obligations_consolidated} equivalent obligations consolidated</span><span className="rounded-full bg-slate-100 px-3 py-1.5">Rule version {preview.taxonomy_version}</span></div><div className="grid gap-4 md:grid-cols-2"><div><h4 className="text-xs font-bold uppercase text-amber-700">Unclassified</h4>{preview.unmapped_items.length ? <ul className="mt-2 space-y-1 text-sm text-slate-600">{preview.unmapped_items.map((item, index) => <li key={index}>{String(item.subject ?? "Unclassified Project Information")}</li>)}</ul> : <p className="mt-2 text-sm text-slate-500">None</p>}</div><div><h4 className="text-xs font-bold uppercase text-slate-500">Informational only</h4><p className="mt-2 text-sm text-slate-600">{preview.non_scope_informational_items.length} non-actionable document facts were retained outside the proposed scopes.</p></div></div></div></details>
+      </div>}
+    </section>
+  );
+}
+
+function PreviewPackageDetails({ item, onViewSource }: { item: ScopeCoveragePreview["packages"][number]; onViewSource: (source: ScopeCoveragePreviewSource) => void }) {
+  return <details className="rounded-xl border bg-white shadow-sm"><summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-3"><div><span className="font-semibold text-slate-900">{item.name}</span><p className="mt-1 text-xs text-slate-500">{item.scope_item_count} work items · {item.responsibility_explicit_count} responsibility stated · {item.responsibility_not_stated_count} not stated · {item.source_document_count} documents / {item.source_page_count} pages</p></div><ChevronDown className="h-4 w-4 text-slate-400" /></summary><div className="divide-y border-t">{item.items.map((scopeItem) => <article key={scopeItem.item_key} className="p-4"><div className="flex flex-wrap items-center gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600">{previewResponsibility(scopeItem.responsibility)}</span>{scopeItem.coordination_required && <span className="rounded bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase text-amber-700">Coordination required</span>}<h4 className="font-semibold text-slate-900">{scopeItem.title}</h4></div><p className="mt-2 text-sm leading-6 text-slate-600">{scopeItem.description}</p><PreviewSources sources={scopeItem.provenance} onViewSource={onViewSource} /></article>)}</div></details>;
+}
+
+function PreviewSources({ sources, onViewSource }: { sources: ScopeCoveragePreviewSource[]; onViewSource: (source: ScopeCoveragePreviewSource) => void }) {
+  const sourceButton = (source: ScopeCoveragePreviewSource) => <button key={source.snapshot_provenance_id} type="button" onClick={() => onViewSource(source)} className="rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-blue-700">Source: {source.document_title} · {source.revision_label || `Version ${source.document_revision_id}`} · Page {source.page_number}{source.sheet_number ? ` · ${source.sheet_number}` : ""}</button>;
+  return <div className="mt-3"><p className="text-xs font-semibold text-slate-500">Supporting sources: {sources.length}</p><div className="mt-2 flex flex-wrap gap-2">{sources.slice(0, 3).map(sourceButton)}</div>{sources.length > 3 && <details className="mt-2"><summary className="cursor-pointer text-xs font-semibold text-blue-700">Show all {sources.length} sources</summary><div className="mt-2 flex flex-wrap gap-2">{sources.slice(3).map(sourceButton)}</div></details>}</div>;
+}
+
+function previewResponsibility(value: string) {
+  return ({ unclear: "Responsibility not stated in documents", owner_supplied: "Owner supplied", landlord_supplied: "Landlord responsibility", by_others: "By others", existing_to_remain: "Responsibility confirmed · Existing to remain", relocate_reuse: "Responsibility confirmed · Relocate / reuse", install_only: "Responsibility confirmed · Install only", supply_install: "Responsibility confirmed" } as Record<string, string>)[value] ?? "Responsibility confirmed";
 }
 
 function ScopeCard({
@@ -630,7 +767,7 @@ function Metric({
   tone,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   tone: "blue" | "amber" | "green";
 }) {
   const style = {

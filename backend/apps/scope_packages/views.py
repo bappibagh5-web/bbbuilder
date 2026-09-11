@@ -8,6 +8,7 @@ from apps.analysis.models import ProjectIntelligenceSnapshot
 from apps.documents.views import ProjectDocumentContextMixin
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 
+from .coverage_preview import build_scope_coverage_preview
 from .models import ScopePackage
 from .serializers import (
     ScopePackageEditSerializer,
@@ -55,6 +56,19 @@ class ScopePackageListView(ProjectDocumentContextMixin, APIView):
             include_history=request.query_params.get("include_history") == "true",
         )
         return Response(ScopePackageSerializer(queryset, many=True).data)
+
+
+class ScopeCoveragePreviewView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        preview = build_scope_coverage_preview(self.get_project())
+        if preview is None:
+            return Response(
+                {"detail": "Approved project information is required for a scope preview."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(preview)
 
 
 class ScopePackageGenerateView(ProjectDocumentContextMixin, APIView):

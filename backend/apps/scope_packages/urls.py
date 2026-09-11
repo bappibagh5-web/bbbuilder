@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    ScopeCoveragePreviewView,
     ScopePackageDetailView,
     ScopePackageGenerateView,
     ScopePackageListView,
@@ -8,6 +9,11 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/scope-coverage-preview/",
+        ScopeCoveragePreviewView.as_view(),
+        name="scope-coverage-preview",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/scope-packages/",
         ScopePackageListView.as_view(),

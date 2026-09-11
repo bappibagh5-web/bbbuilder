@@ -71,6 +71,94 @@ export type ScopePackage = {
   updated_at: string;
 };
 
+export type ScopeCoveragePreviewSource = {
+  snapshot_provenance_id: number;
+  document_id: number;
+  document_title: string;
+  document_type: string;
+  discipline: string;
+  document_revision_id: number;
+  revision_label: string;
+  page_number: number;
+  sheet_number: string;
+  evidence_excerpt: string;
+  visual_evidence_description: string;
+};
+export type ScopeCoveragePreviewItem = {
+  item_key: string;
+  item_type: string;
+  responsibility: string;
+  coordination_required: boolean;
+  title: string;
+  description: string;
+  approved_entry_ids: number[];
+  provenance: ScopeCoveragePreviewSource[];
+};
+export type ScopeCoveragePreview = {
+  source_snapshot_id: number;
+  source_snapshot_version: number;
+  approval_id: number;
+  taxonomy_version: number;
+  total_approved_entries: number;
+  proposed_package_count: number;
+  proposed_scope_item_count: number;
+  project_wide_requirement_count: number;
+  total_requirement_count: number;
+  mapped_entry_count: number;
+  unmapped_entry_count: number;
+  non_scope_informational_count: number;
+  source_coverage_percent: number;
+  unclear_responsibility_count: number;
+  coordination_entry_count: number;
+  duplicate_obligations_consolidated: number;
+  bundled_findings_split: number;
+  non_actionable_clauses_removed: number;
+  passive_fire_items_removed_from_sprinklers: number;
+  trade_assignments_refined: number;
+  responsibility_counts: Record<string, number>;
+  responsibility_explicit_count: number;
+  responsibility_not_stated_count: number;
+  external_responsibility_count: number;
+  current_generation_package_count: number;
+  current_generation_scope_item_count: number;
+  new_package_names: string[];
+  historical_packages_no_longer_supported: string[];
+  packages: Array<{
+    trade_key: string;
+    name: string;
+    scope_item_count: number;
+    approved_entry_count: number;
+    responsibility_counts: Record<string, number>;
+    responsibility_explicit_count: number;
+    responsibility_not_stated_count: number;
+    source_document_count: number;
+    source_page_count: number;
+    items: ScopeCoveragePreviewItem[];
+  }>;
+  project_wide_requirements: {
+    trade_key: string;
+    name: string;
+    scope_item_count: number;
+    approved_entry_count: number;
+    responsibility_counts: Record<string, number>;
+    responsibility_explicit_count: number;
+    responsibility_not_stated_count: number;
+    source_document_count: number;
+    source_page_count: number;
+    items: ScopeCoveragePreviewItem[];
+  };
+  expected_scope_coverage: Array<{
+    trade_key: string;
+    name: string;
+    status: "found" | "limited" | "not_found";
+    scope_item_count: number;
+  }>;
+  coordination_groups: Array<Record<string, unknown>>;
+  ambiguous_items: Array<Record<string, unknown>>;
+  unmapped_items: Array<Record<string, unknown>>;
+  non_scope_informational_items: Array<Record<string, unknown>>;
+};
+
 export type ScopePackageEdit = Pick<
   ScopePackageVersion,
   "title" | "description" | "inclusions" | "exclusions" | "clarifications"
@@ -81,6 +169,10 @@ function projectPath(slug: string, projectId: string | number) {
 }
 
 export const scopePackagesApi = {
+  preview(slug: string, projectId: string | number, signal?: AbortSignal) {
+    const base = `/organizations/${encodeURIComponent(slug)}/projects/${encodeURIComponent(String(projectId))}`;
+    return apiRequest<ScopeCoveragePreview>(`${base}/scope-coverage-preview/`, { signal });
+  },
   list(slug: string, projectId: string | number, signal?: AbortSignal, includeHistory = false) {
     const query = includeHistory ? "?include_history=true" : "";
     return apiRequest<ScopePackage[]>(`${projectPath(slug, projectId)}/${query}`, { signal });

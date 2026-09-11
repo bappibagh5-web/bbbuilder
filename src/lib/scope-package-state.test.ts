@@ -48,6 +48,35 @@ test("Scopes UI exposes item counts, expandable provenance, and generation histo
   assert.match(source, /source\.page_number/);
 });
 
+test("Scopes UI offers an explicit read-only coverage preview with provenance", () => {
+  const source = readFileSync(
+    new URL("../components/scopes/production-scopes-module.tsx", import.meta.url),
+    "utf8",
+  );
+  const api = readFileSync(new URL("./scope-packages.ts", import.meta.url), "utf8");
+  assert.match(source, /Preview New Scope Coverage/);
+  assert.match(source, /Previewing does not create or supersede scope records/);
+  assert.match(source, /New scope coverage from Project Information/);
+  assert.match(source, /Trade scopes identified/);
+  assert.match(source, /Project-wide requirements/);
+  assert.match(source, /Responsibility not stated in documents/);
+  assert.match(source, /Responsibility not stated/);
+  assert.match(source, /preview\.total_requirement_count/);
+  assert.match(source, /Supporting sources:/);
+  assert.match(source, /Show all {sources\.length} sources/);
+  assert.match(source, /Scope coverage check/);
+  assert.match(source, /Limited evidence/);
+  assert.match(source, /does not guarantee that the trade is unnecessary/);
+  assert.match(source, /Advanced details/);
+  assert.match(source, /bundled_findings_split/);
+  assert.match(source, /passive_fire_items_removed_from_sprinklers/);
+  assert.match(source, /preview\.packages\.map/);
+  assert.match(source, /source\.document_revision_id/);
+  assert.match(source, /source\.page_number/);
+  assert.match(api, /scope-coverage-preview/);
+  assert.doesNotMatch(api, /scope-coverage-preview[\s\S]{0,200}method:\s*"POST"/);
+});
+
 test("scope editor converts one inclusion per non-empty line", () => {
   assert.deepEqual(linesToItems("First\n\n Second \r\nThird"), ["First", "Second", "Third"]);
   assert.equal(itemsToLines(["First", "Second"]), "First\nSecond");
