@@ -450,6 +450,14 @@ Define database recovery objectives, object-storage recovery, legal/business ret
 
 Decide whether bounded textual evidence and image crops are persisted, regenerated, or both, considering copyright, security, storage, and reproducibility.
 
+## Scope generation from approved project information
+
+- Preview and persistence use one canonical deterministic scope-plan builder; a second generation taxonomy is prohibited.
+- The plan fingerprint covers the approved Project Information identity, taxonomy version, trade and item content, responsibility/coordination states, and frozen provenance identities. Generation recomputes it under a project lock and rejects a stale browser preview.
+- Generated trade packages start as immutable Draft Version 1 records. Older generations, Ready versions, human edits, ScopeItems, and provenance remain historical and are superseded only for current-generation display.
+- Project-wide requirements remain a separate view of the approved plan. They are not persisted as a fake subcontractor trade package and are not eligible for contractor discovery.
+- Contractor discovery continues to require an explicitly Ready current scope version; generation alone never activates sourcing.
+
 ## Required ADRs before affected production coding
 
 At minimum, create focused ADRs for authentication, storage/upload security, processing idempotency, analysis/finding versioning, and approval readiness before those areas are finalized.

@@ -4,7 +4,6 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.analysis.models import ProjectIntelligenceSnapshot
 from apps.documents.views import ProjectDocumentContextMixin
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 
@@ -15,7 +14,11 @@ from .serializers import (
     ScopePackageGenerateSerializer,
     ScopePackageSerializer,
 )
-from .services import generate_scope_packages, revise_scope_package
+from .services import (
+    SCOPE_PLAN_CHANGED_MESSAGE,
+    generate_scope_plan_packages,
+    revise_scope_package,
+)
 
 
 def api_validation_error(error):
@@ -77,23 +80,31 @@ class ScopePackageGenerateView(ProjectDocumentContextMixin, APIView):
     def post(self, request, *args, **kwargs):
         serializer = ScopePackageGenerateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        snapshot = get_object_or_404(
-            ProjectIntelligenceSnapshot,
-            pk=serializer.validated_data["snapshot_id"],
-            project=self.get_project(),
-        )
         try:
-            created, existing = generate_scope_packages(
-                project=self.get_project(), snapshot=snapshot, actor=request.user
+            created, existing, plan = generate_scope_plan_packages(
+                project=self.get_project(),
+                actor=request.user,
+                expected_plan_fingerprint=serializer.validated_data["expected_plan_fingerprint"],
+                expected_project_information_version=serializer.validated_data[
+                    "expected_project_information_version"
+                ],
             )
         except DjangoValidationError as error:
+            if SCOPE_PLAN_CHANGED_MESSAGE in error.messages:
+                return Response(
+                    {"detail": SCOPE_PLAN_CHANGED_MESSAGE},
+                    status=status.HTTP_409_CONFLICT,
+                )
             raise api_validation_error(error) from error
-        packages = package_queryset(self.get_project()).filter(source_snapshot=snapshot)
         return Response(
             {
                 "created_count": len(created),
                 "existing_count": len(existing),
-                "packages": ScopePackageSerializer(packages, many=True).data,
+                "package_count": plan["proposed_package_count"],
+                "scope_item_count": plan["proposed_scope_item_count"],
+                "project_wide_requirement_count": plan["project_wide_requirement_count"],
+                "source_snapshot_version": plan["source_snapshot_version"],
+                "plan_fingerprint": plan["plan_fingerprint"],
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )

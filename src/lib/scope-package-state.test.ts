@@ -4,8 +4,10 @@ import test from "node:test";
 import type { ScopePackage } from "./scope-packages.ts";
 import {
   itemsToLines,
+  itemTypeLabel,
   linesToItems,
   replaceScopePackage,
+  responsibilityLabel,
   scopePackageCounts,
   scopeItemCount,
   scopePackageGenerations,
@@ -44,7 +46,7 @@ test("Scopes UI exposes item counts, expandable provenance, and generation histo
   assert.match(source, /Current trade packages/);
   assert.match(source, /Detailed scope items/);
   assert.match(source, /View generation history/);
-  assert.match(source, /scopeItem\.sources\.map/);
+  assert.match(source, /ScopeItemSources sources=\{scopeItem\.sources\}/);
   assert.match(source, /source\.page_number/);
 });
 
@@ -59,7 +61,7 @@ test("Scopes UI offers an explicit read-only coverage preview with provenance", 
   assert.match(source, /New scope coverage from Project Information/);
   assert.match(source, /Trade scopes identified/);
   assert.match(source, /Project-wide requirements/);
-  assert.match(source, /Responsibility not stated in documents/);
+  assert.match(source, /responsibilityLabel\(scopeItem\.responsibility\)/);
   assert.match(source, /Responsibility not stated/);
   assert.match(source, /preview\.total_requirement_count/);
   assert.match(source, /Supporting sources:/);
@@ -77,9 +79,49 @@ test("Scopes UI offers an explicit read-only coverage preview with provenance", 
   assert.doesNotMatch(api, /scope-coverage-preview[\s\S]{0,200}method:\s*"POST"/);
 });
 
+test("scope generation requires the accepted preview and plain-language confirmation", () => {
+  const source = readFileSync(
+    new URL("../components/scopes/production-scopes-module.tsx", import.meta.url),
+    "utf8",
+  );
+  const api = readFileSync(new URL("./scope-packages.ts", import.meta.url), "utf8");
+  assert.match(source, /Create a new draft scope generation from Project Information V/);
+  assert.match(source, /Project-wide requirements kept separate/);
+  assert.match(source, /Every new trade scope will start as Draft/);
+  assert.match(source, /Contractor discovery will not use these scopes/);
+  assert.match(source, /Create Draft Scopes/);
+  assert.match(api, /expected_plan_fingerprint: preview\.plan_fingerprint/);
+  assert.match(api, /expected_project_information_version/);
+  assert.match(api, /confirmed: true/);
+  assert.doesNotMatch(api, /snapshot_id: snapshotId/);
+});
+
 test("scope editor converts one inclusion per non-empty line", () => {
   assert.deepEqual(linesToItems("First\n\n Second \r\nThird"), ["First", "Second", "Third"]);
   assert.equal(itemsToLines(["First", "Second"]), "First\nSecond");
+});
+
+test("scope responsibility codes use client-facing business language", () => {
+  assert.equal(responsibilityLabel("unclear"), "Responsibility not stated in documents");
+  assert.equal(responsibilityLabel("supply_install"), "Supply & install");
+  assert.equal(responsibilityLabel("relocate_reuse"), "Relocate / reuse");
+  assert.equal(responsibilityLabel("install_only"), "Install only");
+  assert.equal(itemTypeLabel("supply_install"), "Supply Install");
+});
+
+test("generated package presentation separates work and confirmation needs", () => {
+  const source = readFileSync(
+    new URL("../components/scopes/production-scopes-module.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /title="Work Included"/);
+  assert.match(source, /title="Needs Confirmation"/);
+  assert.match(source, /title="Exclusions"/);
+  assert.match(source, /title="Notes"/);
+  assert.match(source, /scopeItem\.responsibility === "unclear"/);
+  assert.match(source, /Supporting sources: \{sources\.length\}/);
+  assert.match(source, /Show all \{sources\.length\} sources/);
+  assert.doesNotMatch(source, /scopeItem\.responsibility\.replaceAll/);
 });
 
 test("successful Ready response replaces the package immediately", () => {

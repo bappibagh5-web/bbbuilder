@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from collections import Counter, defaultdict
 
@@ -1037,7 +1039,7 @@ def build_scope_coverage_preview(project):
         )
     all_items = [item for package in package_payload for item in package["items"]]
     responsibility_counts = Counter(item["responsibility"] for item in all_items)
-    return {
+    result = {
         "source_snapshot_id": snapshot.pk,
         "source_snapshot_version": snapshot.version,
         "approval_id": snapshot.approval.pk,
@@ -1085,3 +1087,40 @@ def build_scope_coverage_preview(project):
         "unmapped_items": unmapped,
         "non_scope_informational_items": non_scope,
     }
+    fingerprint_manifest = {
+        "source_snapshot_id": result["source_snapshot_id"],
+        "source_snapshot_version": result["source_snapshot_version"],
+        "approval_id": result["approval_id"],
+        "taxonomy_version": result["taxonomy_version"],
+        "packages": [
+            {
+                "trade_key": package["trade_key"],
+                "name": package["name"],
+                "items": [
+                    {
+                        "item_key": item["item_key"],
+                        "item_type": item["item_type"],
+                        "responsibility": item["responsibility"],
+                        "coordination_required": item["coordination_required"],
+                        "title": item["title"],
+                        "description": item["description"],
+                        "approved_entry_ids": sorted(set(item["approved_entry_ids"])),
+                        "provenance": sorted(
+                            source["snapshot_provenance_id"] for source in item["provenance"]
+                        ),
+                    }
+                    for item in package["items"]
+                ],
+            }
+            for package in (*result["packages"], result["project_wide_requirements"])
+        ],
+    }
+    result["plan_fingerprint"] = hashlib.sha256(
+        json.dumps(
+            fingerprint_manifest,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return result

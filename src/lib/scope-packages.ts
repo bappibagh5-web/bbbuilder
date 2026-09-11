@@ -28,6 +28,7 @@ export type ScopeItem = {
     | "unclear";
   title: string;
   description: string;
+  coordination_required: boolean;
   sequence: number;
   sources: ScopeItemSource[];
 };
@@ -99,6 +100,7 @@ export type ScopeCoveragePreview = {
   source_snapshot_version: number;
   approval_id: number;
   taxonomy_version: number;
+  plan_fingerprint: string;
   total_approved_entries: number;
   proposed_package_count: number;
   proposed_scope_item_count: number;
@@ -177,10 +179,25 @@ export const scopePackagesApi = {
     const query = includeHistory ? "?include_history=true" : "";
     return apiRequest<ScopePackage[]>(`${projectPath(slug, projectId)}/${query}`, { signal });
   },
-  generate(slug: string, projectId: string | number, snapshotId: number) {
-    return apiRequest<{ created_count: number; existing_count: number; packages: ScopePackage[] }>(
+  generate(slug: string, projectId: string | number, preview: ScopeCoveragePreview) {
+    return apiRequest<{
+      created_count: number;
+      existing_count: number;
+      package_count: number;
+      scope_item_count: number;
+      project_wide_requirement_count: number;
+      source_snapshot_version: number;
+      plan_fingerprint: string;
+    }>(
       `${projectPath(slug, projectId)}/generate/`,
-      { method: "POST", body: JSON.stringify({ snapshot_id: snapshotId }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          confirmed: true,
+          expected_plan_fingerprint: preview.plan_fingerprint,
+          expected_project_information_version: preview.source_snapshot_version,
+        }),
+      },
     );
   },
   update(slug: string, projectId: string | number, packageId: number, values: ScopePackageEdit) {

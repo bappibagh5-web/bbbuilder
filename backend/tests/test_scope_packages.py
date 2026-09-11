@@ -61,7 +61,12 @@ from apps.scope_packages.models import (
     ScopePackageSource,
     ScopePackageVersion,
 )
-from apps.scope_packages.services import generate_scope_packages, revise_scope_package
+from apps.scope_packages.services import (
+    SCOPE_PLAN_CHANGED_MESSAGE,
+    generate_scope_packages,
+    generate_scope_plan_packages,
+    revise_scope_package,
+)
 from apps.scope_packages.taxonomy import (
     FIRE_PROTECTION,
     GENERAL,
@@ -538,6 +543,67 @@ def test_scope_coverage_preview_selects_newest_approved_version(project, user, a
     assert preview["source_snapshot_version"] == 2
 
 
+def test_scope_plan_fingerprint_is_deterministic(project, approved_snapshot):
+    first = build_scope_coverage_preview(project)
+    second = build_scope_coverage_preview(project)
+    assert first["plan_fingerprint"] == second["plan_fingerprint"]
+    assert len(first["plan_fingerprint"]) == 64
+
+
+def test_canonical_generation_persists_preview_plan_and_is_idempotent(
+    project, user, approved_snapshot
+):
+    preview = build_scope_coverage_preview(project)
+    created, existing, persisted_plan = generate_scope_plan_packages(
+        project=project,
+        actor=user,
+        expected_plan_fingerprint=preview["plan_fingerprint"],
+        expected_project_information_version=preview["source_snapshot_version"],
+    )
+    repeated_created, repeated_existing, repeated_plan = generate_scope_plan_packages(
+        project=project,
+        actor=user,
+        expected_plan_fingerprint=preview["plan_fingerprint"],
+        expected_project_information_version=preview["source_snapshot_version"],
+    )
+    assert len(created) == preview["proposed_package_count"]
+    assert existing == []
+    assert repeated_created == []
+    assert {package.pk for package in repeated_existing} == {package.pk for package in created}
+    assert (
+        persisted_plan["plan_fingerprint"]
+        == repeated_plan["plan_fingerprint"]
+        == preview["plan_fingerprint"]
+    )
+    assert (
+        ScopeItem.objects.filter(package_version__package__in=created).count()
+        == preview["proposed_scope_item_count"]
+    )
+    assert all(package.current_version.status == "draft" for package in created)
+    assert all(package.plan_fingerprint == preview["plan_fingerprint"] for package in created)
+    item = ScopeItem.objects.get(package_version__package__in=created)
+    preview_item = preview["packages"][0]["items"][0]
+    assert item.description == preview_item["description"]
+    assert item.responsibility == preview_item["responsibility"]
+    assert item.coordination_required == preview_item["coordination_required"]
+    assert set(item.sources.values_list("snapshot_provenance_id", flat=True)) == {
+        source["snapshot_provenance_id"] for source in preview_item["provenance"]
+    }
+
+
+def test_canonical_generation_rejects_stale_preview(project, user, approved_snapshot):
+    preview = build_scope_coverage_preview(project)
+    with pytest.raises(ValidationError, match="Project information or proposed scope"):
+        generate_scope_plan_packages(
+            project=project,
+            actor=user,
+            expected_plan_fingerprint="0" * 64,
+            expected_project_information_version=preview["source_snapshot_version"],
+        )
+    assert SCOPE_PLAN_CHANGED_MESSAGE.startswith("Project information")
+    assert ScopePackage.objects.count() == 0
+
+
 def test_scope_coverage_preview_requires_approved_information(project, user, membership):
     url = reverse(
         "scope-coverage-preview",
@@ -811,11 +877,15 @@ def test_admin_and_estimator_can_generate_edit_and_mark_ready(
     base = {"organization_slug": project.organization.slug, "project_pk": project.pk}
     response = client_for(user).post(
         reverse("scope-package-generate", kwargs=base),
-        {"snapshot_id": approved_snapshot.pk},
+        {
+            "confirmed": True,
+            "expected_plan_fingerprint": build_scope_coverage_preview(project)["plan_fingerprint"],
+            "expected_project_information_version": approved_snapshot.version,
+        },
         format="json",
     )
     assert response.status_code == 201
-    package_id = response.data["packages"][0]["id"]
+    package_id = ScopePackage.objects.get(lifecycle=ScopePackage.Lifecycle.ACTIVE).pk
     detail = reverse("scope-package-detail", kwargs={**base, "package_pk": package_id})
     assert client_for(user).patch(detail, {"title": "Edited"}, format="json").status_code == 200
     ready = reverse("scope-package-ready", kwargs={**base, "package_pk": package_id})

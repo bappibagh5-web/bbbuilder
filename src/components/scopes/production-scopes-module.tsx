@@ -19,8 +19,10 @@ import { analysisApi, type IntelligenceSnapshot } from "@/lib/analysis";
 import type { ProductionProject } from "@/lib/projects";
 import {
   itemsToLines,
+  itemTypeLabel,
   linesToItems,
   replaceScopePackage,
+  responsibilityLabel,
   scopeItemCount,
   scopePackageCounts,
   scopePackageGenerations,
@@ -58,6 +60,7 @@ export function ProductionScopesModule({
   const [showHistory, setShowHistory] = useState(false);
   const [preview, setPreview] = useState<ScopeCoveragePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [confirmGeneration, setConfirmGeneration] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -165,20 +168,17 @@ export function ProductionScopesModule({
   }
 
   async function generate() {
-    if (!latestApproved || !canWrite || busy) return;
+    if (!preview || !canWrite || busy) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const result = await scopePackagesApi.generate(
-        slug,
-        project.id,
-        latestApproved.id,
-      );
+      const result = await scopePackagesApi.generate(slug, project.id, preview);
       await load();
+      setConfirmGeneration(false);
       setNotice(
         result.created_count
-          ? `${result.created_count} draft scope package${result.created_count === 1 ? "" : "s"} created from approved Project Information Version ${latestApproved.version}.`
+          ? `New draft scopes created from Project Information Version ${result.source_snapshot_version}: ${result.package_count} trade scopes and ${result.scope_item_count} detailed work items.`
           : "Draft scopes already exist for this approved version. Nothing was overwritten.",
       );
     } catch (reason) {
@@ -260,23 +260,6 @@ export function ProductionScopesModule({
             changes are preserved as explicit versions.
           </p>
         </div>
-        {latestApproved && canWrite && (
-          <button
-            type="button"
-            onClick={() => void generate()}
-            disabled={busy}
-            className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-lg bg-[#173f5f] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#102f49] disabled:opacity-50"
-          >
-            <Sparkles className="h-4 w-4" />
-            {busy
-              ? "Working…"
-              : packages.some(
-                    (item) => item.source_snapshot === latestApproved.id,
-                  )
-                ? "Check Approved Version"
-                : "Generate Draft Scopes"}
-          </button>
-        )}
       </div>
       {error && <Notice tone="error" message={error} />}
       {notice && <Notice tone="success" message={notice} />}
@@ -286,7 +269,17 @@ export function ProductionScopesModule({
         currentPackageCount={activePackages.length}
         onLoad={() => void loadPreview()}
         onViewSource={(source) => void viewPreviewSource(source)}
+        canWrite={canWrite}
+        onCreate={() => setConfirmGeneration(true)}
       />
+      {preview && confirmGeneration && (
+        <GenerationConfirmation
+          preview={preview}
+          busy={busy}
+          onCancel={() => setConfirmGeneration(false)}
+          onConfirm={() => void generate()}
+        />
+      )}
       <section aria-label="Scope status" className="grid gap-3 sm:grid-cols-4">
         <Metric
           label="Current trade packages"
@@ -378,18 +371,62 @@ export function ProductionScopesModule({
   );
 }
 
+function GenerationConfirmation({
+  preview,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  preview: ScopeCoveragePreview;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <section role="dialog" aria-labelledby="scope-generation-title" className="rounded-xl border-2 border-blue-200 bg-white p-5 shadow-lg">
+      <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Confirm new draft generation</p>
+      <h3 id="scope-generation-title" className="mt-2 text-lg font-semibold text-slate-950">
+        Create a new draft scope generation from Project Information V{preview.source_snapshot_version}?
+      </h3>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Metric label="Trade scopes" value={preview.proposed_package_count} tone="blue" />
+        <Metric label="Detailed work items" value={preview.proposed_scope_item_count} tone="blue" />
+        <Metric label="Project-wide requirements kept separate" value={preview.project_wide_requirement_count} tone="amber" />
+      </div>
+      <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-slate-600">
+        <li>Existing scope history and human edits will be preserved.</li>
+        <li>Every new trade scope will start as Draft.</li>
+        <li>Contractor discovery will not use these scopes until an estimator marks them Ready.</li>
+      </ul>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" onClick={onConfirm} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#173f5f] px-4 text-sm font-semibold text-white disabled:opacity-50">
+          {busy && <LoaderCircle className="h-4 w-4 animate-spin" />}
+          {busy ? "Creating drafts…" : "Create Draft Scopes"}
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy} className="h-10 rounded-lg border px-4 text-sm font-semibold text-slate-700 disabled:opacity-50">
+          Cancel
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ScopeCoveragePreviewPanel({
   preview,
   loading,
   currentPackageCount,
   onLoad,
   onViewSource,
+  canWrite,
+  onCreate,
 }: {
   preview: ScopeCoveragePreview | null;
   loading: boolean;
   currentPackageCount: number;
   onLoad: () => void;
   onViewSource: (source: ScopeCoveragePreviewSource) => void;
+  canWrite: boolean;
+  onCreate: () => void;
 }) {
   return (
     <section className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-blue-50 p-5 shadow-sm">
@@ -416,6 +453,12 @@ function ScopeCoveragePreviewPanel({
             <Metric label="Expected scopes not found" value={preview.expected_scope_coverage.filter((scope) => scope.status === "not_found").length} tone="amber" />
           </div>
           <p className="mt-4 text-sm text-slate-600">The documents identify the work below. Missing responsibility means the source documents did not name who performs it—not that the work itself is uncertain.</p>
+          {canWrite && (
+            <button type="button" onClick={onCreate} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#173f5f] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#102f49]">
+              <Sparkles className="h-4 w-4" />
+              Create Draft Scopes
+            </button>
+          )}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Responsibility stated" value={preview.responsibility_explicit_count} tone="green" />
@@ -466,7 +509,7 @@ function PreviewSources({ sources, onViewSource }: { sources: ScopeCoveragePrevi
 }
 
 function previewResponsibility(value: string) {
-  return ({ unclear: "Responsibility not stated in documents", owner_supplied: "Owner supplied", landlord_supplied: "Landlord responsibility", by_others: "By others", existing_to_remain: "Responsibility confirmed · Existing to remain", relocate_reuse: "Responsibility confirmed · Relocate / reuse", install_only: "Responsibility confirmed · Install only", supply_install: "Responsibility confirmed" } as Record<string, string>)[value] ?? "Responsibility confirmed";
+  return responsibilityLabel(value);
 }
 
 function ScopeCard({
@@ -485,6 +528,12 @@ function ScopeCard({
   onViewSource: (source: ScopeItemSource) => void;
 }) {
   const version = item.current_version;
+  const workIncluded = version.scope_items
+    .filter((scopeItem) => scopeItem.responsibility !== "unclear")
+    .map((scopeItem) => scopeItem.description);
+  const needsConfirmation = version.scope_items
+    .filter((scopeItem) => scopeItem.responsibility === "unclear")
+    .map((scopeItem) => scopeItem.description);
   return (
     <Card className="overflow-hidden border-slate-200 shadow-sm">
       <div className="flex flex-col gap-3 border-b bg-white px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -544,11 +593,16 @@ function ScopeCard({
             <article key={scopeItem.id} className="p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded bg-indigo-50 px-2 py-1 text-[10px] font-bold uppercase text-indigo-700">
-                  {scopeItem.item_type.replaceAll("_", " ")}
+                  {itemTypeLabel(scopeItem.item_type)}
                 </span>
                 <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
-                  {scopeItem.responsibility.replaceAll("_", " ")}
+                  {responsibilityLabel(scopeItem.responsibility)}
                 </span>
+                {scopeItem.coordination_required && (
+                  <span className="rounded bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">
+                    Coordination required
+                  </span>
+                )}
                 <h4 className="font-semibold text-slate-900">
                   {scopeItem.title}
                 </h4>
@@ -556,34 +610,19 @@ function ScopeCard({
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 {scopeItem.description}
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {scopeItem.sources.map((source) => (
-                  <button
-                    key={source.id}
-                    type="button"
-                    onClick={() => onViewSource(source)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:border-blue-300"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    {source.document_title} ·{" "}
-                    {source.revision_label ||
-                      `Version ${source.document_revision}`}{" "}
-                    · Page {source.page_number}
-                    {source.sheet_number ? ` · ${source.sheet_number}` : ""}
-                  </button>
-                ))}
-              </div>
+              <ScopeItemSources sources={scopeItem.sources} onViewSource={onViewSource} />
             </article>
           ))}
         </div>
       </details>
-      <div className="grid gap-4 bg-slate-50/50 p-5 lg:grid-cols-3">
-        <ItemList title="Inclusions" items={version.inclusions} tone="green" />
+      <div className="grid gap-4 bg-slate-50/50 p-5 md:grid-cols-2 xl:grid-cols-4">
+        <ItemList title="Work Included" items={workIncluded} tone="green" />
+        <ItemList title="Needs Confirmation" items={needsConfirmation} tone="amber" />
         <ItemList title="Exclusions" items={version.exclusions} tone="red" />
         <ItemList
-          title="Clarifications & Notes"
+          title="Notes"
           items={version.clarifications}
-          tone="amber"
+          tone="blue"
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-white px-5 py-3 text-xs text-slate-500">
@@ -610,6 +649,39 @@ function ScopeCard({
         </details>
       </div>
     </Card>
+  );
+}
+
+function ScopeItemSources({
+  sources,
+  onViewSource,
+}: {
+  sources: ScopeItemSource[];
+  onViewSource: (source: ScopeItemSource) => void;
+}) {
+  const sourceButton = (source: ScopeItemSource) => (
+    <button
+      key={source.id}
+      type="button"
+      onClick={() => onViewSource(source)}
+      className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:border-blue-300"
+    >
+      <ExternalLink className="h-3.5 w-3.5" />
+      {source.document_title} · {source.revision_label || `Version ${source.document_revision}`} · Page {source.page_number}
+      {source.sheet_number ? ` · ${source.sheet_number}` : ""}
+    </button>
+  );
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-semibold text-slate-500">Supporting sources: {sources.length}</p>
+      <div className="mt-2 flex flex-wrap gap-2">{sources.slice(0, 3).map(sourceButton)}</div>
+      {sources.length > 3 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs font-semibold text-blue-700">Show all {sources.length} sources</summary>
+          <div className="mt-2 flex flex-wrap gap-2">{sources.slice(3).map(sourceButton)}</div>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -720,12 +792,13 @@ function ItemList({
 }: {
   title: string;
   items: string[];
-  tone: "green" | "red" | "amber";
+  tone: "green" | "red" | "amber" | "blue";
 }) {
   const dot = {
     green: "bg-emerald-500",
     red: "bg-red-500",
     amber: "bg-amber-500",
+    blue: "bg-blue-500",
   }[tone];
   return (
     <section>

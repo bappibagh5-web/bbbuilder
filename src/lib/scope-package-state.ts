@@ -1,5 +1,27 @@
 import type { ScopePackage } from "./scope-packages.ts";
 
+const RESPONSIBILITY_LABELS: Record<string, string> = {
+  unclear: "Responsibility not stated in documents",
+  owner_supplied: "Owner supplied",
+  landlord_supplied: "Landlord responsibility",
+  by_others: "By others",
+  existing_to_remain: "Existing to remain",
+  relocate_reuse: "Relocate / reuse",
+  install_only: "Install only",
+  supply_install: "Supply & install",
+};
+
+export function responsibilityLabel(value: string) {
+  return RESPONSIBILITY_LABELS[value] ?? "Responsibility confirmed";
+}
+
+export function itemTypeLabel(value: string) {
+  return value
+    .split("_")
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+}
+
 export function scopePackageCounts(packages: Pick<ScopePackage, "current_version">[]) {
   const ready = packages.filter((item) => item.current_version.status === "ready").length;
   return { total: packages.length, ready, draft: packages.length - ready };

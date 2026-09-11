@@ -64,6 +64,7 @@ class ScopeItemSerializer(serializers.ModelSerializer):
             "responsibility",
             "title",
             "description",
+            "coordination_required",
             "sequence",
             "sources",
         )
@@ -128,6 +129,7 @@ class ScopePackageSerializer(serializers.ModelSerializer):
             "trade_key",
             "trade_category",
             "generation_rule_version",
+            "plan_fingerprint",
             "lifecycle",
             "source_snapshot",
             "source_snapshot_version",
@@ -143,7 +145,14 @@ class ScopePackageSerializer(serializers.ModelSerializer):
 
 
 class ScopePackageGenerateSerializer(serializers.Serializer):
-    snapshot_id = serializers.IntegerField(min_value=1)
+    confirmed = serializers.BooleanField()
+    expected_plan_fingerprint = serializers.RegexField(r"^[0-9a-f]{64}$")
+    expected_project_information_version = serializers.IntegerField(min_value=1)
+
+    def validate_confirmed(self, value):
+        if not value:
+            raise serializers.ValidationError("Confirm the scope plan before creating drafts.")
+        return value
 
 
 class ScopePackageEditSerializer(serializers.Serializer):

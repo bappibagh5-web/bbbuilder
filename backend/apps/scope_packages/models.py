@@ -26,6 +26,7 @@ class ScopePackage(models.Model):
     trade_key = models.SlugField(max_length=100)
     trade_category = models.CharField(max_length=200)
     generation_rule_version = models.PositiveIntegerField(default=1)
+    plan_fingerprint = models.CharField(max_length=64, blank=True)
     lifecycle = models.CharField(max_length=20, choices=Lifecycle, default=Lifecycle.ACTIVE)
     current_version = models.OneToOneField(
         "ScopePackageVersion",
@@ -197,6 +198,7 @@ class ScopeItem(ImmutableFieldsMixin):
     )
     title = models.CharField(max_length=255)
     description = models.TextField(max_length=2000)
+    coordination_required = models.BooleanField(default=False)
     sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -207,6 +209,7 @@ class ScopeItem(ImmutableFieldsMixin):
         "responsibility",
         "title",
         "description",
+        "coordination_required",
         "sequence",
         "created_at",
     )

@@ -809,6 +809,12 @@ For every task:
 
 Never implement multiple roadmap tasks in one uncontrolled Codex request.
 
+## Current scope-generation implementation checkpoint
+
+The accepted full-project Scope Coverage Preview for JD Sports Project Information Version 4 is the canonical scope plan: 27 trade scopes, 659 detailed trade work items, and 106 project-wide requirements kept outside subcontractor trade packages. The production generation path now recomputes and persists that same plan only after an Admin/Estimator previews it and explicitly confirms creation. It uses a deterministic plan fingerprint to block stale previews, creates Draft versions only, preserves all earlier package versions and human edits, and leaves contractor discovery unavailable until a human marks the new scopes Ready.
+
+Automated implementation validation is complete; real Project 3 generation has not been performed. Manual validation of the explicit Scopes-page action is the next step. Outreach/M3 has not started.
+
 ## Recovery instruction
 
 If all previous ChatGPT or Codex conversations are lost, a new session should:
