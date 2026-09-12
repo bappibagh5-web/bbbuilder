@@ -71,6 +71,24 @@ export type ScopePackage = {
   created_at: string;
   updated_at: string;
 };
+export type ScopePackageVersionSummary = {
+  id: number;
+  version: number;
+  title: string;
+  status: ScopePackageStatus;
+  created_by: string;
+  created_at: string;
+  scope_item_count: number;
+  needs_confirmation_count: number;
+  source_count: number;
+};
+export type ScopePackageSummary = Omit<
+  ScopePackage,
+  "current_version" | "versions" | "source_approval_id" | "created_by" | "updated_by" | "plan_fingerprint"
+> & {
+  current_version: ScopePackageVersionSummary;
+  version_count: number;
+};
 
 export type ScopeCoveragePreviewSource = {
   snapshot_provenance_id: number;
@@ -177,7 +195,10 @@ export const scopePackagesApi = {
   },
   list(slug: string, projectId: string | number, signal?: AbortSignal, includeHistory = false) {
     const query = includeHistory ? "?include_history=true" : "";
-    return apiRequest<ScopePackage[]>(`${projectPath(slug, projectId)}/${query}`, { signal });
+    return apiRequest<ScopePackageSummary[]>(`${projectPath(slug, projectId)}/${query}`, { signal });
+  },
+  detail(slug: string, projectId: string | number, packageId: number, signal?: AbortSignal) {
+    return apiRequest<ScopePackage>(`${projectPath(slug, projectId)}/${packageId}/`, { signal });
   },
   generate(slug: string, projectId: string | number, preview: ScopeCoveragePreview) {
     return apiRequest<{

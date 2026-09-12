@@ -450,6 +450,8 @@ function ProjectIntelligencePanel({ slug, projectId, canOperate, onSnapshotsChan
   useEffect(() => {
     if (!authoritativeRunId || candidatesLoading || selected.length) return;
     if (candidates.some((candidate) => candidate.id === authoritativeRunId)) {
+      // The persisted authoritative run initializes this controlled selection after the async candidate load.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelected([authoritativeRunId]);
     }
   }, [authoritativeRunId, candidates, candidatesLoading, selected.length]);

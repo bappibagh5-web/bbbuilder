@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -963,11 +965,59 @@ def test_default_list_hides_superseded_generation_and_history_can_be_requested(
     assert current.status_code == 200
     assert len(current.data) == 1
     assert current.data[0]["lifecycle"] == ScopePackage.Lifecycle.ACTIVE
-    assert current.data[0]["current_version"]["scope_items"][0]["sources"][0]["page_number"] == 1
+    assert "scope_items" not in current.data[0]["current_version"]
+    assert current.data[0]["current_version"]["scope_item_count"] == 1
+    detail = client_for(user).get(
+        reverse(
+            "scope-package-detail",
+            kwargs={
+                "organization_slug": project.organization.slug,
+                "project_pk": project.pk,
+                "package_pk": current.data[0]["id"],
+            },
+        )
+    )
+    assert detail.data["current_version"]["scope_items"][0]["sources"][0]["page_number"] == 1
     assert history.status_code == 200
     assert len(history.data) == 2
     assert legacy.lifecycle == ScopePackage.Lifecycle.SUPERSEDED
     assert legacy.current_version.description == "Preserve this content."
+
+
+def test_scope_summary_is_lightweight_and_query_bounded(
+    project, user, membership, approved_snapshot
+):
+    packages = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    url = reverse(
+        "scope-package-list",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    connection.queries_log.clear()
+    with CaptureQueriesContext(connection) as queries:
+        response = client_for(user).get(url)
+    assert response.status_code == 200
+    assert len(response.data) == len(packages)
+    assert len(queries) <= 7
+    assert all("scope_items" not in row["current_version"] for row in response.data)
+    assert sum(row["current_version"]["scope_item_count"] for row in response.data) == 1
+
+
+def test_scope_detail_returns_only_requested_project_package(
+    project, user, membership, approved_snapshot
+):
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    url = reverse(
+        "scope-package-detail",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "package_pk": package.pk,
+        },
+    )
+    response = client_for(user).get(url)
+    assert response.status_code == 200
+    assert response.data["id"] == package.pk
+    assert response.data["current_version"]["scope_items"][0]["sources"][0]["page_number"] == 1
 
 
 def test_cross_organization_scope_isolation(project, user, membership, approved_snapshot):
@@ -1648,11 +1698,28 @@ def test_candidate_permissions_and_human_shortlist(
     assert response.status_code == 200 and response.data["status"] == "shortlisted"
     response = client_for(user).patch(url, {"status": "candidate"}, format="json")
     assert response.status_code == 200 and response.data["status"] == "candidate"
-    response = client_for(user).patch(url, {"status": "candidate"}, format="json")
-    assert response.status_code == 200 and response.data["status"] == "candidate"
     membership.role = Membership.Role.VIEWER
     membership.save(update_fields=("role",))
     assert client_for(user).patch(url, {"status": "rejected"}, format="json").status_code == 403
+
+
+def test_candidate_list_can_lazy_load_one_ready_scope(
+    project, user, membership, approved_snapshot, settings
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    discover_contractors(project=project, package=package, actor=user)
+    url = reverse(
+        "contractor-candidate-list",
+        kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+    )
+    response = client_for(user).get(url, {"scope_package": package.pk})
+    assert response.status_code == 200
+    assert response.data
+    assert {row["scope_package"] for row in response.data} == {package.pk}
+    assert client_for(user).get(url, {"scope_package": "invalid"}).status_code == 400
 
 
 def test_candidate_stays_bound_to_searched_ready_version_and_hides_after_new_draft(
@@ -1727,6 +1794,7 @@ def test_trade_coverage_uses_configured_shortlist_target_and_is_viewer_read_only
         "trades": [
             {
                 "scope_package": package.pk,
+                "scope_version": package.current_version.version,
                 "trade_key": package.trade_key,
                 "trade_category": package.trade_category,
                 "title": package.current_version.title,

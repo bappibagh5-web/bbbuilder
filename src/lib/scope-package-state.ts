@@ -1,5 +1,3 @@
-import type { ScopePackage } from "./scope-packages.ts";
-
 const RESPONSIBILITY_LABELS: Record<string, string> = {
   unclear: "Responsibility not stated in documents",
   owner_supplied: "Owner supplied",
@@ -22,16 +20,16 @@ export function itemTypeLabel(value: string) {
     .join(" ");
 }
 
-export function scopePackageCounts(packages: Pick<ScopePackage, "current_version">[]) {
+export function scopePackageCounts(packages: { current_version: { status: string } }[]) {
   const ready = packages.filter((item) => item.current_version.status === "ready").length;
   return { total: packages.length, ready, draft: packages.length - ready };
 }
 
-export function scopeItemCount(packages: Pick<ScopePackage, "current_version">[]) {
-  return packages.reduce((total, item) => total + item.current_version.scope_items.length, 0);
+export function scopeItemCount(packages: { current_version: { scope_item_count?: number; scope_items?: unknown[] } }[]) {
+  return packages.reduce((total, item) => total + (item.current_version.scope_item_count ?? item.current_version.scope_items?.length ?? 0), 0);
 }
 
-export function scopePackageGenerations(packages: ScopePackage[]) {
+export function scopePackageGenerations<T extends { lifecycle: string }>(packages: T[]) {
   return {
     active: packages.filter((item) => item.lifecycle === "active"),
     historical: packages.filter((item) => item.lifecycle === "superseded"),
@@ -46,6 +44,6 @@ export function itemsToLines(value: string[]) {
   return value.join("\n");
 }
 
-export function replaceScopePackage(packages: ScopePackage[], updated: ScopePackage) {
+export function replaceScopePackage<T extends { id: number; current_version: { status: string } }>(packages: T[], updated: T) {
   return packages.map((item) => (item.id === updated.id ? updated : item));
 }

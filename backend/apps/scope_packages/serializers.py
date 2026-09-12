@@ -144,6 +144,46 @@ class ScopePackageSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ScopePackageSummarySerializer(serializers.ModelSerializer):
+    source_snapshot_version = serializers.IntegerField(
+        source="source_snapshot.version", read_only=True
+    )
+    current_version = serializers.SerializerMethodField()
+    version_count = serializers.IntegerField(read_only=True)
+
+    def get_current_version(self, package):
+        version = package.current_version
+        return {
+            "id": version.pk,
+            "version": version.version,
+            "title": version.title,
+            "status": version.status,
+            "created_by": version.created_by.email,
+            "created_at": version.created_at,
+            "scope_item_count": package.scope_item_count,
+            "needs_confirmation_count": package.needs_confirmation_count,
+            "source_count": package.source_count,
+        }
+
+    class Meta:
+        model = ScopePackage
+        fields = (
+            "id",
+            "project",
+            "trade_key",
+            "trade_category",
+            "generation_rule_version",
+            "lifecycle",
+            "source_snapshot",
+            "source_snapshot_version",
+            "current_version",
+            "version_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
 class ScopePackageGenerateSerializer(serializers.Serializer):
     confirmed = serializers.BooleanField()
     expected_plan_fingerprint = serializers.RegexField(r"^[0-9a-f]{64}$")

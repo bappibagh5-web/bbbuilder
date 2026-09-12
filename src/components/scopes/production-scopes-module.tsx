@@ -21,7 +21,6 @@ import {
   itemsToLines,
   itemTypeLabel,
   linesToItems,
-  replaceScopePackage,
   responsibilityLabel,
   scopeItemCount,
   scopePackageCounts,
@@ -34,6 +33,7 @@ import {
   type ScopeItemSource,
   type ScopePackage,
   type ScopePackageEdit,
+  type ScopePackageSummary,
 } from "@/lib/scope-packages";
 import { documentsApi } from "@/lib/documents";
 import { sourcePdfViewerUrl } from "@/lib/document-source-navigation";
@@ -50,9 +50,10 @@ export function ProductionScopesModule({
 }) {
   const slug = membership.organization.slug;
   const canWrite = project.is_active && canEditProjects(membership);
-  const [packages, setPackages] = useState<ScopePackage[]>([]);
+  const [packages, setPackages] = useState<ScopePackageSummary[]>([]);
   const [snapshots, setSnapshots] = useState<IntelligenceSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -61,29 +62,30 @@ export function ProductionScopesModule({
   const [preview, setPreview] = useState<ScopeCoveragePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmGeneration, setConfirmGeneration] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [details, setDetails] = useState<Record<number, ScopePackage>>({});
+  const [detailLoading, setDetailLoading] = useState<number | null>(null);
+  const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historicalPackages, setHistoricalPackages] = useState<ScopePackageSummary[]>([]);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const [scopeData, snapshotData] = await Promise.all([
-        scopePackagesApi.list(slug, project.id, signal, showHistory),
+        scopePackagesApi.list(slug, project.id, signal),
         analysisApi.snapshots(slug, project.id, signal),
       ]);
       setPackages(scopeData);
       setSnapshots(snapshotData);
     },
-    [project.id, showHistory, slug],
+    [project.id, slug],
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      scopePackagesApi.list(slug, project.id, controller.signal, showHistory),
-      analysisApi.snapshots(slug, project.id, controller.signal),
-    ])
-      .then(([scopeData, snapshotData]) => {
-        setPackages(scopeData);
-        setSnapshots(snapshotData);
-      })
+    scopePackagesApi.list(slug, project.id, controller.signal)
+      .then(setPackages)
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) {
           setError(
@@ -96,17 +98,63 @@ export function ProductionScopesModule({
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
+    analysisApi.snapshots(slug, project.id, controller.signal)
+      .then(setSnapshots)
+      .catch(() => undefined)
+      .finally(() => {
+        if (!controller.signal.aborted) setSnapshotsLoading(false);
+      });
     return () => controller.abort();
-  }, [project.id, showHistory, slug]);
+  }, [project.id, slug]);
 
   const approvedSnapshots = snapshots
     .filter((snapshot) => snapshot.approval)
     .sort((a, b) => b.version - a.version);
   const latestApproved = approvedSnapshots[0] ?? null;
-  const { active: activePackages, historical: historicalPackages } =
-    scopePackageGenerations(packages);
+  const { active: activePackages } = scopePackageGenerations(packages);
   const counts = scopePackageCounts(activePackages);
   const detailedItemCount = scopeItemCount(activePackages);
+
+  async function togglePackage(packageId: number) {
+    if (expanded === packageId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(packageId);
+    if (details[packageId]) return;
+    setDetailLoading(packageId);
+    setDetailErrors((current) => ({ ...current, [packageId]: "" }));
+    try {
+      const detail = await scopePackagesApi.detail(slug, project.id, packageId);
+      setDetails((current) => ({ ...current, [packageId]: detail }));
+    } catch (reason) {
+      setDetailErrors((current) => ({
+        ...current,
+        [packageId]: reason instanceof Error ? reason.message : "Scope details could not be loaded.",
+      }));
+    } finally {
+      setDetailLoading(null);
+    }
+  }
+
+  async function toggleHistory() {
+    if (showHistory) {
+      setShowHistory(false);
+      return;
+    }
+    setShowHistory(true);
+    if (historicalPackages.length) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const allPackages = await scopePackagesApi.list(slug, project.id, undefined, true);
+      setHistoricalPackages(scopePackageGenerations(allPackages).historical);
+    } catch (reason) {
+      setHistoryError(reason instanceof Error ? reason.message : "Generation history could not be loaded.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function viewSource(source: ScopeItemSource) {
     const preview = window.open("about:blank", "_blank");
@@ -197,7 +245,8 @@ export function ProductionScopesModule({
     setError(null);
     setNotice(null);
     try {
-      await scopePackagesApi.update(slug, project.id, packageId, values);
+      const updated = await scopePackagesApi.update(slug, project.id, packageId, values);
+      setDetails((current) => ({ ...current, [packageId]: updated }));
       await load();
       setEditing(null);
       setNotice("Scope changes saved as a new version.");
@@ -222,7 +271,8 @@ export function ProductionScopesModule({
         project.id,
         packageId,
       );
-      setPackages((current) => replaceScopePackage(current, updated));
+      setDetails((current) => ({ ...current, [packageId]: updated }));
+      await load();
       setNotice("Scope marked ready by the estimator.");
     } catch (reason) {
       setError(
@@ -234,15 +284,6 @@ export function ProductionScopesModule({
       setBusy(false);
     }
   }
-
-  if (loading)
-    return (
-      <State
-        title="Loading scope packages…"
-        detail="Retrieving approved project information and scope history."
-        spin
-      />
-    );
 
   return (
     <div className="space-y-5">
@@ -280,7 +321,7 @@ export function ProductionScopesModule({
           onConfirm={() => void generate()}
         />
       )}
-      <section aria-label="Scope status" className="grid gap-3 sm:grid-cols-4">
+      {loading ? <ScopeSummarySkeleton /> : <section aria-label="Scope status" className="grid gap-3 sm:grid-cols-4">
         <Metric
           label="Current trade packages"
           value={counts.total}
@@ -293,8 +334,8 @@ export function ProductionScopesModule({
         />
         <Metric label="Draft" value={counts.draft} tone="amber" />
         <Metric label="Ready" value={counts.ready} tone="green" />
-      </section>
-      {!latestApproved ? (
+      </section>}
+      {loading ? <ScopeRowsSkeleton /> : !latestApproved && !snapshotsLoading ? (
         <State
           title="Approved project information required"
           detail="Approve a Project Information version in Document Review before generating scope packages."
@@ -311,32 +352,36 @@ export function ProductionScopesModule({
       ) : (
         <div className="grid gap-4">
           {activePackages.map((item) =>
-            editing === item.id ? (
+            editing === item.id && details[item.id] ? (
               <ScopeEditor
                 key={item.id}
-                item={item}
+                item={details[item.id]}
                 busy={busy}
                 onCancel={() => setEditing(null)}
                 onSave={(values) => void save(item.id, values)}
               />
-            ) : (
-              <ScopeCard
-                key={item.id}
-                item={item}
-                canWrite={canWrite}
-                busy={busy}
-                onEdit={() => setEditing(item.id)}
-                onReady={() => void ready(item.id)}
-                onViewSource={(source) => void viewSource(source)}
-              />
-            ),
+            ) : <ScopeAccordion
+              key={item.id}
+              summary={item}
+              detail={details[item.id]}
+              expanded={expanded === item.id}
+              loading={detailLoading === item.id}
+              error={detailErrors[item.id]}
+              canWrite={canWrite}
+              busy={busy}
+              onToggle={() => void togglePackage(item.id)}
+              onEdit={() => setEditing(item.id)}
+              onReady={() => void ready(item.id)}
+              onViewSource={(source) => void viewSource(source)}
+            />,
           )}
         </div>
       )}
       <section className="rounded-xl border bg-white p-4">
         <button
           type="button"
-          onClick={() => setShowHistory((value) => !value)}
+          onClick={() => void toggleHistory()}
+          aria-expanded={showHistory}
           className="inline-flex items-center gap-2 text-sm font-semibold text-blue-700"
         >
           <History className="h-4 w-4" />
@@ -344,7 +389,7 @@ export function ProductionScopesModule({
         </button>
         {showHistory && (
           <div className="mt-4 space-y-2 border-t pt-4">
-            {historicalPackages.length ? (
+            {historyLoading ? <p className="text-sm text-slate-500">Loading generation history…</p> : historyError ? <Notice tone="error" message={historyError} /> : historicalPackages.length ? (
               historicalPackages.map((item) => (
                 <div
                   key={item.id}
@@ -355,7 +400,7 @@ export function ProductionScopesModule({
                     {item.source_snapshot_version}
                   </span>
                   <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-bold uppercase text-slate-600">
-                    Superseded · {item.current_version.scope_items.length} items
+                    Superseded · {item.current_version.scope_item_count} items
                   </span>
                 </div>
               ))
@@ -512,6 +557,25 @@ function previewResponsibility(value: string) {
   return responsibilityLabel(value);
 }
 
+function ScopeAccordion({ summary, detail, expanded, loading, error, canWrite, busy, onToggle, onEdit, onReady, onViewSource }: { summary: ScopePackageSummary; detail?: ScopePackage; expanded: boolean; loading: boolean; error?: string; canWrite: boolean; busy: boolean; onToggle: () => void; onEdit: () => void; onReady: () => void; onViewSource: (source: ScopeItemSource) => void }) {
+  const version = summary.current_version;
+  return <Card className="overflow-hidden border-slate-200 shadow-sm">
+    <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={`scope-package-${summary.id}`} className="flex w-full items-center justify-between gap-4 bg-white px-5 py-4 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{summary.trade_category}</span><Status status={version.status} /><span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">Version {version.version}</span></div><p className="mt-1 text-sm text-slate-500">{version.scope_item_count} detailed items{version.needs_confirmation_count ? ` · ${version.needs_confirmation_count} need confirmation` : ""}</p></div>
+      <ChevronDown className={cn("h-5 w-5 shrink-0 text-slate-500 transition-transform", expanded && "rotate-180")} />
+    </button>
+    {expanded && <div id={`scope-package-${summary.id}`} className="border-t bg-slate-50/40 p-3">{loading ? <p className="p-5 text-sm text-slate-500">Loading {summary.trade_category} details…</p> : error ? <Notice tone="error" message={error} /> : detail ? <ScopeCard item={detail} canWrite={canWrite} busy={busy} onEdit={onEdit} onReady={onReady} onViewSource={onViewSource} embedded /> : null}</div>}
+  </Card>;
+}
+
+function ScopeSummarySkeleton() {
+  return <section aria-label="Loading scope summary" className="grid gap-3 sm:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-24 animate-pulse rounded-xl border bg-slate-100" />)}</section>;
+}
+
+function ScopeRowsSkeleton() {
+  return <div aria-label="Loading scope packages" className="space-y-3">{Array.from({ length: 5 }, (_, index) => <div key={index} className="h-20 animate-pulse rounded-xl border bg-slate-100" />)}</div>;
+}
+
 function ScopeCard({
   item,
   canWrite,
@@ -519,6 +583,7 @@ function ScopeCard({
   onEdit,
   onReady,
   onViewSource,
+  embedded = false,
 }: {
   item: ScopePackage;
   canWrite: boolean;
@@ -526,6 +591,7 @@ function ScopeCard({
   onEdit: () => void;
   onReady: () => void;
   onViewSource: (source: ScopeItemSource) => void;
+  embedded?: boolean;
 }) {
   const version = item.current_version;
   const workIncluded = version.scope_items
@@ -535,7 +601,7 @@ function ScopeCard({
     .filter((scopeItem) => scopeItem.responsibility === "unclear")
     .map((scopeItem) => scopeItem.description);
   return (
-    <Card className="overflow-hidden border-slate-200 shadow-sm">
+    <Card className={cn("overflow-hidden border-slate-200 shadow-sm", embedded && "border-0 shadow-none")}>
       <div className="flex flex-col gap-3 border-b bg-white px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">

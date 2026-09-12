@@ -404,6 +404,14 @@ The business search area is 200 miles from the project site. The backend resolve
 
 Real Project 3 validation completed the HVAC / Mechanical search across this boundary and reported 32 contractor results. Reused organization companies retain their identity, contacts, candidates, and shortlist history; trusted Google coordinates fill only missing geographic fields at six-decimal precision, and fresh provider distance metadata updates the matching discovered trade capability. Search-result totals are labelled as contractor results, while coverage separately reports active candidates because preserved fake/rejected history can be intentionally excluded. D.Peppard Mechanical contact enrichment and human shortlist actions were validated without automatic persistence or outreach.
 
+### D-049 — Large workflow lists use summary-first, user-triggered detail loading
+
+**Status:** Decided
+
+**Decision:** Scopes and Contractor Discovery render useful project-level summaries without serializing every detailed ScopeItem, provenance source, candidate, profile, or contact. Scope-package list responses contain bounded aggregate metadata; one exact package detail loads only when its full-row accessible accordion is expanded. Contractor Discovery starts from Ready-scope coverage counts and loads candidates for one expanded scope version at a time. Generation history, contractor profiles, and public contact enrichment remain independently user-triggered. Loaded package and candidate detail is cached for the current page session and invalidated only after a relevant mutation.
+
+**Consequence:** Project 3's 27-package/659-item Scopes workspace and Ready-trade Contractor Discovery become usable without a full-page data waterfall. Independent loading and error states prevent one detail failure from blanking unrelated workflow content. This changes transport and presentation only: immutable scope history, Ready-only discovery, ranking, shortlist, contact enrichment, provider boundaries, and outreach exclusions remain unchanged. Manual acceptance confirmed the 27/659 Scopes summary and collapsed package rows, plus three collapsed Ready contractor trades with HVAC at 31 active candidates and 1 of 3 shortlisted.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

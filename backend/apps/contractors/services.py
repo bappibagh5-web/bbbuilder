@@ -98,6 +98,7 @@ def build_trade_coverage(*, project, candidate_queryset=None, minimum_target=Non
         "trades": [
             {
                 "scope_package": package.pk,
+                "scope_version": package.current_version.version,
                 "trade_key": package.trade_key,
                 "trade_category": package.trade_category,
                 "title": package.current_version.title,

@@ -48,6 +48,17 @@ test("Scopes UI exposes item counts, expandable provenance, and generation histo
   assert.match(source, /View generation history/);
   assert.match(source, /ScopeItemSources sources=\{scopeItem\.sources\}/);
   assert.match(source, /source\.page_number/);
+  assert.match(source, /const \[expanded, setExpanded\] = useState<number \| null>\(null\)/);
+  assert.match(source, /aria-expanded=\{expanded\}/);
+  assert.match(source, /scopePackagesApi\.detail/);
+  assert.match(source, /if \(details\[packageId\]\) return/);
+  assert.match(source, /scope_item_count/);
+});
+
+test("scope list API is summary-only and detail is loaded on expansion", () => {
+  const api = readFileSync(new URL("./scope-packages.ts", import.meta.url), "utf8");
+  assert.match(api, /apiRequest<ScopePackageSummary\[\]>/);
+  assert.match(api, /detail\(slug:/);
 });
 
 test("Scopes UI offers an explicit read-only coverage preview with provenance", () => {

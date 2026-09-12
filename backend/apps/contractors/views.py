@@ -62,7 +62,17 @@ class CandidateListView(ProjectDocumentContextMixin, APIView):
     permission_classes = (ActiveOrganizationMember,)
 
     def get(self, request, *args, **kwargs):
-        return Response(CandidateSerializer(candidates(self.get_project()), many=True).data)
+        queryset = candidates(self.get_project())
+        scope_package_id = request.query_params.get("scope_package")
+        if scope_package_id:
+            try:
+                scope_package_id = int(scope_package_id)
+            except ValueError as error:
+                raise serializers.ValidationError(
+                    {"scope_package": "Enter a valid scope package ID."}
+                ) from error
+            queryset = queryset.filter(scope_package_id=scope_package_id)
+        return Response(CandidateSerializer(queryset, many=True).data)
 
 
 class TradeCoverageView(ProjectDocumentContextMixin, APIView):

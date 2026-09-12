@@ -1,23 +1,20 @@
 "use client";
 
-import { AlertTriangle, Building2, CheckCircle2, MapPin, Search, Users } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, ChevronDown, MapPin, Search, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ContractorProfilePanel } from "@/components/contractors/contractor-profile-panel";
 import { Card } from "@/components/ui/card";
 import type { OrganizationMembership } from "@/lib/auth";
 import {
-  candidatesForScope,
   canManageContractors,
   contractorFitBand,
   contractorRankingSignals,
   contractorSearchResultMessage,
   contractorSourceLabel,
   filterContractors,
-  readyScopePackages,
   replaceCandidate,
   sortContractors,
-  tradeCoverage,
   type ContractorSort,
 } from "@/lib/contractor-discovery-state";
 import {
@@ -29,13 +26,17 @@ import {
   type TradeCoverage,
 } from "@/lib/contractors";
 import type { ProductionProject } from "@/lib/projects";
-import { scopePackagesApi, type ScopePackage } from "@/lib/scope-packages";
+
+type ReadyTrade = TradeCoverage;
 
 export function ProductionContractorsModule({ project, membership }: { project: ProductionProject; membership: OrganizationMembership }) {
   const slug = membership.organization.slug;
   const canManage = canManageContractors(membership.role) && project.is_active;
-  const [packages, setPackages] = useState<ScopePackage[]>([]);
-  const [candidates, setCandidates] = useState<ContractorCandidate[]>([]);
+  const [coverage, setCoverage] = useState<TradeCoverage[]>([]);
+  const [candidates, setCandidates] = useState<Record<number, ContractorCandidate[]>>({});
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [candidateLoading, setCandidateLoading] = useState<number | null>(null);
+  const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({});
   const [minimumTarget, setMinimumTarget] = useState(3);
   const [shortlistedOnly, setShortlistedOnly] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,15 +49,10 @@ export function ProductionContractorsModule({ project, membership }: { project: 
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      scopePackagesApi.list(slug, project.id, controller.signal),
-      contractorsApi.candidates(slug, project.id, controller.signal),
-      contractorsApi.coverage(slug, project.id, controller.signal),
-    ])
-      .then(([packageRows, candidateRows, coverage]) => {
-        setPackages(packageRows);
-        setCandidates(candidateRows);
-        setMinimumTarget(coverage.minimum_shortlist_target);
+    contractorsApi.coverage(slug, project.id, controller.signal)
+      .then((result) => {
+        setCoverage(result.trades);
+        setMinimumTarget(result.minimum_shortlist_target);
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Contractors could not be loaded.");
@@ -67,24 +63,45 @@ export function ProductionContractorsModule({ project, membership }: { project: 
     return () => controller.abort();
   }, [project.id, slug]);
 
+  async function toggleTrade(scopeId: number) {
+    if (expanded === scopeId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(scopeId);
+    if (candidates[scopeId]) return;
+    setCandidateLoading(scopeId);
+    setCandidateErrors((current) => ({ ...current, [scopeId]: "" }));
+    try {
+      const rows = await contractorsApi.candidates(slug, project.id, undefined, scopeId);
+      setCandidates((current) => ({ ...current, [scopeId]: rows }));
+    } catch (reason) {
+      setCandidateErrors((current) => ({ ...current, [scopeId]: reason instanceof Error ? reason.message : "Contractors for this trade could not be loaded." }));
+    } finally {
+      setCandidateLoading(null);
+    }
+  }
+
   useEffect(() => {
     if (profile) profileRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [profile]);
 
-  async function search(scope: ScopePackage, keywords: string) {
-    setBusy(scope.id);
+  async function search(scope: ReadyTrade, keywords: string) {
+    setBusy(scope.scope_package);
     setError(null);
-    setSearchMessages((current) => ({ ...current, [scope.id]: "Searching…" }));
+    setSearchMessages((current) => ({ ...current, [scope.scope_package]: "Searching…" }));
     try {
       const result = await contractorsApi.search(slug, project.id, {
-        scope_package_id: scope.id,
+        scope_package_id: scope.scope_package,
         keywords: keywords.split(",").map((item) => item.trim()).filter(Boolean),
       });
-      setCandidates((current) => [...current.filter((item) => item.scope_package !== scope.id), ...result.candidates]);
-      setSearchMessages((current) => ({ ...current, [scope.id]: contractorSearchResultMessage(result.result_count, result.partial_results) }));
+      setCandidates((current) => ({ ...current, [scope.scope_package]: result.candidates }));
+      setSearchMessages((current) => ({ ...current, [scope.scope_package]: contractorSearchResultMessage(result.result_count, result.partial_results) }));
+      const refreshed = await contractorsApi.coverage(slug, project.id);
+      setCoverage(refreshed.trades);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Contractor search could not be completed.";
-      setSearchMessages((current) => ({ ...current, [scope.id]: message }));
+      setSearchMessages((current) => ({ ...current, [scope.scope_package]: message }));
       setError(message);
     } finally {
       setBusy(null);
@@ -96,7 +113,9 @@ export function ProductionContractorsModule({ project, membership }: { project: 
     setError(null);
     try {
       const updated = await contractorsApi.setStatus(slug, project.id, candidate.id, shortlisted ? "shortlisted" : "candidate");
-      setCandidates((current) => replaceCandidate(current, updated));
+      setCandidates((current) => ({ ...current, [candidate.scope_package]: replaceCandidate(current[candidate.scope_package] ?? [], updated) }));
+      const refreshed = await contractorsApi.coverage(slug, project.id);
+      setCoverage(refreshed.trades);
       if (profile?.id === candidate.company.id) setProfile(await contractorsApi.profile(slug, project.id, profile.id));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : shortlisted ? "The contractor could not be added to the shortlist." : "The contractor could not be removed from the shortlist.");
@@ -147,16 +166,14 @@ export function ProductionContractorsModule({ project, membership }: { project: 
     }
   }
 
-  if (loading) return <Empty title="Loading Contractor Discovery…" detail="Checking Ready scope packages and your contractor network." />;
-  const ready = readyScopePackages(packages);
-  const coverage = tradeCoverage(packages, candidates, minimumTarget);
+  const ready: ReadyTrade[] = coverage;
   return <div className="space-y-5">
     <div><span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-indigo-700"><Building2 className="h-3 w-3" />Contractor Discovery</span><h2 className="mt-3 text-xl font-semibold text-slate-950">Find contractors for Ready scopes</h2><p className="mt-1 text-sm text-slate-500">Your internal network is searched first. External discovery runs only when you explicitly search and never sends outreach.</p><p className="mt-2 flex items-center gap-1 text-sm font-semibold text-blue-800"><MapPin className="h-4 w-4" />Search area: within 200 miles of the project</p><p className="mt-2 text-xs font-medium text-slate-500">Best Match is a deterministic fit ranking—not AI scoring or an approval decision.</p></div>
     {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-    {ready.length === 0 ? <Empty title="No Ready scope packages" detail="Mark a scope Ready before searching for contractors." /> : <>
+    {loading ? <ContractorSummarySkeleton /> : ready.length === 0 ? <Empty title="No Ready scope packages" detail="Mark a scope Ready before searching for contractors." /> : <>
       <TradeCoverageSummary coverage={coverage} minimumTarget={minimumTarget} shortlistedOnly={shortlistedOnly} onShortlistedOnlyChange={setShortlistedOnly} />
       {profile && <div ref={profileRef}><ContractorProfilePanel key={profile.id} profile={profile} canManage={canManage} busy={profileBusy} onBack={() => setProfile(null)} onSave={saveContact} onFindContactDetails={findContactDetails} /></div>}
-      {ready.map((scope) => <ScopeDiscovery key={scope.id} scope={scope} rows={filterContractors(candidatesForScope(candidates, scope.id), shortlistedOnly)} shortlistedOnly={shortlistedOnly} city={project.city} province={project.province_state} canManage={canManage} busy={busy === scope.id || profileBusy} searchMessage={searchMessages[scope.id]} onSearch={search} onSetShortlist={setShortlist} onViewProfile={openProfile} />)}
+      {ready.map((scope) => <ScopeDiscovery key={scope.scope_package} scope={scope} rows={filterContractors(candidates[scope.scope_package] ?? [], shortlistedOnly)} shortlistedOnly={shortlistedOnly} city={project.city} province={project.province_state} minimumTarget={minimumTarget} canManage={canManage} busy={busy === scope.scope_package || profileBusy} expanded={expanded === scope.scope_package} loading={candidateLoading === scope.scope_package} error={candidateErrors[scope.scope_package]} searchMessage={searchMessages[scope.scope_package]} onToggle={() => void toggleTrade(scope.scope_package)} onSearch={search} onSetShortlist={setShortlist} onViewProfile={openProfile} />)}
     </>}
   </div>;
 }
@@ -169,12 +186,14 @@ function TradeCoverageSummary({ coverage, minimumTarget, shortlistedOnly, onShor
   })}</div></Card>;
 }
 
-function ScopeDiscovery({ scope, rows, shortlistedOnly, city, province, canManage, busy, searchMessage, onSearch, onSetShortlist, onViewProfile }: { scope: ScopePackage; rows: ContractorCandidate[]; shortlistedOnly: boolean; city: string; province: string; canManage: boolean; busy: boolean; searchMessage?: string; onSearch: (scope: ScopePackage, keywords: string) => void; onSetShortlist: (candidate: ContractorCandidate, shortlisted: boolean) => void; onViewProfile: (candidate: ContractorCandidate) => void }) {
+function ScopeDiscovery({ scope, rows, shortlistedOnly, city, province, minimumTarget, canManage, busy, expanded, loading, error, searchMessage, onToggle, onSearch, onSetShortlist, onViewProfile }: { scope: ReadyTrade; rows: ContractorCandidate[]; shortlistedOnly: boolean; city: string; province: string; minimumTarget: number; canManage: boolean; busy: boolean; expanded: boolean; loading: boolean; error?: string; searchMessage?: string; onToggle: () => void; onSearch: (scope: ReadyTrade, keywords: string) => void; onSetShortlist: (candidate: ContractorCandidate, shortlisted: boolean) => void; onViewProfile: (candidate: ContractorCandidate) => void }) {
   const [keywords, setKeywords] = useState("");
   const [sort, setSort] = useState<ContractorSort>("best_match");
   const rankedRows = sortContractors(rows, sort);
-  return <Card className="overflow-hidden border-slate-200 shadow-sm"><div className="border-b bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-700">{scope.trade_category}</p><h3 className="mt-1 text-lg font-semibold">{scope.current_version.title}</h3><p className="mt-1 flex items-center gap-1 text-sm text-slate-500"><MapPin className="h-4 w-4" />{city}, {province} · Ready V{scope.current_version.version}</p><p className="mt-1 text-xs font-semibold text-blue-800">Search area: within 200 miles of the project</p></div><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Ready</span></div>{canManage && <div className="mt-4 flex flex-col gap-2 sm:flex-row"><input aria-label={`Keywords for ${scope.trade_category}`} value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="Optional keywords, comma separated" className="h-10 flex-1 rounded-lg border px-3 text-sm"/><button type="button" disabled={busy} onClick={() => onSearch(scope, keywords)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#173f5f] px-4 text-sm font-semibold text-white disabled:opacity-50"><Search className="h-4 w-4" />{busy ? "Searching…" : "Search Contractors"}</button></div>}{searchMessage && <p aria-live="polite" className="mt-2 text-sm font-medium text-slate-600">{searchMessage}</p>}{rows.length > 0 && <SortControl scopeId={scope.id} sort={sort} onChange={setSort} />}</div><div className="divide-y">{rankedRows.length === 0 ? <p className="p-5 text-sm text-slate-500">{shortlistedOnly ? "No shortlisted contractors for this trade yet." : "No candidates yet. Search your internal network and configured discovery provider."}</p> : rankedRows.map((candidate, index) => <CandidateRow key={candidate.id} candidate={candidate} rank={index + 1} canManage={canManage} busy={busy} onSetShortlist={onSetShortlist} onViewProfile={onViewProfile} />)}</div></Card>;
+  return <Card className="overflow-hidden border-slate-200 shadow-sm"><button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={`contractor-trade-${scope.scope_package}`} className="flex w-full items-center justify-between gap-4 bg-white p-5 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-950">{scope.trade_category}</p><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase text-emerald-700">Ready V{scope.scope_version}</span></div><p className="mt-1 text-sm text-slate-500">{scope.candidates_found} active candidates · {scope.shortlisted_count} / {minimumTarget} shortlisted</p></div><ChevronDown className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`} /></button>{expanded && <div id={`contractor-trade-${scope.scope_package}`} className="border-t"><div className="border-b bg-white p-5"><p className="flex items-center gap-1 text-sm text-slate-500"><MapPin className="h-4 w-4" />{city}, {province}</p><p className="mt-1 text-xs font-semibold text-blue-800">Search area: within 200 miles of the project</p>{canManage && <div className="mt-4 flex flex-col gap-2 sm:flex-row"><input aria-label={`Keywords for ${scope.trade_category}`} value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="Optional keywords, comma separated" className="h-10 flex-1 rounded-lg border px-3 text-sm"/><button type="button" disabled={busy} onClick={() => onSearch(scope, keywords)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#173f5f] px-4 text-sm font-semibold text-white disabled:opacity-50"><Search className="h-4 w-4" />{busy ? "Searching…" : "Search Contractors"}</button></div>}{searchMessage && <p aria-live="polite" className="mt-2 text-sm font-medium text-slate-600">{searchMessage}</p>}{rows.length > 0 && <SortControl scopeId={scope.scope_package} sort={sort} onChange={setSort} />}</div>{loading ? <p className="p-5 text-sm text-slate-500">Loading contractor candidates…</p> : error ? <div role="alert" className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div> : <div className="divide-y">{rankedRows.length === 0 ? <p className="p-5 text-sm text-slate-500">{shortlistedOnly ? "No shortlisted contractors for this trade yet." : "No candidates yet. Search your internal network and configured discovery provider."}</p> : rankedRows.map((candidate, index) => <CandidateRow key={candidate.id} candidate={candidate} rank={index + 1} canManage={canManage} busy={busy} onSetShortlist={onSetShortlist} onViewProfile={onViewProfile} />)}</div>}</div>}</Card>;
 }
+
+function ContractorSummarySkeleton() { return <div className="space-y-4" aria-label="Loading Ready contractor trades"><div className="h-40 animate-pulse rounded-xl border bg-slate-100" />{Array.from({ length: 3 }, (_, index) => <div key={index} className="h-20 animate-pulse rounded-xl border bg-slate-100" />)}</div>; }
 
 function SortControl({ scopeId, sort, onChange }: { scopeId: number; sort: ContractorSort; onChange: (sort: ContractorSort) => void }) { return <div className="mt-4 flex items-center justify-end gap-2"><label htmlFor={`contractor-sort-${scopeId}`} className="text-xs font-semibold text-slate-500">Sort by</label><select id={`contractor-sort-${scopeId}`} value={sort} onChange={(event) => onChange(event.target.value as ContractorSort)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700"><option value="best_match">Best Match</option><option value="internal_first">Internal First</option><option value="rating">Rating</option><option value="review_count">Review Count</option><option value="company_name">Company Name</option></select></div>; }
 
