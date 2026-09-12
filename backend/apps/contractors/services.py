@@ -1,16 +1,71 @@
+import hashlib
 import re
 from collections import Counter
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import F
 
 from apps.projects.audit import record_event
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
+from apps.scope_packages.trades import CONTRACTOR_ELIGIBLE_TRADE_KEYS
 
 from .models import Company, Contact, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
-from .providers import build_search_queries, provider_for
+from .providers import BUSINESS_RADIUS_MILES, SearchCenter, build_search_queries, provider_for
+
+COORDINATE_QUANTUM = Decimal("0.000001")
+
+
+def coordinate_decimal(value):
+    """Convert provider coordinates to the precision supported by our storage model."""
+    return Decimal(str(value)).quantize(COORDINATE_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def project_location_query(project):
+    parts = (
+        project.site_address_line_1,
+        project.site_address_line_2,
+        project.city,
+        project.province_state,
+        project.postal_zip_code,
+        project.country,
+    )
+    value = ", ".join(part.strip() for part in parts if part and part.strip())
+    if not project.city or not project.province_state:
+        raise ValidationError("Add the project city and province before searching contractors.")
+    return value
+
+
+def project_location_key(project):
+    return hashlib.sha256(project_location_query(project).casefold().encode("utf-8")).hexdigest()
+
+
+def resolve_project_center(project, provider):
+    key = project_location_key(project)
+    cached = (
+        DiscoveryRequest.objects.filter(
+            project=project,
+            project_location_key=key,
+            center_latitude__isnull=False,
+            center_longitude__isnull=False,
+        )
+        .order_by("-requested_at")
+        .first()
+    )
+    if cached:
+        return (
+            SearchCenter(
+                float(cached.center_latitude),
+                float(cached.center_longitude),
+                cached.center_reference,
+            ),
+            key,
+            True,
+        )
+    return provider.resolve_center(location_query=project_location_query(project)), key, False
 
 
 def build_trade_coverage(*, project, candidate_queryset=None, minimum_target=None):
@@ -26,7 +81,11 @@ def build_trade_coverage(*, project, candidate_queryset=None, minimum_target=Non
     )
     queryset = candidate_queryset
     if queryset is None:
-        queryset = ScopeContractorCandidate.objects.filter(project=project)
+        queryset = ScopeContractorCandidate.objects.filter(
+            project=project,
+            scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE,
+            scope_version=F("scope_package__current_version"),
+        )
     counts = Counter()
     shortlisted = Counter()
     for package_id, status_value in queryset.values_list("scope_package_id", "status"):
@@ -209,16 +268,21 @@ def internal_companies(*, organization, trade_key, city, province):
 
 
 @transaction.atomic
-def discover_contractors(
-    *, project, package, actor, city, province, country="Canada", radius_km=None, keywords=None
-):
+def discover_contractors(*, project, package, actor, keywords=None):
     if (
         package.project_id != project.pk
         or package.current_version.status != ScopePackageVersion.Status.READY
     ):
         raise ValidationError("Only Ready scope packages in this project can be searched.")
+    if package.trade_key not in CONTRACTOR_ELIGIBLE_TRADE_KEYS:
+        raise ValidationError("This scope trade is not available for contractor search.")
     keywords = list(dict.fromkeys(item.strip() for item in (keywords or []) if item.strip()))
     provider_name = settings.CONTRACTOR_DISCOVERY_PROVIDER
+    provider = provider_for(provider_name)
+    center, location_key, center_cached = resolve_project_center(project, provider)
+    city = project.city
+    province = project.province_state
+    country = project.country
     terms = build_search_queries(
         trade_key=package.trade_key,
         city=city,
@@ -233,7 +297,12 @@ def discover_contractors(
         trade_key=package.trade_key,
         city=city,
         province=province,
-        radius_km=radius_km,
+        radius_km=322,
+        radius_miles=BUSINESS_RADIUS_MILES,
+        project_location_key=location_key,
+        center_latitude=coordinate_decimal(center.latitude),
+        center_longitude=coordinate_decimal(center.longitude),
+        center_reference=center.reference,
         keywords=keywords,
         search_terms=terms,
         provider=provider_name,
@@ -247,14 +316,16 @@ def discover_contractors(
             province=province,
         )
     )
-    for result in provider_for(provider_name).search(
+    outcome = provider.search(
         trade_key=package.trade_key,
         city=city,
         province=province,
         country=country,
-        radius_km=radius_km,
+        center=center,
+        radius_miles=BUSINESS_RADIUS_MILES,
         keywords=keywords,
-    ):
+    )
+    for result in outcome.results:
         company = dedupe_company(project.organization, result, provider_name)
         if company is None:
             company = Company.objects.create(
@@ -266,35 +337,82 @@ def discover_contractors(
                 address=result.address,
                 city=result.city,
                 province=result.province,
+                postal_code=result.postal_code,
                 country=result.country,
                 source_type=Company.Source.DISCOVERED,
                 external_provider=provider_name,
                 external_place_id=result.external_place_id,
+                latitude=(
+                    coordinate_decimal(result.latitude) if result.latitude is not None else None
+                ),
+                longitude=(
+                    coordinate_decimal(result.longitude) if result.longitude is not None else None
+                ),
                 created_by=actor,
                 updated_by=actor,
             )
-            TradeCapability.objects.create(
-                company=company,
-                trade_key=package.trade_key,
-                keywords=keywords,
-                service_cities=[city],
-                province=province,
-                source_type=Company.Source.DISCOVERED,
-                source_metadata={"provider": provider_name, **result.metadata},
-            )
+        else:
+            changed = []
+            if company.latitude is None and result.latitude is not None:
+                company.latitude = coordinate_decimal(result.latitude)
+                changed.append("latitude")
+            if company.longitude is None and result.longitude is not None:
+                company.longitude = coordinate_decimal(result.longitude)
+                changed.append("longitude")
+            if changed:
+                company.updated_by = actor
+                company.save(update_fields=(*changed, "updated_by", "updated_at"))
+        capability, capability_created = TradeCapability.objects.get_or_create(
+            company=company,
+            trade_key=package.trade_key,
+            defaults={
+                "keywords": keywords,
+                "service_cities": [city],
+                "province": province,
+                "source_type": company.source_type,
+                "source_metadata": {"provider": provider_name, **result.metadata},
+            },
+        )
+        if (
+            not capability_created
+            and capability.source_type == Company.Source.DISCOVERED
+            and provider_name == "google_places"
+        ):
+            refreshed_metadata = {
+                **capability.source_metadata,
+                "provider": provider_name,
+                **result.metadata,
+            }
+            if capability.source_metadata != refreshed_metadata:
+                capability.source_metadata = refreshed_metadata
+                capability.save(update_fields=("source_metadata", "updated_at"))
         if company not in companies:
             companies.append(company)
     for company in companies:
         ScopeContractorCandidate.objects.get_or_create(
             project=project,
             scope_package=package,
+            scope_version=package.current_version,
             company=company,
             defaults={"created_by": actor, "updated_by": actor},
         )
     request.result_count = len(companies)
+    search_request_count = outcome.metadata.get("provider_request_count", 0)
+    geocode_request_count = 0 if center_cached or provider_name == "fake" else 1
     request.provider_metadata = {
         "internal_first": True,
+        "business_radius_miles": BUSINESS_RADIUS_MILES,
+        "project_center": {
+            "latitude": center.latitude,
+            "longitude": center.longitude,
+            "reference": center.reference,
+            "cached": center_cached,
+        },
+        **outcome.metadata,
         "query_count": len(terms),
+        "search_request_count": search_request_count,
+        "geocode_request_count": geocode_request_count,
+        "provider_request_count": search_request_count + geocode_request_count,
         "external_result_count": sum(
             company.source_type == Company.Source.DISCOVERED for company in companies
         ),
@@ -310,6 +428,14 @@ def discover_contractors(
             "scope_package_id": package.pk,
             "result_count": len(companies),
             "provider": provider_name,
+            "business_radius_miles": BUSINESS_RADIUS_MILES,
+            "scope_version_id": package.current_version_id,
+            "provider_request_count": search_request_count + geocode_request_count,
+            "raw_result_count": outcome.metadata.get("raw_result_count", 0),
+            "outside_radius_filtered_count": outcome.metadata.get(
+                "outside_radius_filtered_count", 0
+            ),
+            "deduplicated_count": outcome.metadata.get("deduplicated_count", 0),
         },
     )
     return request

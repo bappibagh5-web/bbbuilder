@@ -392,6 +392,18 @@ Contractor company identity and provider-sourced Google fields remain separate f
 
 **Consequence:** BB Builders can measure shortlist and contact readiness and reduce manual transcription without confusing discovery with approval or outreach. Public enrichment is bounded and auditable at the user interface, Google company data remains intact, and no unverified person or address is automatically added to the system.
 
+### D-048 — Contractor discovery shares the scope taxonomy and enforces a project-centered 200-mile boundary
+
+**Status:** Decided
+
+**Decision:** Contractor-eligible trades come from one canonical registry shared by scope-package choices and provider query terms. Project-wide requirements are not contractor trades. Only an Active scope package whose exact current version is explicitly Ready may be searched, and both discovery requests and candidates retain that exact version identity.
+
+The business search area is 200 miles from the project site. The backend resolves the most precise available project address through the configured provider, caches the resolved center against a hash of that location, uses a project-centered rectangular Google Places Text Search restriction, then deterministically excludes any result whose great-circle distance exceeds 200 miles. Provider searches use at most two pages per query and four search requests total. Internal-network matching remains first; Google results supplement it and retain Place ID, coordinates, safe business metadata, deterministic deduplication, and a modest near-project ranking signal. Search remains an explicit Admin/Estimator action, shortlisting remains human-controlled, and no outreach is created.
+
+**Consequence:** The client-facing claim “within 200 miles of the project” is enforced by application logic rather than query wording. Existing contractor history remains preserved, location changes invalidate the cached center naturally, and Google cost is bounded. Straight-line distance is displayed simply as miles from project and is never represented as driving distance.
+
+Real Project 3 validation completed the HVAC / Mechanical search across this boundary and reported 32 contractor results. Reused organization companies retain their identity, contacts, candidates, and shortlist history; trusted Google coordinates fill only missing geographic fields at six-decimal precision, and fresh provider distance metadata updates the matching discovered trade capability. Search-result totals are labelled as contractor results, while coverage separately reports active candidates because preserved fake/rejected history can be intentionally excluded. D.Peppard Mechanical contact enrichment and human shortlist actions were validated without automatic persistence or outreach.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

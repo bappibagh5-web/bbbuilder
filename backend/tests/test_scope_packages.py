@@ -2,6 +2,7 @@ import hashlib
 import json
 import urllib.error
 from collections import Counter
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -29,11 +30,18 @@ from apps.contractors.models import (
     TradeCapability,
 )
 from apps.contractors.providers import (
+    BUSINESS_RADIUS_MILES,
+    GOOGLE_MAX_PAGES_PER_QUERY,
+    GOOGLE_MAX_REQUESTS,
     ContractorProviderError,
     ContractorResult,
+    ContractorSearchOutcome,
     FakeContractorDiscoveryProvider,
     GooglePlacesContractorDiscoveryProvider,
+    SearchCenter,
+    bounding_rectangle,
     build_search_queries,
+    great_circle_miles,
     map_google_place,
 )
 from apps.contractors.ranking import rank_candidate
@@ -42,6 +50,7 @@ from apps.contractors.services import (
     dedupe_company,
     discover_contractors,
     internal_companies,
+    project_location_query,
 )
 from apps.documents.models import Document, DocumentPage, DocumentRevision, FileAsset, ProjectFile
 from apps.organizations.models import Membership, Organization
@@ -76,6 +85,11 @@ from apps.scope_packages.taxonomy import (
     scope_items_for_entry,
     trades_for_entry,
 )
+from apps.scope_packages.trades import (
+    CONTRACTOR_ELIGIBLE_TRADE_KEYS,
+    TRADE_CHOICES,
+    TRADE_QUERY_TERMS,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -87,6 +101,9 @@ def project(organization, user):
         created_by=user,
         project_number="BB-SCOPE-001",
         name="Scope Test",
+        city="Thunder Bay",
+        province_state="Ontario",
+        country="CA",
         project_timezone="America/Vancouver",
         status=Project.Status.HUMAN_SCOPE_REVIEW,
     )
@@ -1082,15 +1099,32 @@ def test_dedupe_priority_and_ambiguous_name_do_not_merge(organization, user):
     )
 
 
+def test_every_canonical_contractor_trade_has_controlled_search_terms():
+    choice_keys = {key for key, _label in TRADE_CHOICES}
+    assert choice_keys == CONTRACTOR_ELIGIBLE_TRADE_KEYS == set(TRADE_QUERY_TERMS)
+    assert len(choice_keys) == 27
+    assert all(len(TRADE_QUERY_TERMS[key]) >= 2 for key in choice_keys)
+    assert "general-requirements" not in choice_keys
+
+
+def test_project_centered_rectangle_and_distance_are_mile_based():
+    center = SearchCenter(48.38, -89.25, "Project site")
+    rectangle = bounding_rectangle(center, BUSINESS_RADIUS_MILES)
+    assert rectangle["low"]["latitude"] < center.latitude < rectangle["high"]["latitude"]
+    assert rectangle["low"]["longitude"] < center.longitude < rectangle["high"]["longitude"]
+    assert round(great_circle_miles(48.38, -89.25, 49.8951, -97.1384)) == 371
+
+
 def test_fake_provider_remains_network_free():
-    assert (
-        len(
-            FakeContractorDiscoveryProvider().search(
-                trade_key="plumbing", city="Vancouver", province="BC", radius_km=50, keywords=[]
-            )
-        )
-        == 1
+    outcome = FakeContractorDiscoveryProvider().search(
+        trade_key="plumbing",
+        city="Vancouver",
+        province="BC",
+        center=SearchCenter(49.2827, -123.1207, "Vancouver, BC"),
+        radius_miles=200,
+        keywords=[],
     )
+    assert len(outcome.results) == 1
 
 
 def test_google_trade_query_construction_is_controlled():
@@ -1128,6 +1162,17 @@ def test_google_place_mapping_uses_only_safe_discovery_fields():
             "types": ["plumber", "point_of_interest"],
             "rating": 4.6,
             "userRatingCount": 38,
+            "location": {"latitude": 48.4, "longitude": -89.2},
+            "addressComponents": [
+                {"longText": "Shuniah", "types": ["locality"]},
+                {
+                    "longText": "Ontario",
+                    "shortText": "ON",
+                    "types": ["administrative_area_level_1"],
+                },
+                {"longText": "P7A 1A1", "types": ["postal_code"]},
+                {"longText": "Canada", "shortText": "CA", "types": ["country"]},
+            ],
             "ignoredOversizedField": {"raw": "not persisted"},
         },
         city="Thunder Bay",
@@ -1138,6 +1183,8 @@ def test_google_place_mapping_uses_only_safe_discovery_fields():
     assert result.display_name == "Lakehead Mechanical"
     assert result.external_place_id == "google-place-1"
     assert result.address == "1 Example St, Thunder Bay, ON"
+    assert (result.city, result.province, result.postal_code) == ("Shuniah", "ON", "P7A 1A1")
+    assert (result.latitude, result.longitude) == (48.4, -89.2)
     assert result.metadata == {
         "query": "commercial plumber Thunder Bay Ontario Canada",
         "primary_type": "plumber",
@@ -1177,22 +1224,31 @@ def test_google_provider_posts_minimal_mask_and_maps_missing_optional_fields():
     def opener(request, *, timeout):
         requests.append((request, timeout))
         return GoogleResponse(
-            {"places": [{"id": "place-1", "displayName": {"text": "Safe Plumbing"}}]}
+            {
+                "places": [
+                    {
+                        "id": "place-1",
+                        "displayName": {"text": "Safe Plumbing"},
+                        "location": {"latitude": 48.38, "longitude": -89.25},
+                    }
+                ]
+            }
         )
 
-    results = GooglePlacesContractorDiscoveryProvider(
+    outcome = GooglePlacesContractorDiscoveryProvider(
         api_key="test-key-not-a-real-secret", opener=opener
     ).search(
         trade_key="plumbing",
         city="Thunder Bay",
         province="Ontario",
         country="Canada",
-        radius_km=50,
+        center=SearchCenter(48.38, -89.25, "Thunder Bay, ON"),
+        radius_miles=200,
         keywords=[],
     )
     assert len(requests) == 2
-    assert len(results) == 1
-    assert results[0].phone == results[0].website == results[0].address == ""
+    assert len(outcome.results) == 1
+    assert outcome.results[0].phone == outcome.results[0].website == ""
     request, timeout = requests[0]
     assert request.full_url == "https://places.googleapis.com/v1/places:searchText"
     assert timeout == 30
@@ -1213,11 +1269,99 @@ def test_google_provider_failure_is_safe_and_does_not_expose_key():
             city="Thunder Bay",
             province="Ontario",
             country="Canada",
-            radius_km=None,
+            center=SearchCenter(48.38, -89.25, "Thunder Bay, ON"),
+            radius_miles=200,
             keywords=[],
         )
-    assert str(error.value) == "Contractor search is temporarily unavailable."
+    assert str(error.value) == "Google contractor search is temporarily unavailable."
     assert "test-key" not in str(error.value)
+
+
+def test_google_provider_enforces_boundary_dedupe_and_request_caps(monkeypatch):
+    requests = []
+
+    def opener(request, *, timeout):
+        requests.append(json.loads(request.data))
+        return GoogleResponse(
+            {
+                "places": [
+                    {
+                        "id": "boundary",
+                        "displayName": {"text": "Boundary Co"},
+                        "location": {"latitude": 200, "longitude": 0},
+                    },
+                    {
+                        "id": "outside",
+                        "displayName": {"text": "Outside Co"},
+                        "location": {"latitude": 200.1, "longitude": 0},
+                    },
+                ],
+                "nextPageToken": "bounded-next-page",
+            }
+        )
+
+    monkeypatch.setattr(
+        "apps.contractors.providers.great_circle_miles",
+        lambda _lat1, _lon1, lat2, _lon2: lat2,
+    )
+    outcome = GooglePlacesContractorDiscoveryProvider(
+        api_key="test-key-not-a-real-secret", opener=opener
+    ).search(
+        trade_key="plumbing",
+        city="Thunder Bay",
+        province="Ontario",
+        center=SearchCenter(0, 0, "Project site"),
+        radius_miles=200,
+        keywords=[],
+    )
+    assert len(requests) == GOOGLE_MAX_REQUESTS == 2 * GOOGLE_MAX_PAGES_PER_QUERY
+    assert all("locationRestriction" in payload for payload in requests)
+    assert all("circle" not in payload["locationRestriction"] for payload in requests)
+    assert [result.external_place_id for result in outcome.results] == ["boundary"]
+    assert outcome.results[0].distance_miles == 200
+    assert outcome.metadata == {
+        "provider_request_count": 4,
+        "raw_result_count": 8,
+        "outside_radius_filtered_count": 4,
+        "deduplicated_count": 3,
+        "partial_failure_count": 0,
+    }
+
+
+def test_google_provider_returns_safe_partial_results_after_later_request_failure():
+    call_count = 0
+
+    def opener(request, *, timeout):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise urllib.error.URLError("simulated provider interruption")
+        return GoogleResponse(
+            {
+                "places": [
+                    {
+                        "id": "inside",
+                        "displayName": {"text": "Available Contractor"},
+                        "location": {"latitude": 48.38, "longitude": -89.25},
+                    }
+                ],
+                "nextPageToken": "next",
+            }
+        )
+
+    outcome = GooglePlacesContractorDiscoveryProvider(
+        api_key="test-key-not-a-real-secret", opener=opener
+    ).search(
+        trade_key="plumbing",
+        city="Thunder Bay",
+        province="Ontario",
+        center=SearchCenter(48.38, -89.25, "Project site"),
+        radius_miles=200,
+        keywords=[],
+    )
+    assert [result.external_place_id for result in outcome.results] == ["inside"]
+    assert outcome.metadata["partial_failure_count"] == 2
+    assert outcome.metadata["provider_request_count"] == 3
 
 
 def test_google_provider_failure_maps_to_safe_api_response(
@@ -1230,6 +1374,9 @@ def test_google_provider_failure_maps_to_safe_api_response(
     package.refresh_from_db()
 
     class FailingProvider:
+        def resolve_center(self, **kwargs):
+            return SearchCenter(48.4020957, -89.2441234, "Thunder Bay, ON")
+
         def search(self, **kwargs):
             raise ContractorProviderError("Contractor search is temporarily unavailable.")
 
@@ -1244,9 +1391,6 @@ def test_google_provider_failure_maps_to_safe_api_response(
         ),
         {
             "scope_package_id": package.pk,
-            "city": "Thunder Bay",
-            "province": "Ontario",
-            "country": "CA",
             "keywords": [],
         },
         format="json",
@@ -1265,30 +1409,54 @@ def test_discovery_requires_ready_scope_and_is_idempotent(
     settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
     package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
     with pytest.raises(ValidationError, match="Only Ready"):
-        discover_contractors(
-            project=project, package=package, actor=user, city="Vancouver", province="BC"
-        )
+        discover_contractors(project=project, package=package, actor=user)
     revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
     package.refresh_from_db()
     first = discover_contractors(
         project=project,
         package=package,
         actor=user,
-        city="Vancouver",
-        province="BC",
         keywords=["commercial"],
     )
     second = discover_contractors(
         project=project,
         package=package,
         actor=user,
-        city="Vancouver",
-        province="BC",
         keywords=["commercial"],
     )
     assert first.result_count == second.result_count == 1
     assert ScopeContractorCandidate.objects.count() == 1
     assert DiscoveryRequest.objects.count() == 2
+
+
+def test_project_location_prefers_site_address_and_center_is_reused(
+    project, user, approved_snapshot, settings, monkeypatch
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
+    project.site_address_line_1 = "100 Project Road"
+    project.postal_zip_code = "P7A 1A1"
+    project.save(update_fields=("site_address_line_1", "postal_zip_code"))
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    calls = []
+
+    class Provider:
+        def resolve_center(self, *, location_query):
+            calls.append(location_query)
+            return SearchCenter(48.38, -89.25, "100 Project Road")
+
+        def search(self, **kwargs):
+            return ContractorSearchOutcome(results=(), metadata={"provider_request_count": 0})
+
+    monkeypatch.setattr("apps.contractors.services.provider_for", lambda name: Provider())
+    discover_contractors(project=project, package=package, actor=user)
+    discover_contractors(project=project, package=package, actor=user)
+    assert calls == ["100 Project Road, Thunder Bay, Ontario, P7A 1A1, CA"]
+    assert project_location_query(project).startswith("100 Project Road")
+    first, second = DiscoveryRequest.objects.order_by("id")
+    assert first.provider_metadata["project_center"]["cached"] is False
+    assert second.provider_metadata["project_center"]["cached"] is True
 
 
 def test_google_discovery_persists_mapped_identity_and_safe_search_history(
@@ -1301,45 +1469,164 @@ def test_google_discovery_persists_mapped_identity_and_safe_search_history(
     package.refresh_from_db()
 
     class MockGoogleProvider:
+        def resolve_center(self, **kwargs):
+            return SearchCenter(48.4020957, -89.2441234, "Thunder Bay, ON")
+
         def search(self, **kwargs):
             assert kwargs["country"] == "CA"
-            return [
-                ContractorResult(
-                    display_name="Lakehead Mechanical",
-                    city="Thunder Bay",
-                    province="Ontario",
-                    country="Canada",
-                    address="1 Example St, Thunder Bay, ON",
-                    website="https://lakehead.example",
-                    external_place_id="google-place-1",
-                    metadata={"rating": 4.6, "review_count": 38},
-                )
-            ]
+            return ContractorSearchOutcome(
+                results=(
+                    ContractorResult(
+                        display_name="Lakehead Mechanical",
+                        city="Thunder Bay",
+                        province="Ontario",
+                        country="Canada",
+                        address="1 Example St, Thunder Bay, ON",
+                        website="https://lakehead.example",
+                        external_place_id="google-place-1",
+                        latitude=48.4000007,
+                        longitude=-89.2000007,
+                        metadata={"rating": 4.6, "review_count": 38},
+                    ),
+                ),
+                metadata={
+                    "provider_request_count": 2,
+                    "raw_result_count": 1,
+                    "outside_radius_filtered_count": 0,
+                    "deduplicated_count": 0,
+                },
+            )
 
     monkeypatch.setattr("apps.contractors.services.provider_for", lambda name: MockGoogleProvider())
     request = discover_contractors(
         project=project,
         package=package,
         actor=user,
-        city="Thunder Bay",
-        province="Ontario",
-        country="CA",
         keywords=["retail"],
     )
     company = Company.objects.get(external_place_id="google-place-1")
     assert request.provider == "google_places"
     assert request.search_terms[0].endswith("retail Thunder Bay Ontario Canada")
-    assert request.provider_metadata == {
-        "internal_first": True,
-        "query_count": 2,
-        "external_result_count": 1,
-    }
+    assert request.radius_miles == 200
+    assert request.scope_version_id == package.current_version_id
+    assert request.provider_metadata["provider_request_count"] == 3
+    assert request.provider_metadata["search_request_count"] == 2
+    assert request.provider_metadata["geocode_request_count"] == 1
+    assert request.provider_metadata["external_result_count"] == 1
+    assert request.center_latitude == Decimal("48.402096")
+    assert request.center_longitude == Decimal("-89.244123")
     assert company.address == "1 Example St, Thunder Bay, ON"
+    assert company.latitude == Decimal("48.400001")
+    assert company.longitude == Decimal("-89.200001")
     assert company.trade_capabilities.get().source_metadata == {
         "provider": "google_places",
         "rating": 4.6,
         "review_count": 38,
     }
+
+
+def test_google_dedupe_backfills_missing_coordinates_without_replacing_valid_history(
+    project, user, approved_snapshot, settings, monkeypatch
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "google_places"
+    generated = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0]
+    package = next(item for item in generated if item.trade_key != "general-requirements")
+    revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+
+    missing = Company.objects.create(
+        organization=project.organization,
+        display_name="Existing Missing Coordinates",
+        website="https://missing-coordinates.example",
+        source_type=Company.Source.DISCOVERED,
+        created_by=user,
+        updated_by=user,
+    )
+    valid = Company.objects.create(
+        organization=project.organization,
+        display_name="Existing Valid Coordinates",
+        website="https://valid-coordinates.example",
+        source_type=Company.Source.DISCOVERED,
+        latitude=Decimal("48.123456"),
+        longitude=Decimal("-89.123456"),
+        created_by=user,
+        updated_by=user,
+    )
+    for company in (missing, valid):
+        TradeCapability.objects.create(
+            company=company,
+            trade_key=package.trade_key,
+            source_type=Company.Source.DISCOVERED,
+            source_metadata={"provider": "google_places", "rating": 4.0},
+        )
+    contact = Contact.objects.create(
+        company=missing,
+        name="Existing Contact",
+        email="existing@example.test",
+        is_primary=True,
+    )
+    candidate = ScopeContractorCandidate.objects.create(
+        project=project,
+        scope_package=package,
+        scope_version=package.current_version,
+        company=missing,
+        status=ScopeContractorCandidate.Status.SHORTLISTED,
+        created_by=user,
+        updated_by=user,
+    )
+
+    class MockGoogleProvider:
+        def resolve_center(self, **kwargs):
+            return SearchCenter(48.4020957, -89.2441234, "Thunder Bay, ON")
+
+        def search(self, **kwargs):
+            return ContractorSearchOutcome(
+                results=(
+                    ContractorResult(
+                        display_name=missing.display_name,
+                        city="Thunder Bay",
+                        province="Ontario",
+                        website=missing.website,
+                        external_place_id="missing-place",
+                        latitude=48.4442738,
+                        longitude=-89.2059327,
+                        metadata={"rating": 5.0, "review_count": 172, "distance_miles": 3.6},
+                    ),
+                    ContractorResult(
+                        display_name=valid.display_name,
+                        city="Thunder Bay",
+                        province="Ontario",
+                        website=valid.website,
+                        external_place_id="valid-place",
+                        latitude=49.9999999,
+                        longitude=-88.9999999,
+                        metadata={"rating": 4.5, "review_count": 80, "distance_miles": 8.1},
+                    ),
+                ),
+                metadata={"provider_request_count": 1},
+            )
+
+    monkeypatch.setattr("apps.contractors.services.provider_for", lambda name: MockGoogleProvider())
+    discover_contractors(project=project, package=package, actor=user)
+
+    missing.refresh_from_db()
+    valid.refresh_from_db()
+    candidate.refresh_from_db()
+    assert Company.objects.filter(organization=project.organization).count() == 2
+    assert missing.latitude == Decimal("48.444274")
+    assert missing.longitude == Decimal("-89.205933")
+    assert missing.trade_capabilities.get().source_metadata["distance_miles"] == 3.6
+    assert rank_candidate(candidate).distance_miles == 3.6
+    assert valid.latitude == Decimal("48.123456")
+    assert valid.longitude == Decimal("-89.123456")
+    assert candidate.status == ScopeContractorCandidate.Status.SHORTLISTED
+    assert Contact.objects.get(pk=contact.pk).email == "existing@example.test"
+    assert (
+        ScopeContractorCandidate.objects.filter(
+            project=project, scope_version=package.current_version
+        ).count()
+        == 2
+    )
 
 
 def test_candidate_permissions_and_human_shortlist(
@@ -1349,9 +1636,7 @@ def test_candidate_permissions_and_human_shortlist(
     package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
     revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
     package.refresh_from_db()
-    discover_contractors(
-        project=project, package=package, actor=user, city="Vancouver", province="BC"
-    )
+    discover_contractors(project=project, package=package, actor=user)
     candidate = ScopeContractorCandidate.objects.get()
     base = {
         "organization_slug": project.organization.slug,
@@ -1368,6 +1653,37 @@ def test_candidate_permissions_and_human_shortlist(
     membership.role = Membership.Role.VIEWER
     membership.save(update_fields=("role",))
     assert client_for(user).patch(url, {"status": "rejected"}, format="json").status_code == 403
+
+
+def test_candidate_stays_bound_to_searched_ready_version_and_hides_after_new_draft(
+    project, user, membership, approved_snapshot, settings
+):
+    settings.CONTRACTOR_DISCOVERY_PROVIDER = "fake"
+    package = generate_scope_packages(project=project, snapshot=approved_snapshot, actor=user)[0][0]
+    ready_version, _ = revise_scope_package(package=package, actor=user, values={}, mark_ready=True)
+    package.refresh_from_db()
+    discover_contractors(project=project, package=package, actor=user)
+    candidate = ScopeContractorCandidate.objects.get()
+    assert candidate.scope_version_id == ready_version.pk
+
+    revise_scope_package(
+        package=package,
+        actor=user,
+        values={"description": "Human-edited successor draft"},
+        mark_ready=False,
+    )
+    package.refresh_from_db()
+    assert candidate.scope_version_id == ready_version.pk
+    response = client_for(user).get(
+        reverse(
+            "contractor-candidate-list",
+            kwargs={"organization_slug": project.organization.slug, "project_pk": project.pk},
+        )
+    )
+    assert response.status_code == 200
+    assert response.data == []
+    with pytest.raises(ValidationError, match="Only Ready"):
+        discover_contractors(project=project, package=package, actor=user)
 
 
 def test_trade_coverage_uses_configured_shortlist_target_and_is_viewer_read_only(

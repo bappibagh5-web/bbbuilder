@@ -1,3 +1,4 @@
+from django.db.models import F
 from rest_framework import serializers
 
 from .models import Company, Contact, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
@@ -20,6 +21,8 @@ class CompanySerializer(serializers.ModelSerializer):
             "country",
             "source_type",
             "external_provider",
+            "latitude",
+            "longitude",
             "is_active",
         )
         read_only_fields = fields
@@ -31,6 +34,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     match_reasons = serializers.SerializerMethodField()
     google_rating = serializers.SerializerMethodField()
     google_review_count = serializers.SerializerMethodField()
+    distance_miles = serializers.SerializerMethodField()
 
     @staticmethod
     def ranking(candidate):
@@ -50,17 +54,22 @@ class CandidateSerializer(serializers.ModelSerializer):
     def get_google_review_count(self, candidate):
         return self.ranking(candidate).google_review_count
 
+    def get_distance_miles(self, candidate):
+        return self.ranking(candidate).distance_miles
+
     class Meta:
         model = ScopeContractorCandidate
         fields = (
             "id",
             "scope_package",
+            "scope_version",
             "status",
             "company",
             "match_score",
             "match_reasons",
             "google_rating",
             "google_review_count",
+            "distance_miles",
             "created_at",
             "updated_at",
         )
@@ -135,7 +144,9 @@ class CompanyProfileSerializer(CompanySerializer):
                 "status": candidate.status,
             }
             for candidate in company.project_candidates.filter(
-                project=project, scope_package__lifecycle="active"
+                project=project,
+                scope_package__lifecycle="active",
+                scope_version=F("scope_package__current_version"),
             ).select_related("scope_package")
         ]
 
@@ -183,6 +194,8 @@ class DiscoveryRequestSerializer(serializers.ModelSerializer):
             "city",
             "province",
             "radius_km",
+            "radius_miles",
+            "center_reference",
             "keywords",
             "search_terms",
             "provider",
@@ -195,12 +208,6 @@ class DiscoveryRequestSerializer(serializers.ModelSerializer):
 
 class SearchSerializer(serializers.Serializer):
     scope_package_id = serializers.IntegerField(min_value=1)
-    city = serializers.CharField(max_length=120)
-    province = serializers.CharField(max_length=80)
-    country = serializers.CharField(max_length=80, required=False, default="Canada")
-    radius_km = serializers.IntegerField(
-        min_value=1, max_value=500, required=False, allow_null=True
-    )
     keywords = serializers.ListField(
         child=serializers.CharField(max_length=100), required=False, max_length=20
     )

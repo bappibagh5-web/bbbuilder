@@ -40,7 +40,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 is COMPLETE. Milestone 2 is active. M2A-01 and M2B-01 through M2B-06 are COMPLETE; outreach/M3 has NOT started.**
+**Milestone 1 is COMPLETE. Milestone 2 is active. M2A-01 and M2B-01 through M2B-06 are COMPLETE; canonical 27-trade/200-mile Contractor Discovery is implemented and manually validated; outreach/M3 has NOT started.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -55,6 +55,8 @@ M2B-04 — Trade Coverage is **complete**. The Contractors tab summarizes every 
 M2B-05 — Contractor Profile / Contact Readiness is **complete**. Project-scoped profiles expose provider-sourced company identity, address, phone, website, trade capabilities, shortlist state, and Google quality signals without allowing contact edits to overwrite Google company data. Human-managed contacts remain separate and append audited mutations. Contact ready requires an active primary contact with an email or phone. Admin and Estimator/Operator may manage contacts; Viewer remains read-only.
 
 M2B-06 — Contact Enrichment is **complete**. Google-discovered contractor profiles lead with **Find Contact Details**, using a safe bounded backend lookup of the stored public company website and a small number of same-site contact, team, staff, people, or about pages. Public suggestions identify their source, pre-fill the existing contact form, and are never saved until a human explicitly confirms. **Add manually** remains available, duplicate email/phone confirmation is idempotent, and a truthful **No public contact found** state is shown when public pages yield nothing. The current shortlisted Reliance Heating website did not expose usable content to the bounded local lookup, so no suggestion was fabricated and no Contact was created. No outreach/M3 workflow exists yet.
+
+Contractor Discovery now shares the accepted 27-trade scope registry, exposes only current Active packages whose exact current version is Ready, searches the internal BB network first, and performs external discovery only after an authorized explicit action. Google Places searches are anchored to a cached project-site center, constrained by a deterministic 200-mile bounding rectangle, capped at two pages per trade query and four search requests, and filtered again by great-circle distance so outside-radius results are excluded. Candidates and discovery history bind to the exact Ready scope version. A real Project 3 HVAC / Mechanical search completed across the 200-mile area and reported 32 contractor results. D.Peppard Mechanical public contact enrichment suggested its published general email and phone without auto-saving; the user explicitly saved the contact and made it Contact Ready, then manually shortlisted it. HVAC coverage became 1 of 3 shortlisted. Electrical and Fire Protection remained untouched, and no outreach was created or sent.
 
 M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
 
@@ -811,9 +813,9 @@ Never implement multiple roadmap tasks in one uncontrolled Codex request.
 
 ## Current scope-generation implementation checkpoint
 
-The accepted full-project Scope Coverage Preview for JD Sports Project Information Version 4 is the canonical scope plan: 27 trade scopes, 659 detailed trade work items, and 106 project-wide requirements kept outside subcontractor trade packages. The production generation path now recomputes and persists that same plan only after an Admin/Estimator previews it and explicitly confirms creation. It uses a deterministic plan fingerprint to block stale previews, creates Draft versions only, preserves all earlier package versions and human edits, and leaves contractor discovery unavailable until a human marks the new scopes Ready.
+The accepted full-project Scope Coverage Preview for JD Sports Project Information Version 4 is the canonical scope plan: 27 trade scopes, 659 detailed trade work items, and 106 project-wide requirements kept outside subcontractor trade packages. Project 3 generation was manually accepted. It used the deterministic plan fingerprint to create Draft versions while preserving all earlier package versions and human edits; three representative packages were subsequently marked Ready through the normal human action.
 
-Automated implementation validation is complete; real Project 3 generation has not been performed. Manual validation of the explicit Scopes-page action is the next step. Outreach/M3 has not started.
+Canonical 27-trade, project-centered 200-mile Contractor Discovery is the current validation target. Manual validation must begin with one explicit HVAC / Mechanical search; no implementation-time provider search was run. Outreach/M3 has not started.
 
 ## Recovery instruction
 

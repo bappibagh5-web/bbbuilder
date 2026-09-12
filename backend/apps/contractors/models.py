@@ -5,13 +5,7 @@ from django.db import models
 from apps.organizations.models import Organization
 from apps.projects.models import Project
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
-
-TRADE_CHOICES = (
-    ("hvac-mechanical", "HVAC / Mechanical"),
-    ("plumbing", "Plumbing"),
-    ("fire-protection", "Fire Protection / Sprinkler"),
-    ("general-requirements", "General Requirements"),
-)
+from apps.scope_packages.trades import TRADE_CHOICES
 
 
 class Company(models.Model):
@@ -37,6 +31,8 @@ class Company(models.Model):
     source_type = models.CharField(max_length=20, choices=Source, default=Source.INTERNAL)
     external_provider = models.CharField(max_length=50, blank=True)
     external_place_id = models.CharField(max_length=255, blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_companies"
@@ -137,6 +133,11 @@ class ScopeContractorCandidate(models.Model):
     scope_package = models.ForeignKey(
         ScopePackage, on_delete=models.PROTECT, related_name="contractor_candidates"
     )
+    scope_version = models.ForeignKey(
+        ScopePackageVersion,
+        on_delete=models.PROTECT,
+        related_name="contractor_candidates",
+    )
     company = models.ForeignKey(
         Company, on_delete=models.PROTECT, related_name="project_candidates"
     )
@@ -157,20 +158,26 @@ class ScopeContractorCandidate(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=("project", "scope_package", "company"),
-                name="contractor_unique_scope_company",
-            )
+                fields=("project", "scope_version", "company"),
+                name="contractor_unique_scope_version_company",
+            ),
         ]
 
     def clean(self):
         super().clean()
+        if not self.scope_version_id and self.scope_package_id:
+            self.scope_version_id = self.scope_package.current_version_id
         if (
             self.scope_package.project_id != self.project_id
             or self.company.organization_id != self.project.organization_id
         ):
             raise ValidationError("Candidate organization and project scope must align.")
+        if self.scope_version.package_id != self.scope_package_id:
+            raise ValidationError("Candidate scope version must belong to its scope package.")
 
     def save(self, *args, **kwargs):
+        if not self.scope_version_id and self.scope_package_id:
+            self.scope_version_id = self.scope_package.current_version_id
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -189,6 +196,11 @@ class DiscoveryRequest(models.Model):
     city = models.CharField(max_length=120)
     province = models.CharField(max_length=80)
     radius_km = models.PositiveIntegerField(null=True, blank=True)
+    radius_miles = models.PositiveIntegerField(default=200)
+    project_location_key = models.CharField(max_length=64, blank=True)
+    center_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    center_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    center_reference = models.CharField(max_length=255, blank=True)
     keywords = models.JSONField(default=list, blank=True)
     search_terms = models.JSONField(default=list)
     provider = models.CharField(max_length=50)

@@ -8,6 +8,7 @@ INTERNAL_NETWORK_WEIGHT = 18
 WEBSITE_WEIGHT = 5
 PHONE_WEIGHT = 5
 SHORTLISTED_WEIGHT = 5
+NEAR_PROJECT_WEIGHT = 6
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class CandidateRanking:
     reasons: tuple[str, ...]
     google_rating: float | None
     google_review_count: int | None
+    distance_miles: float | None
 
 
 def _matching_capability(candidate):
@@ -32,7 +34,7 @@ def _matching_capability(candidate):
 
 def _google_quality(capability):
     if capability is None or capability.source_type != Company.Source.DISCOVERED:
-        return None, None
+        return None, None, None
     metadata = capability.source_metadata if isinstance(capability.source_metadata, dict) else {}
     rating = metadata.get("rating")
     review_count = metadata.get("review_count")
@@ -40,14 +42,17 @@ def _google_quality(capability):
         rating = None
     if isinstance(review_count, bool) or not isinstance(review_count, int):
         review_count = None
-    return float(rating) if rating is not None else None, review_count
+    distance = metadata.get("distance_miles")
+    if isinstance(distance, bool) or not isinstance(distance, (int, float)):
+        distance = None
+    return float(rating) if rating is not None else None, review_count, distance
 
 
 def rank_candidate(candidate: ScopeContractorCandidate) -> CandidateRanking:
     score = 0
     reasons = []
     capability = _matching_capability(candidate)
-    rating, review_count = _google_quality(capability)
+    rating, review_count, distance = _google_quality(capability)
 
     if capability is not None:
         score += EXACT_TRADE_WEIGHT
@@ -91,10 +96,14 @@ def rank_candidate(candidate: ScopeContractorCandidate) -> CandidateRanking:
     if candidate.status == ScopeContractorCandidate.Status.SHORTLISTED:
         score += SHORTLISTED_WEIGHT
         reasons.append("Shortlisted by BB Builders")
+    if distance is not None and distance <= 75:
+        score += NEAR_PROJECT_WEIGHT
+        reasons.append("Near project")
 
     return CandidateRanking(
         score=min(score, 100),
         reasons=tuple(reasons),
         google_rating=rating,
         google_review_count=review_count,
+        distance_miles=distance,
     )

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -32,7 +33,9 @@ from .services import (
 def candidates(project):
     queryset = (
         ScopeContractorCandidate.objects.filter(
-            project=project, scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE
+            project=project,
+            scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE,
+            scope_version=F("scope_package__current_version"),
         )
         .select_related("company", "scope_package", "project")
         .prefetch_related("company__trade_capabilities")
@@ -163,10 +166,6 @@ class DiscoverySearchView(ProjectDocumentContextMixin, APIView):
                 project=project,
                 package=package,
                 actor=request.user,
-                city=serializer.validated_data["city"],
-                province=serializer.validated_data["province"],
-                country=serializer.validated_data["country"],
-                radius_km=serializer.validated_data.get("radius_km"),
                 keywords=serializer.validated_data.get("keywords", []),
             )
         except DjangoValidationError as error:
@@ -180,6 +179,9 @@ class DiscoverySearchView(ProjectDocumentContextMixin, APIView):
             {
                 "discovery_request_id": discovery.pk,
                 "result_count": discovery.result_count,
+                "partial_results": bool(
+                    discovery.provider_metadata.get("partial_failure_count", 0)
+                ),
                 "candidates": CandidateSerializer(
                     candidates(project).filter(scope_package=package), many=True
                 ).data,
