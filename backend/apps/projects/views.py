@@ -2,9 +2,11 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, viewsets
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.organizations.models import Organization
-from apps.organizations.permissions import OrganizationReadWritePermission
+from apps.organizations.permissions import ActiveOrganizationMember, OrganizationReadWritePermission
 
 from .audit import (
     CONTACT_AUDIT_FIELDS,
@@ -13,6 +15,7 @@ from .audit import (
     snapshot,
     update_action,
 )
+from .dashboard import dashboard_activity, dashboard_summary
 from .models import AuditEvent, Project, ProjectContact
 from .serializers import AuditEventSerializer, ProjectContactSerializer, ProjectSerializer
 
@@ -31,6 +34,22 @@ class OrganizationContextMixin:
         context = super().get_serializer_context()
         context["organization"] = self.get_organization()
         return context
+
+
+class DashboardSummaryView(OrganizationContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+    http_method_names = ("get", "head", "options")
+
+    def get(self, request, *args, **kwargs):
+        return Response(dashboard_summary(self.get_organization()))
+
+
+class DashboardActivityView(OrganizationContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+    http_method_names = ("get", "head", "options")
+
+    def get(self, request, *args, **kwargs):
+        return Response({"results": dashboard_activity(self.get_organization())})
 
 
 class ProjectDomainPagination(PageNumberPagination):

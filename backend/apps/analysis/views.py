@@ -49,6 +49,7 @@ from .services import (
     review_finding,
     snapshot_freshness,
     snapshot_readiness,
+    summary_handling_status,
 )
 
 
@@ -164,27 +165,6 @@ def finding_matches_review_filter(finding, review_filter, *, open_conflict_findi
     if review_filter == "reviewed_by_you":
         return handling.startswith("human_")
     return True
-
-
-def summary_handling_status(row, open_conflict_finding_ids):
-    if row["id"] in open_conflict_finding_ids:
-        return "conflicting"
-    decision = row["latest_review_decision"]
-    if decision:
-        return {
-            "accepted": "human_confirmed",
-            "edited_accepted": "human_edited",
-            "rejected": "human_rejected",
-            "needs_clarification": "human_needs_follow_up",
-        }[decision]
-    if row["category"] == ExtractedFinding.Category.OPEN_QUESTION:
-        return "needs_attention"
-    if row["machine_support"] not in {
-        ExtractedFinding.Support.EXPLICIT,
-        ExtractedFinding.Support.STRONGLY_SUPPORTED,
-    }:
-        return "needs_attention"
-    return AI_HANDLED if row["has_source"] else "needs_attention"
 
 
 def project_review_summary(run, findings, *, open_conflict_finding_ids):

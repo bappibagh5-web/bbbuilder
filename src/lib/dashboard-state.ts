@@ -1,48 +1,20 @@
-import type { ExtractedFinding, IntelligenceConflict } from "./analysis.ts";
-
-export type DashboardReviewCounts = {
-  total: number;
-  aiHandled: number;
-  reviewedByUser: number;
-  needsAttention: number;
-  conflicts: number;
-  complete: boolean;
-};
-
-export function dashboardReviewCounts(
-  findings: Pick<ExtractedFinding, "handling_status">[],
-  conflicts: Pick<IntelligenceConflict, "status">[],
-): DashboardReviewCounts {
-  const openConflicts = conflicts.filter((conflict) => conflict.status === "open").length;
-  const aiHandled = findings.filter((finding) => finding.handling_status === "ai_handled").length;
-  const reviewedByUser = findings.filter((finding) =>
-    finding.handling_status.startsWith("human_"),
-  ).length;
-  const needsAttention = findings.filter((finding) =>
-    ["needs_attention", "human_needs_follow_up"].includes(finding.handling_status),
-  ).length;
-  return {
-    total: findings.length,
-    aiHandled,
-    reviewedByUser,
-    needsAttention,
-    conflicts: openConflicts,
-    complete: findings.length > 0 && needsAttention === 0 && openConflicts === 0,
-  };
-}
-
-export function projectNeedsAttention(input: {
-  activeDocumentCount: number;
-  reviewedDocumentCount: number;
-  needsAttention: number;
-  conflicts: number;
+export function dashboardAttentionDescription(item: {
+  project_review: { current: boolean } | null;
+  review: { total: number; complete: boolean; needs_attention: number; conflicts: number };
+  active_document_count: number;
+  reviewed_document_count: number;
 }) {
-  return (
-    input.activeDocumentCount === 0 ||
-    input.needsAttention > 0 ||
-    input.conflicts > 0 ||
-    input.activeDocumentCount > input.reviewedDocumentCount
-  );
+  const parts: string[] = [];
+  if (item.project_review) {
+    if (!item.project_review.current) parts.push("Estimating set changed since review");
+    else if (!item.review.complete && !item.review.needs_attention && !item.review.conflicts) parts.push("Project review not complete");
+  } else {
+    const incomplete = item.active_document_count - item.reviewed_document_count;
+    if (incomplete > 0) parts.push(`${incomplete} current document${incomplete === 1 ? "" : "s"} not fully reviewed`);
+  }
+  if (item.review.needs_attention) parts.push(`${item.review.needs_attention} finding${item.review.needs_attention === 1 ? "" : "s"} ${item.review.needs_attention === 1 ? "needs" : "need"} follow-up`);
+  if (item.review.conflicts) parts.push(`${item.review.conflicts} open conflict${item.review.conflicts === 1 ? "" : "s"}`);
+  return parts.join(" · ");
 }
 
 export const dashboardActivityLabels: Record<string, string> = {

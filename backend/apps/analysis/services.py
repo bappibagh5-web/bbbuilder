@@ -1810,6 +1810,28 @@ HUMAN_REJECTED = "human_rejected"
 HUMAN_NEEDS_FOLLOW_UP = "human_needs_follow_up"
 
 
+def summary_handling_status(row, open_conflict_finding_ids):
+    """Classify aggregate finding rows without loading full provenance payloads."""
+    if row["id"] in open_conflict_finding_ids:
+        return CONFLICTING
+    decision = row["latest_review_decision"]
+    if decision:
+        return {
+            FindingReview.Decision.ACCEPTED: HUMAN_CONFIRMED,
+            FindingReview.Decision.EDITED_ACCEPTED: HUMAN_EDITED,
+            FindingReview.Decision.REJECTED: HUMAN_REJECTED,
+            FindingReview.Decision.NEEDS_CLARIFICATION: HUMAN_NEEDS_FOLLOW_UP,
+        }[decision]
+    if row["category"] == ExtractedFinding.Category.OPEN_QUESTION:
+        return NEEDS_ATTENTION
+    if row["machine_support"] not in {
+        ExtractedFinding.Support.EXPLICIT,
+        ExtractedFinding.Support.STRONGLY_SUPPORTED,
+    }:
+        return NEEDS_ATTENTION
+    return AI_HANDLED if row["has_source"] else NEEDS_ATTENTION
+
+
 def _candidate_for_finding(finding):
     try:
         candidates = validate_result(

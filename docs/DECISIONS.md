@@ -412,6 +412,14 @@ Real Project 3 validation completed the HVAC / Mechanical search across this bou
 
 **Consequence:** Project 3's 27-package/659-item Scopes workspace and Ready-trade Contractor Discovery become usable without a full-page data waterfall. Independent loading and error states prevent one detail failure from blanking unrelated workflow content. This changes transport and presentation only: immutable scope history, Ready-only discovery, ranking, shortlist, contact enrichment, provider boundaries, and outreach exclusions remain unchanged. Manual acceptance confirmed the 27/659 Scopes summary and collapsed package rows, plus three collapsed Ready contractor trades with HVAC at 31 active candidates and 1 of 3 shortlisted.
 
+### D-050 — Dashboard summaries are calculated server-side and activity loads independently
+
+**Status:** Decided
+
+**Decision:** The production Dashboard reads one organization-scoped, summary-only endpoint for active-project KPIs and project cards. Where a project-set review exists, the backend selects the same latest successful project-set run (or latest run if none succeeded) as Document Review, verifies its frozen revision set against currently selected/current documents, and summarizes only that run's persisted findings/reviews/open conflicts. It never combines project-set results with historical standalone runs. Projects without a project-set run retain a standalone-document fallback. The response excludes full documents, runs, findings, provenance, conflicts, and snapshot manifests. Recent organization activity is a separate GET-only request capped at the eight items displayed. Both endpoints require active organization membership and trust the URL organization context, not client-supplied organization identifiers.
+
+**Consequence:** Dashboard cost is bounded by grouped queries rather than a browser-side project/document waterfall. Summary or activity failures have independent presentation states, and refresh retains the last successful dashboard. The KPI counts complete **projects**, not independent document reviews; project-set coverage reports its selected documents and pages/slides. Historical approval alone does not mark a changed or incomplete current review complete. This is read-only transport/presentation work and does not start M3 or alter project data.
+
 ## Unresolved decisions
 
 ### U-001 — Production hosting topology

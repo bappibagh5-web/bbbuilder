@@ -1,6 +1,12 @@
 from django.urls import path
 
-from .views import ProjectAuditEventViewSet, ProjectContactViewSet, ProjectViewSet
+from .views import (
+    DashboardActivityView,
+    DashboardSummaryView,
+    ProjectAuditEventViewSet,
+    ProjectContactViewSet,
+    ProjectViewSet,
+)
 
 project_collection = ProjectViewSet.as_view({"get": "list", "post": "create"})
 project_detail = ProjectViewSet.as_view(
@@ -13,6 +19,16 @@ contact_detail = ProjectContactViewSet.as_view(
 audit_event_collection = ProjectAuditEventViewSet.as_view({"get": "list"})
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/dashboard/",
+        DashboardSummaryView.as_view(),
+        name="dashboard-summary",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/dashboard/activity/",
+        DashboardActivityView.as_view(),
+        name="dashboard-activity",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/",
         project_collection,
