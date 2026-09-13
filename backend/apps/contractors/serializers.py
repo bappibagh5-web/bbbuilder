@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from .models import Company, Contact, DiscoveryRequest, ScopeContractorCandidate, TradeCapability
 from .ranking import rank_candidate
-from .services import contact_is_ready
+from .services import candidate_outreach_eligibility, contact_is_ready
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -35,6 +35,17 @@ class CandidateSerializer(serializers.ModelSerializer):
     google_rating = serializers.SerializerMethodField()
     google_review_count = serializers.SerializerMethodField()
     distance_miles = serializers.SerializerMethodField()
+    outreach_contact_ready = serializers.SerializerMethodField()
+    outreach_eligibility = serializers.SerializerMethodField()
+
+    def get_outreach_contact_ready(self, candidate):
+        return any(
+            contact.is_active and contact.is_primary and bool(contact.email)
+            for contact in candidate.company.contacts.all()
+        )
+
+    def get_outreach_eligibility(self, candidate):
+        return candidate_outreach_eligibility(candidate)
 
     @staticmethod
     def ranking(candidate):
@@ -70,6 +81,8 @@ class CandidateSerializer(serializers.ModelSerializer):
             "google_rating",
             "google_review_count",
             "distance_miles",
+            "outreach_contact_ready",
+            "outreach_eligibility",
             "created_at",
             "updated_at",
         )

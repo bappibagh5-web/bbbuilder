@@ -10,6 +10,7 @@ import type {
   ContractorContactInput,
   ContractorContactEnrichment,
   ContractorContactSuggestion,
+  ContractorCandidate,
 } from "@/lib/contractors";
 
 type ContactForm = {
@@ -32,18 +33,22 @@ const emptyContact: ContactForm = {
 
 export function ContractorProfilePanel({
   profile,
+  outreachCandidate,
   canManage,
   busy,
   onBack,
   onSave,
   onFindContactDetails,
+  onApprovalChange,
 }: {
   profile: ContractorCompanyProfile;
+  outreachCandidate: ContractorCandidate | null;
   canManage: boolean;
   busy: boolean;
   onBack: () => void;
   onSave: (contactId: number | null, input: ContractorContactInput) => Promise<void>;
   onFindContactDetails: () => Promise<ContractorContactEnrichment>;
+  onApprovalChange: (approved: boolean) => void;
 }) {
   const [editingId, setEditingId] = useState<number | "new" | null>(null);
   const [form, setForm] = useState<ContactForm>(emptyContact);
@@ -115,6 +120,8 @@ export function ContractorProfilePanel({
           <div className="text-sm sm:text-right">
             <p className="font-semibold text-slate-900">Shortlist status</p>
             {profile.shortlist_statuses.map((item) => <p key={item.scope_package} className="mt-1 text-slate-600">{item.trade_category}: <span className="font-semibold capitalize">{item.status.replaceAll("_", " ")}</span></p>)}
+            {outreachCandidate?.status === "shortlisted" && <><p className="mt-2 text-xs font-semibold text-emerald-700">Shortlisted ✓ · {outreachCandidate.outreach_contact_ready ? "Contact Ready" : "Contact needs an email"}</p>{canManage && (outreachCandidate.outreach_eligibility.can_approve ? <button type="button" onClick={() => onApprovalChange(true)} disabled={busy} className="mt-2 rounded-lg bg-[#173f5f] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Approve for Outreach</button> : <p className="mt-2 text-xs text-amber-700">{outreachCandidate.outreach_eligibility.reason}</p>)}</>}
+            {outreachCandidate?.status === "approved_for_outreach" && <><p className="mt-2 text-xs font-semibold text-indigo-700">Approved for Outreach ✓</p>{canManage && (outreachCandidate.outreach_eligibility.can_revoke ? <button type="button" onClick={() => onApprovalChange(false)} disabled={busy} className="mt-2 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">Revoke approval</button> : <p className="mt-2 text-xs text-slate-500">{outreachCandidate.outreach_eligibility.reason}</p>)}</>}
           </div>
         </div>
       </div>

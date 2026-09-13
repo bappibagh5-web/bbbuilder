@@ -93,7 +93,10 @@ def rank_candidate(candidate: ScopeContractorCandidate) -> CandidateRanking:
         elif review_count >= 5:
             score += 3
             reasons.append("Review history available")
-    if candidate.status == ScopeContractorCandidate.Status.SHORTLISTED:
+    if candidate.status in (
+        ScopeContractorCandidate.Status.SHORTLISTED,
+        ScopeContractorCandidate.Status.APPROVED,
+    ):
         score += SHORTLISTED_WEIGHT
         reasons.append("Shortlisted by BB Builders")
     if distance is not None and distance <= 75:

@@ -6,7 +6,7 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun with M3-01 domain foundation implemented, awaiting validation. M3-02 has not started.
+Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 is committed; M3-02 deterministic RFQ Template V3, M3-03 explicit recipient preparation, and M3-04 guarded delivery infrastructure are **COMPLETE and manually validated**. M3-05 is NEXT / NOT STARTED.
 
 ## Current implementation status
 
@@ -40,7 +40,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 is COMPLETE. Milestone 2 is COMPLETE. M2A-01, M2B-01 through M2B-06, and the final M2 UI/performance pass are COMPLETE and manually accepted. M3-01 is implemented awaiting manual validation; M3-02 is NOT STARTED.**
+**Milestone 1 is COMPLETE. Milestone 2 is COMPLETE. M2A-01, M2B-01 through M2B-06, and the final M2 UI/performance pass are COMPLETE and manually accepted. M3-01 is committed; M3-02, M3-03 and M3-04 are COMPLETE and manually validated. M3-05 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -62,7 +62,7 @@ The final Milestone 2 UI/performance pass is **complete and manually accepted**.
 
 The Contractors tab now loads only its five-query coverage summary initially (five-run average 16 ms and 738 bytes), so its heading and three current Ready trade rows are no longer blocked by the former 2.36 MB Scopes request or an all-candidate request. Candidate lists load and cache per expanded trade; Project 3 HVAC's 31 active production-facing candidates load in a five-query request averaging 29 ms with a 23.2 KB payload. Profiles and contact enrichment remain lazy, each trade has an independent error/loading state, no provider search runs on page load, and no outreach behavior was introduced.
 
-The post-Milestone-2 Dashboard performance fix is complete and pushed. Its authoritative project-set summary reports JD Sports Run 18's 23 selected documents / 141 pages, 556 findings, 509 AI handled, 47 human reviewed, no attention/conflicts, and approved Project Information V4. The corrected HTTP summary averaged 99 ms, 9 queries, and 800 bytes across ten local runs. M3-01 domain foundation is implemented, awaiting manual validation; M3-02 has not started.
+The post-Milestone-2 Dashboard performance fix is complete and pushed. Its authoritative project-set summary reports JD Sports Run 18's 23 selected documents / 141 pages, 556 findings, 509 AI handled, 47 human reviewed, no attention/conflicts, and approved Project Information V4. The corrected HTTP summary averaged 99 ms, 9 queries, and 800 bytes across ten local runs. M3-02 adds a versioned, read-only RFQ preview tied to the exact campaign Ready scope version. M3-03 adds explicit recipient preparation; Project 3 validation later created one Draft campaign, two batches and one prepared recipient. M3-04 adds guarded delivery infrastructure, but no Project 3 message or delivery exists.
 
 M1-UX-01 — Non-Technical Document Review UX is **complete**. Automated validation and client manual acceptance passed on September 4, 2026. This post-Milestone-1 refinement translates the existing production document-processing, AI review, human decision, provenance, conflict, version, and approval states into plain construction/business language without changing backend semantics or starting M2.
 
@@ -152,7 +152,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 and M2B-01 through M2B-06 are complete. M3-01 domain foundation is implemented awaiting validation; no outreach has been sent.
+M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 and M2B-01 through M2B-06 are complete. M3-01 through M3-04 are complete; no outreach has been sent. M3-05 is not started.
 
 M1-05 currently includes:
 
@@ -821,7 +821,7 @@ Never implement multiple roadmap tasks in one uncontrolled Codex request.
 
 The accepted full-project Scope Coverage Preview for JD Sports Project Information Version 4 is the canonical scope plan: 27 trade scopes, 659 detailed trade work items, and 106 project-wide requirements kept outside subcontractor trade packages. Project 3 generation was manually accepted. It used the deterministic plan fingerprint to create Draft versions while preserving all earlier package versions and human edits; three representative packages were subsequently marked Ready through the normal human action.
 
-Milestone 2 is complete. Canonical 27-trade, project-centered 200-mile Contractor Discovery and the final summary-first Scopes/Contractors UI were manually accepted on Project 3. **M3-01 — Invitation / Outreach Domain Model** is implemented, awaiting manual validation. M3-02 has not started; no outreach exists.
+Milestone 2 is complete. Canonical 27-trade, project-centered 200-mile Contractor Discovery and the final summary-first Scopes/Contractors UI were manually accepted on Project 3. **M3-01 — Invitation / Outreach Domain Model** is committed. **M3-02 — RFQ Template & Trade Package Invitation Builder**, **M3-03 — Recipient Selection & Invitation Batches**, and **M3-04 — Outreach Delivery Adapter & Retry/Audit** are COMPLETE and manually validated. Project 3 retains one Draft campaign, two batches and one prepared recipient; zero messages, send approvals, or delivery attempts exist. Missing Bid Due blocks sending. M3-05 is NEXT / NOT STARTED.
 
 ## Recovery instruction
 

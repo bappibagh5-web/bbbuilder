@@ -37,8 +37,8 @@ def candidates(project):
             scope_package__lifecycle=ScopePackage.Lifecycle.ACTIVE,
             scope_version=F("scope_package__current_version"),
         )
-        .select_related("company", "scope_package", "project")
-        .prefetch_related("company__trade_capabilities")
+        .select_related("company", "scope_package", "scope_version", "project")
+        .prefetch_related("company__trade_capabilities", "company__contacts")
     )
     if settings.CONTRACTOR_DISCOVERY_PROVIDER == "google_places":
         queryset = queryset.exclude(company__external_provider="fake")

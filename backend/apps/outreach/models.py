@@ -86,6 +86,7 @@ class InvitationRecipient(ImmutableFieldsMixin):
     class Status(models.TextChoices):
         PREPARED = "prepared", "Prepared"
         CANCELLED = "cancelled", "Cancelled"
+        INVITED = "invited", "Invited"
 
     batch = models.ForeignKey(InvitationBatch, on_delete=models.PROTECT, related_name="recipients")
     candidate = models.ForeignKey(ScopeContractorCandidate, on_delete=models.PROTECT)
@@ -233,3 +234,59 @@ class OutreachMessage(ImmutableFieldsMixin):
         super().clean()
         if self.to_address != self.recipient.email:
             raise ValidationError("Prepared message must use the frozen recipient email address.")
+
+
+class BatchSendApproval(ImmutableFieldsMixin):
+    batch = models.ForeignKey(
+        InvitationBatch, on_delete=models.PROTECT, related_name="send_approvals"
+    )
+    message_fingerprint = models.CharField(max_length=64, default="")
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    approved_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("batch_id", "message_fingerprint", "approved_by_id", "approved_at")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("batch", "message_fingerprint"), name="outreach_unique_send_approval_state"
+            )
+        ]
+
+
+class OutreachDeliveryAttempt(ImmutableFieldsMixin):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    message = models.ForeignKey(OutreachMessage, on_delete=models.PROTECT, related_name="attempts")
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    provider_key = models.CharField(max_length=40)
+    idempotency_key = models.CharField(max_length=100)
+    status = models.CharField(max_length=20, choices=Status, default=Status.PENDING)
+    attempted_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    provider_reference = models.CharField(max_length=120, blank=True)
+    safe_error_code = models.CharField(max_length=80, blank=True)
+    safe_error_message = models.CharField(max_length=255, blank=True)
+
+    immutable_fields = ("message_id", "sequence", "provider_key", "idempotency_key", "attempted_at")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("message", "sequence"), name="outreach_unique_delivery_attempt_sequence"
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = type(self).objects.get(pk=self.pk)
+            if (
+                old.status != self.Status.PENDING
+                or self.status not in {self.Status.SUCCEEDED, self.Status.FAILED}
+                or old.completed_at is not None
+            ):
+                raise ValidationError("Completed delivery attempts are immutable.")
+        return super().save(*args, **kwargs)

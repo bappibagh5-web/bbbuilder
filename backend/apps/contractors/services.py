@@ -91,7 +91,10 @@ def build_trade_coverage(*, project, candidate_queryset=None, minimum_target=Non
     for package_id, status_value in queryset.values_list("scope_package_id", "status"):
         if status_value != ScopeContractorCandidate.Status.REJECTED:
             counts[package_id] += 1
-        if status_value == ScopeContractorCandidate.Status.SHORTLISTED:
+        if status_value in (
+            ScopeContractorCandidate.Status.SHORTLISTED,
+            ScopeContractorCandidate.Status.APPROVED,
+        ):
             shortlisted[package_id] += 1
     return {
         "minimum_shortlist_target": target,
@@ -131,6 +134,55 @@ def contact_is_ready(company):
         .exclude(email="", phone="")
         .exists()
     )
+
+
+def outreach_contact(company):
+    """Approval requires an active primary person with a usable email."""
+    return next(
+        (
+            contact
+            for contact in company.contacts.all()
+            if contact.is_active and contact.is_primary and contact.email
+        ),
+        None,
+    )
+
+
+def candidate_outreach_eligibility(candidate):
+    """Single source of truth for approval/revocation affordances and validation."""
+    from apps.outreach.models import InvitationRecipient
+
+    if candidate.status == ScopeContractorCandidate.Status.APPROVED:
+        used = InvitationRecipient.objects.filter(candidate=candidate).exists()
+        return {
+            "can_approve": False,
+            "can_revoke": not used,
+            "reason": ("Approval cannot be revoked after recipient preparation." if used else ""),
+        }
+    if candidate.status != ScopeContractorCandidate.Status.SHORTLISTED:
+        return {
+            "can_approve": False,
+            "can_revoke": False,
+            "reason": "Shortlist this contractor first.",
+        }
+    if (
+        not candidate.project.is_active
+        or candidate.scope_package.lifecycle != ScopePackage.Lifecycle.ACTIVE
+        or candidate.scope_package.current_version_id != candidate.scope_version_id
+        or candidate.scope_version.status != ScopePackageVersion.Status.READY
+    ):
+        return {
+            "can_approve": False,
+            "can_revoke": False,
+            "reason": "Approval requires the current Active Ready scope version.",
+        }
+    if not candidate.company.is_active or not outreach_contact(candidate.company):
+        return {
+            "can_approve": False,
+            "can_revoke": False,
+            "reason": "Add an active primary contact with an email before approval.",
+        }
+    return {"can_approve": True, "can_revoke": False, "reason": ""}
 
 
 @transaction.atomic
@@ -446,8 +498,22 @@ def discover_contractors(*, project, package, actor, keywords=None):
 def set_candidate_status(*, candidate, status, actor):
     if status not in ScopeContractorCandidate.Status.values:
         raise ValidationError("Invalid candidate status.")
+    candidate = (
+        ScopeContractorCandidate.objects.select_for_update()
+        .select_related("project", "scope_package", "scope_version", "company")
+        .get(pk=candidate.pk)
+    )
     if candidate.status == status:
         return candidate, False
+    eligibility = candidate_outreach_eligibility(candidate)
+    if status == ScopeContractorCandidate.Status.APPROVED and not eligibility["can_approve"]:
+        raise ValidationError(eligibility["reason"])
+    if candidate.status == ScopeContractorCandidate.Status.APPROVED:
+        if status != ScopeContractorCandidate.Status.SHORTLISTED:
+            raise ValidationError("Approved contractors can only return to the shortlist.")
+        if not eligibility["can_revoke"]:
+            raise ValidationError(eligibility["reason"])
+    previous = candidate.status
     candidate.status = status
     candidate.updated_by = actor
     candidate.save(update_fields=("status", "updated_by", "updated_at"))
@@ -460,6 +526,8 @@ def set_candidate_status(*, candidate, status, actor):
         metadata={
             "scope_package_id": candidate.scope_package_id,
             "company_id": candidate.company_id,
+            "previous_status": previous,
+            "new_status": status,
         },
     )
     return candidate, True
