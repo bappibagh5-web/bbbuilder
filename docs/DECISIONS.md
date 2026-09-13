@@ -489,3 +489,7 @@ Decide whether bounded textual evidence and image crops are persisted, regenerat
 ## Required ADRs before affected production coding
 
 At minimum, create focused ADRs for authentication, storage/upload security, processing idempotency, analysis/finding versioning, and approval readiness before those areas are finalized.
+
+# M3-01 outreach preparation boundary (2026-09-13)
+
+Invitation campaigns freeze one Active, current, Ready scope-package version. Batches and recipients preserve exact candidate, company and selected active email-contact identity; recipients require an explicit `approved_for_outreach` candidate. Recipient identity is snapshotted so later company/contact changes cannot rewrite history. Recipient status events and prepared message versions are append-only; M3-01 permits only `prepared` and a controlled cancellation, never a delivery-implying transition. Creation is service-only, Admin is inspection-only, and no production Outreach API or UI is activated. Sending, delivery evidence, provider configuration, recipient-selection UI and RFQ composer belong to later M3 tasks.

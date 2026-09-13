@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "apps.analysis",
     "apps.scope_packages",
     "apps.contractors",
+    "apps.outreach",
 ]
 
 CONTRACTOR_DISCOVERY_PROVIDER = env("CONTRACTOR_DISCOVERY_PROVIDER", default="fake")

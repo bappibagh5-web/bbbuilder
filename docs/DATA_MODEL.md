@@ -305,3 +305,7 @@ Responsibility findings should represent supply, installation, GC coordination/s
 | CloseoutRequirement | Required closeout deliverable, responsibility, due state, revisions, and approval. |
 
 These future entities may be referenced by conceptual identifiers or extension points only when necessary. Their workflows, tables, endpoints, and UI are not Milestone 1 deliverables.
+
+# M3-01 invitation preparation entities
+
+`InvitationCampaign` binds Organization → Project → active ScopePackage → exact current Ready ScopePackageVersion and freezes trade identity. `InvitationBatch` is a unique sequence inside a campaign. `InvitationRecipient` binds a batch to one explicitly `approved_for_outreach` ScopeContractorCandidate, Company, and selected active Contact with email, and freezes the selected business identity and address. The same candidate may appear in a later batch, never twice in one batch. `InvitationRecipientStatusEvent` is append-only and records initial prepared state and controlled cancellation; no delivery event exists yet. `OutreachMessage` is an immutable prepared email snapshot with a unique per-recipient sequence. It does not represent sending, delivery, opening or response. AuditEvent records safe IDs/status only. M3-01 adds no outbound transport or production API.
