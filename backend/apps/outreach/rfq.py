@@ -210,14 +210,14 @@ def build_rfq_preview(*, campaign: InvitationCampaign) -> RFQPreview:
     if campaign.organization_id != project.organization_id:
         raise ValidationError("Campaign organization binding is invalid.")
     if (
-        project.questions_deadline
-        and project.bid_deadline
-        and project.questions_deadline > project.bid_deadline
+        campaign.questions_deadline
+        and campaign.bid_deadline
+        and campaign.questions_deadline >= campaign.bid_deadline
     ):
         raise ValidationError("Questions deadline cannot be after the bid deadline.")
 
-    bid_deadline = _format_deadline(project.bid_deadline, project.project_timezone)
-    questions_deadline = _format_deadline(project.questions_deadline, project.project_timezone)
+    bid_deadline = _format_deadline(campaign.bid_deadline, project.project_timezone)
+    questions_deadline = _format_deadline(campaign.questions_deadline, project.project_timezone)
     inclusions, clarifications, coordination, general, omitted_count = _classify_scope_items(scope)
     exclusions = _unique(scope.exclusions)
     location = (

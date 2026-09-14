@@ -1,6 +1,9 @@
+import smtplib
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
+from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import override_settings
@@ -13,6 +16,7 @@ from apps.contractors.models import Company, Contact, ScopeContractorCandidate
 from apps.contractors.serializers import CandidateSerializer
 from apps.contractors.services import build_trade_coverage, set_candidate_status
 from apps.organizations.models import Membership, Organization
+from apps.outreach.credentials import encrypt_password
 from apps.outreach.delivery import (
     approve_batch_send,
     deliver_message,
@@ -21,12 +25,15 @@ from apps.outreach.delivery import (
 )
 from apps.outreach.models import (
     BatchSendApproval,
+    CampaignSetupEvent,
     InvitationBatch,
     InvitationCampaign,
     InvitationRecipient,
     InvitationRecipientStatusEvent,
     OutreachDeliveryAttempt,
     OutreachMessage,
+    OutreachSenderSettings,
+    OutreachSMTPConfiguration,
 )
 from apps.outreach.rfq import COMPANY_PLACEHOLDER, RFQ_TEMPLATE_VERSION, build_rfq_preview
 from apps.outreach.services import (
@@ -36,10 +43,13 @@ from apps.outreach.services import (
     create_outreach_message,
     transition_invitation_recipient_status,
 )
+from apps.outreach.setup import parse_project_local, save_campaign_setup, save_sender_settings
+from apps.outreach.smtp import SMTPDeliveryProvider, provider_status
 from apps.projects.models import AuditEvent, Project
 from apps.scope_packages.models import ScopeItem, ScopePackage, ScopePackageVersion
 
 pytestmark = pytest.mark.django_db
+TEST_ENCRYPTION_KEY = Fernet.generate_key().decode("ascii")
 
 
 @pytest.fixture
@@ -400,18 +410,17 @@ def test_rfq_deadlines_are_real_and_validated(setup, user):
     project, _, _, _, _ = setup
     campaign = campaign_for(setup, user)
     bid = timezone.now() + timedelta(days=10)
-    project.bid_deadline = bid
-    project.questions_deadline = bid - timedelta(days=2)
-    project.save()
+    campaign.bid_deadline = bid
+    campaign.questions_deadline = bid - timedelta(days=2)
+    campaign.save()
     preview = build_rfq_preview(campaign=campaign)
     assert preview.bid_deadline is not None
     assert preview.questions_deadline is not None
     assert preview.bid_deadline in preview.body
     assert preview.questions_deadline in preview.body
-    project.questions_deadline = bid + timedelta(days=1)
-    project.save()
+    campaign.questions_deadline = bid + timedelta(days=1)
     with pytest.raises(ValidationError):
-        build_rfq_preview(campaign=campaign)
+        campaign.save()
 
 
 def test_rfq_classifies_frozen_items_without_promoting_uncertain_or_coordination(setup, user):
@@ -705,19 +714,53 @@ def delivery_batch(setup, user):
     return project, batch
 
 
-@override_settings(
-    OUTREACH_DELIVERY_PROVIDER="fake",
-    OUTREACH_FROM_NAME="BB Builders",
-    OUTREACH_FROM_ADDRESS="bids@example.invalid",
-    OUTREACH_REPLY_TO="",
-)
-def test_delivery_readiness_approval_and_idempotent_fake_send(setup, user):
+@pytest.fixture
+def smtp_configured():
+    with override_settings(OUTREACH_CREDENTIAL_ENCRYPTION_KEY=TEST_ENCRYPTION_KEY):
+        yield
+
+
+@pytest.fixture
+def smtp_ready(monkeypatch, smtp_configured):
+    monkeypatch.setattr(
+        "apps.outreach.delivery.SMTPDeliveryProvider.deliver",
+        lambda self, *, message, idempotency_key: "",
+    )
+    yield
+
+
+def configure_delivery(project, batch, user):
+    campaign = batch.campaign
+    campaign.bid_deadline = timezone.now() + timedelta(days=10)
+    campaign.setup_version += 1
+    campaign.save()
+    OutreachSenderSettings.objects.create(
+        organization=project.organization,
+        display_name="BB Builders",
+        from_address="bids@example.invalid",
+        reply_to="reply@example.invalid",
+        updated_by=user,
+    )
+    OutreachSMTPConfiguration.objects.create(
+        organization=project.organization,
+        host="smtp.example.invalid",
+        port=587,
+        username="test-user",
+        encrypted_password=encrypt_password("test-password"),
+        security=OutreachSMTPConfiguration.Security.STARTTLS,
+        timeout_seconds=20,
+        is_enabled=True,
+        updated_by=user,
+    )
+    return campaign
+
+
+def test_delivery_readiness_approval_and_idempotent_smtp_send(setup, user, smtp_ready):
     project, batch = delivery_batch(setup, user)
     assert "bid_deadline_required" in {item["code"] for item in readiness(batch)["blockers"]}
     with pytest.raises(ValidationError):
         approve_batch_send(batch=batch, actor=user)
-    project.bid_deadline = timezone.now() + timedelta(days=10)
-    project.save()
+    configure_delivery(project, batch, user)
     messages = prepare_batch_messages(batch=batch, actor=user)
     assert [item.pk for item in prepare_batch_messages(batch=batch, actor=user)] == [messages[0].pk]
     assert OutreachMessage.objects.count() == 1
@@ -729,7 +772,8 @@ def test_delivery_readiness_approval_and_idempotent_fake_send(setup, user):
     assert BatchSendApproval.objects.count() == 1
     attempt = deliver_message(message=messages[0], actor=user)
     assert attempt.status == OutreachDeliveryAttempt.Status.SUCCEEDED
-    assert deliver_message(message=messages[0], actor=user).pk == attempt.pk
+    with pytest.raises(ValidationError):
+        deliver_message(message=messages[0], actor=user)
     assert OutreachDeliveryAttempt.objects.count() == 1
     assert batch.recipients.get().current_status == InvitationRecipient.Status.INVITED
     assert batch.recipients.get().status_events.filter(new_status="invited").count() == 1
@@ -741,30 +785,25 @@ def test_delivery_readiness_approval_and_idempotent_fake_send(setup, user):
     )
 
 
-@override_settings(
-    OUTREACH_DELIVERY_PROVIDER="fake",
-    OUTREACH_FROM_NAME="BB Builders",
-    OUTREACH_FROM_ADDRESS="bids@example.invalid",
-    OUTREACH_REPLY_TO="",
-)
-def test_delivery_failure_preserved_explicit_retry_and_permissions(setup, user, monkeypatch):
+def test_delivery_failure_preserved_explicit_retry_and_permissions(
+    setup, user, monkeypatch, smtp_ready
+):
     project, batch = delivery_batch(setup, user)
-    project.bid_deadline = timezone.now() + timedelta(days=10)
-    project.save()
+    configure_delivery(project, batch, user)
     message = prepare_batch_messages(batch=batch, actor=user)[0]
     approve_batch_send(batch=batch, actor=user)
 
-    def fail(*, message, idempotency_key):
+    def fail(self, *, message, idempotency_key):
         raise RuntimeError("Secret provider failure")
 
-    monkeypatch.setattr("apps.outreach.delivery.FakeDeliveryProvider.deliver", fail)
-    first = deliver_message(message=message, actor=user)
+    with monkeypatch.context() as patcher:
+        patcher.setattr("apps.outreach.delivery.SMTPDeliveryProvider.deliver", fail)
+        first = deliver_message(message=message, actor=user)
     assert first.status == OutreachDeliveryAttempt.Status.FAILED
     assert "Secret" not in first.safe_error_message
     assert batch.recipients.get().current_status == InvitationRecipient.Status.PREPARED
     with pytest.raises(ValidationError):
         deliver_message(message=message, actor=user)
-    monkeypatch.undo()
     second = deliver_message(message=message, actor=user, retry=True)
     assert second.status == OutreachDeliveryAttempt.Status.SUCCEEDED
     assert second.sequence == 2
@@ -829,41 +868,31 @@ def test_delivery_api_blocks_missing_bid_due_and_viewer_writes(setup, user):
     assert client.get(wrong).status_code == 404
 
 
-@override_settings(
-    OUTREACH_DELIVERY_PROVIDER="fake",
-    OUTREACH_FROM_NAME="",
-    OUTREACH_FROM_ADDRESS="",
-)
-def test_delivery_missing_sender_blocks_send_approval(setup, user):
+def test_delivery_missing_sender_blocks_send_approval(setup, user, smtp_ready):
     project, batch = delivery_batch(setup, user)
-    project.bid_deadline = timezone.now() + timedelta(days=10)
-    project.save()
+    campaign = batch.campaign
+    campaign.bid_deadline = timezone.now() + timedelta(days=10)
+    campaign.save()
     assert "sender_required" in {item["code"] for item in readiness(batch)["blockers"]}
     with pytest.raises(ValidationError):
         approve_batch_send(batch=batch, actor=user)
 
 
-@override_settings(
-    OUTREACH_DELIVERY_PROVIDER="fake",
-    OUTREACH_FROM_NAME="BB Builders",
-    OUTREACH_FROM_ADDRESS="bids@example.invalid",
-    OUTREACH_REPLY_TO="",
-)
-def test_changed_message_requires_new_send_approval(setup, user):
+def test_changed_message_requires_new_send_approval(setup, user, smtp_ready):
     project, batch = delivery_batch(setup, user)
-    project.bid_deadline = timezone.now() + timedelta(days=10)
-    project.save()
+    campaign = configure_delivery(project, batch, user)
     first = prepare_batch_messages(batch=batch, actor=user)[0]
     approval = approve_batch_send(batch=batch, actor=user)
     assert readiness(InvitationBatch.objects.get(pk=batch.pk))["ready"]
-    project.bid_deadline += timedelta(days=1)
-    project.save()
+    campaign.bid_deadline += timedelta(days=1)
+    campaign.setup_version += 1
+    campaign.save()
     second = prepare_batch_messages(batch=batch, actor=user)[0]
     assert second.pk != first.pk
     assert first.body != second.body
     state = readiness(InvitationBatch.objects.get(pk=batch.pk))
     assert not state["send_approved"]
-    assert "send_approval_required" in {item["code"] for item in state["blockers"]}
+    assert "send_approval_stale" in {item["code"] for item in state["blockers"]}
     with pytest.raises(ValidationError):
         deliver_message(message=second, actor=user)
     renewed = approve_batch_send(batch=batch, actor=user)
@@ -872,13 +901,7 @@ def test_changed_message_requires_new_send_approval(setup, user):
     assert first.body == OutreachMessage.objects.get(pk=first.pk).body
 
 
-@override_settings(
-    OUTREACH_DELIVERY_PROVIDER="fake",
-    OUTREACH_FROM_NAME="BB Builders",
-    OUTREACH_FROM_ADDRESS="bids@example.invalid",
-    OUTREACH_REPLY_TO="",
-)
-def test_batch_approval_remains_valid_during_multi_recipient_delivery(setup, user):
+def test_batch_approval_remains_valid_during_multi_recipient_delivery(setup, user, smtp_ready):
     project, batch = delivery_batch(setup, user)
     _, package, ready, _, _ = setup
     second_company = Company.objects.create(
@@ -902,8 +925,7 @@ def test_batch_approval_remains_valid_during_multi_recipient_delivery(setup, use
     add_invitation_recipient(
         batch=batch, candidate=second_candidate, contact=second_contact, actor=user
     )
-    project.bid_deadline = timezone.now() + timedelta(days=10)
-    project.save()
+    configure_delivery(project, batch, user)
     messages = prepare_batch_messages(batch=batch, actor=user)
     approve_batch_send(batch=batch, actor=user)
     assert readiness(InvitationBatch.objects.get(pk=batch.pk))["send_approved"]
@@ -911,3 +933,235 @@ def test_batch_approval_remains_valid_during_multi_recipient_delivery(setup, use
     assert readiness(InvitationBatch.objects.get(pk=batch.pk))["send_approved"]
     assert deliver_message(message=messages[1], actor=user).status == "succeeded"
     assert OutreachDeliveryAttempt.objects.count() == 2
+
+
+def test_campaign_setup_is_local_audited_and_stales_prepared_message(setup, user, smtp_ready):
+    project, batch = delivery_batch(setup, user)
+    configure_delivery(project, batch, user)
+    first = prepare_batch_messages(batch=batch, actor=user)[0]
+    approve_batch_send(batch=batch, actor=user)
+    local_bid = (
+        (timezone.now() + timedelta(days=15))
+        .astimezone(__import__("zoneinfo").ZoneInfo(project.project_timezone))
+        .strftime("%Y-%m-%dT%H:%M")
+    )
+    campaign = save_campaign_setup(
+        campaign=batch.campaign, actor=user, bid_local=local_bid, questions_local=""
+    )
+    assert campaign.setup_version == 2
+    assert CampaignSetupEvent.objects.filter(campaign=campaign).count() == 1
+    assert "messages_stale" in {item["code"] for item in readiness(batch)["blockers"]}
+    second = prepare_batch_messages(batch=batch, actor=user)[0]
+    assert second.pk != first.pk
+    assert second.source_scope_version_id == campaign.scope_version_id
+    assert second.bid_deadline == campaign.bid_deadline
+    assert not readiness(batch)["send_approved"]
+    assert OutreachMessage.objects.get(pk=first.pk).body == first.body
+
+
+def test_sender_admin_only_and_provider_status_has_no_secret(
+    setup, user, membership, smtp_configured
+):
+    project = setup[0]
+    with pytest.raises(PermissionDenied):
+        save_sender_settings(
+            organization=project.organization,
+            actor=user,
+            display_name="BB Builders",
+            from_address="bids@example.invalid",
+            reply_to="reply@example.invalid",
+        )
+    membership.role = Membership.Role.ADMIN
+    membership.save()
+    sender = save_sender_settings(
+        organization=project.organization,
+        actor=user,
+        display_name="BB Builders",
+        from_address="bids@example.invalid",
+        reply_to="reply@example.invalid",
+    )
+    assert sender.is_enabled
+    OutreachSMTPConfiguration.objects.create(
+        organization=project.organization,
+        host="smtp.example.invalid",
+        port=587,
+        username="private-user",
+        encrypted_password=encrypt_password("private-password"),
+        security="starttls",
+        timeout_seconds=20,
+        is_enabled=True,
+        updated_by=user,
+    )
+    state = provider_status(project.organization)
+    assert state["state"] == "configured"
+    assert "private" not in str(state)
+
+
+def test_smtp_adapter_uses_frozen_message_and_mocked_transport(
+    setup, user, monkeypatch, smtp_configured
+):
+    project, batch = delivery_batch(setup, user)
+    configure_delivery(project, batch, user)
+    message = prepare_batch_messages(batch=batch, actor=user)[0]
+    sent = []
+
+    class StubSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def starttls(self, **kwargs):
+            return None
+
+        def login(self, username, password):
+            assert username == "test-user"
+            assert password == "test-password"
+
+        def send_message(self, email):
+            sent.append(email)
+            return {}
+
+    monkeypatch.setattr(smtplib, "SMTP", StubSMTP)
+    SMTPDeliveryProvider().deliver(message=message, idempotency_key="safe-test-key")
+    assert len(sent) == 1
+    assert sent[0]["To"] == message.to_address
+    assert sent[0]["Subject"] == message.subject
+    assert message.body in sent[0].get_content()
+
+
+def test_setup_and_sender_api_permissions_and_scoping(setup, user, membership):
+    project, batch = delivery_batch(setup, user)
+    campaign = batch.campaign
+    setup_url = reverse(
+        "outreach-campaign-setup",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": project.pk,
+            "campaign_pk": campaign.pk,
+        },
+    )
+    sender_url = reverse(
+        "outreach-sender-settings",
+        kwargs={
+            "organization_slug": project.organization.slug,
+        },
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    assert client.get(setup_url).status_code == 200
+    assert client.get(sender_url).status_code == 200
+    assert (
+        client.put(
+            sender_url,
+            {
+                "display_name": "BB Builders",
+                "from_address": "bids@example.invalid",
+                "reply_to": "reply@example.invalid",
+                "is_enabled": True,
+            },
+        ).status_code
+        == 403
+    )
+    viewer = get_user_model().objects.create_user(
+        email="sender-viewer@example.invalid", password="test"
+    )
+    Membership.objects.create(
+        user=viewer, organization=project.organization, role=Membership.Role.VIEWER
+    )
+    client.force_authenticate(viewer)
+    assert client.get(setup_url).status_code == 200
+    assert (
+        client.put(setup_url, {"bid_due_local": "", "questions_due_local": ""}).status_code == 403
+    )
+    assert client.get(sender_url).status_code == 200
+    assert client.put(sender_url, {}).status_code == 403
+    membership.role = Membership.Role.ADMIN
+    membership.save()
+    client.force_authenticate(user)
+    assert (
+        client.put(
+            sender_url,
+            {
+                "display_name": "BB Builders",
+                "from_address": "bids@example.invalid",
+                "reply_to": "reply@example.invalid",
+                "is_enabled": True,
+            },
+        ).status_code
+        == 200
+    )
+    other = Project.objects.create(
+        organization=project.organization,
+        created_by=user,
+        project_number="OUT-OTHER-SETUP",
+        name="Other",
+        project_timezone="America/Toronto",
+    )
+    wrong_url = reverse(
+        "outreach-campaign-setup",
+        kwargs={
+            "organization_slug": project.organization.slug,
+            "project_pk": other.pk,
+            "campaign_pk": campaign.pk,
+        },
+    )
+    assert client.get(wrong_url).status_code == 404
+
+
+def test_campaign_local_time_validation_and_optional_questions(setup, user):
+    project, batch = delivery_batch(setup, user)
+    assert parse_project_local("2026-09-20T12:30", project.project_timezone).hour == 12
+    with pytest.raises(ValidationError):
+        parse_project_local("2026-09-20", project.project_timezone)
+    with pytest.raises(ValidationError):
+        parse_project_local("2026-11-01T01:30", project.project_timezone)
+    with pytest.raises(ValidationError):
+        parse_project_local("2027-03-14T02:30", project.project_timezone)
+    future = (
+        (timezone.now() + timedelta(days=20))
+        .astimezone(ZoneInfo(project.project_timezone))
+        .strftime("%Y-%m-%dT%H:%M")
+    )
+    campaign = save_campaign_setup(
+        campaign=batch.campaign, actor=user, bid_local=future, questions_local=""
+    )
+    assert campaign.questions_deadline is None
+    assert campaign.bid_deadline.tzinfo is not None
+    with pytest.raises(ValidationError):
+        save_campaign_setup(
+            campaign=campaign,
+            actor=user,
+            bid_local="2020-01-01T12:00",
+            questions_local="",
+        )
+    with pytest.raises(ValidationError):
+        save_campaign_setup(
+            campaign=campaign,
+            actor=user,
+            bid_local=future,
+            questions_local=future,
+        )
+
+
+def test_provider_readiness_never_opens_smtp_connection(setup, user, monkeypatch, smtp_configured):
+    project, batch = delivery_batch(setup, user)
+    configure_delivery(project, batch, user)
+    monkeypatch.setattr(
+        smtplib, "SMTP", lambda *args, **kwargs: pytest.fail("SMTP connected on GET")
+    )
+    config = OutreachSMTPConfiguration.objects.get(organization=project.organization)
+    assert provider_status(project.organization)["state"] == "configured"
+    readiness(batch)
+    config.is_enabled = False
+    config.save()
+    assert provider_status(project.organization)["state"] == "disabled"
+    assert "delivery_not_configured" in {item["code"] for item in readiness(batch)["blockers"]}
+    config.is_enabled = True
+    config.host = ""
+    config.save()
+    assert provider_status(project.organization)["state"] == "misconfigured"

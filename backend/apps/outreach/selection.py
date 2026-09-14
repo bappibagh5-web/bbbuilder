@@ -7,7 +7,9 @@ from apps.contractors.models import ScopeContractorCandidate
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
 
 from .delivery import readiness
-from .models import InvitationCampaign
+from .models import InvitationCampaign, OutreachSenderSettings
+from .setup import format_project_local
+from .smtp import provider_status
 
 
 def outreach_workspace(project):
@@ -34,7 +36,15 @@ def outreach_workspace(project):
         .select_related("scope_version")
         .prefetch_related("batches__recipients__messages__attempts")
     )
+    sender = OutreachSenderSettings.objects.filter(organization=project.organization).first()
     return {
+        "sender": {
+            "configured": bool(sender and sender.is_enabled),
+            "display_name": sender.display_name if sender else "",
+            "from_address": sender.from_address if sender else "",
+            "reply_to": sender.reply_to if sender else "",
+        },
+        "provider": provider_status(project.organization),
         "trades": [
             {
                 "scope_package_id": package.pk,
@@ -71,6 +81,14 @@ def outreach_workspace(project):
                         {
                             "id": campaign.pk,
                             "status": campaign.status,
+                            "bid_due_local": format_project_local(
+                                campaign.bid_deadline, project.project_timezone
+                            ),
+                            "questions_due_local": format_project_local(
+                                campaign.questions_deadline, project.project_timezone
+                            ),
+                            "project_timezone": project.project_timezone,
+                            "setup_version": campaign.setup_version,
                             "batches": [
                                 {
                                     "id": batch.pk,
@@ -90,6 +108,16 @@ def outreach_workspace(project):
                                                 {
                                                     "id": message.pk,
                                                     "sequence": message.sequence,
+                                                    "from_name": message.from_name,
+                                                    "from_address": message.from_address,
+                                                    "reply_to": message.reply_to,
+                                                    "to_address": message.to_address,
+                                                    "subject": message.subject,
+                                                    "body": message.body,
+                                                    "template_version": message.template_version,
+                                                    "scope_version_id": (
+                                                        message.source_scope_version_id
+                                                    ),
                                                     "attempts": [
                                                         {
                                                             "id": attempt.pk,
@@ -119,5 +147,5 @@ def outreach_workspace(project):
                 ),
             }
             for package in packages
-        ]
+        ],
     }

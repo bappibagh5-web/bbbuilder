@@ -8,7 +8,7 @@ export default function Page() {
     <div className="mx-auto max-w-[1400px]">
       <PageHeader
         title="Settings"
-        description="Review the organization and workflow defaults used throughout this demonstration."
+        description="Manage your organization’s outreach sender identity and delivery readiness."
       />
       <SettingsPanel />
     </div>

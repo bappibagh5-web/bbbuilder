@@ -8,11 +8,22 @@ from rest_framework.views import APIView
 
 from apps.contractors.models import Contact, ScopeContractorCandidate
 from apps.documents.views import ProjectDocumentContextMixin
-from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
+from apps.organizations.models import Organization
+from apps.organizations.permissions import (
+    ActiveOrganizationMember,
+    OrganizationAdmin,
+    OrganizationOperator,
+)
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
 
 from .delivery import approve_batch_send, deliver_message, prepare_batch_messages, readiness
-from .models import InvitationBatch, InvitationCampaign, OutreachMessage
+from .models import (
+    InvitationBatch,
+    InvitationCampaign,
+    OutreachMessage,
+    OutreachSenderSettings,
+    OutreachSMTPConfiguration,
+)
 from .rfq import build_rfq_preview
 from .selection import outreach_workspace
 from .services import (
@@ -20,6 +31,9 @@ from .services import (
     create_invitation_batch,
     create_invitation_campaign,
 )
+from .setup import format_project_local, save_campaign_setup, save_sender_settings
+from .smtp import provider_status
+from .smtp_setup import run_connection_test, run_test_email, save_smtp_configuration
 
 
 def api_validation_error(error):
@@ -144,6 +158,182 @@ class CampaignRFQPreviewView(ProjectDocumentContextMixin, APIView):
             return Response(build_rfq_preview(campaign=campaign).as_dict())
         except DjangoValidationError as error:
             raise serializers.ValidationError({"detail": error.messages}) from error
+
+
+class CampaignSetupView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def _campaign(self):
+        return get_object_or_404(
+            InvitationCampaign.objects.select_related("project"),
+            pk=self.kwargs["campaign_pk"],
+            project=self.get_project(),
+            organization=self.get_organization(),
+        )
+
+    def get(self, request, *args, **kwargs):
+        campaign = self._campaign()
+        zone = campaign.project.project_timezone
+        return Response(
+            {
+                "bid_due_local": format_project_local(campaign.bid_deadline, zone),
+                "questions_due_local": format_project_local(campaign.questions_deadline, zone),
+                "project_timezone": zone,
+                "setup_version": campaign.setup_version,
+            }
+        )
+
+    def put(self, request, *args, **kwargs):
+        if not OrganizationOperator().has_permission(request, self):
+            raise PermissionDenied("Operator access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["bid_due_local"] = serializers.CharField(allow_blank=True)
+        serializer.fields["questions_due_local"] = serializers.CharField(allow_blank=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_campaign_setup(
+                campaign=self._campaign(),
+                actor=request.user,
+                bid_local=serializer.validated_data["bid_due_local"],
+                questions_local=serializer.validated_data["questions_due_local"],
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return self.get(request, *args, **kwargs)
+
+
+class OutreachSenderSettingsView(APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get_organization(self):
+        return get_object_or_404(Organization, slug=self.kwargs["organization_slug"])
+
+    def get(self, request, *args, **kwargs):
+        sender = OutreachSenderSettings.objects.filter(organization=self.get_organization()).first()
+        return Response(
+            {
+                "display_name": sender.display_name if sender else "",
+                "from_address": sender.from_address if sender else "",
+                "reply_to": sender.reply_to if sender else "",
+                "is_enabled": sender.is_enabled if sender else False,
+                "provider": provider_status(self.get_organization()),
+            }
+        )
+
+    def put(self, request, *args, **kwargs):
+        from apps.organizations.permissions import OrganizationAdmin
+
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["display_name"] = serializers.CharField(max_length=255)
+        serializer.fields["from_address"] = serializers.EmailField()
+        serializer.fields["reply_to"] = serializers.EmailField()
+        serializer.fields["is_enabled"] = serializers.BooleanField()
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_sender_settings(
+                organization=self.get_organization(),
+                actor=request.user,
+                display_name=serializer.validated_data["display_name"],
+                from_address=serializer.validated_data["from_address"],
+                reply_to=serializer.validated_data["reply_to"],
+                enabled=serializer.validated_data["is_enabled"],
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return self.get(request, *args, **kwargs)
+
+
+class OutreachSMTPSettingsView(APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get_organization(self):
+        return get_object_or_404(Organization, slug=self.kwargs["organization_slug"])
+
+    def get(self, request, *args, **kwargs):
+        organization = self.get_organization()
+        status = provider_status(organization)
+        if not OrganizationAdmin().has_permission(request, self):
+            return Response({"provider": status})
+        config = OutreachSMTPConfiguration.objects.filter(organization=organization).first()
+        return Response(
+            {
+                "provider": status,
+                "host": config.host if config else "",
+                "port": config.port if config else 587,
+                "username": config.username if config else "",
+                "password_saved": bool(config and config.encrypted_password),
+                "security": config.security if config else "starttls",
+                "timeout_seconds": config.timeout_seconds if config else 20,
+                "is_enabled": config.is_enabled if config else False,
+                "last_test_status": config.last_test_status if config else "",
+            }
+        )
+
+    def put(self, request, *args, **kwargs):
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["host"] = serializers.CharField(max_length=255, allow_blank=True)
+        serializer.fields["port"] = serializers.IntegerField(min_value=1, max_value=65535)
+        serializer.fields["username"] = serializers.CharField(max_length=255, allow_blank=True)
+        serializer.fields["password"] = serializers.CharField(allow_blank=True, write_only=True)
+        serializer.fields["clear_password"] = serializers.BooleanField(default=False)
+        serializer.fields["security"] = serializers.ChoiceField(choices=("starttls", "ssl", "none"))
+        serializer.fields["timeout_seconds"] = serializers.IntegerField(min_value=1, max_value=120)
+        serializer.fields["is_enabled"] = serializers.BooleanField()
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_smtp_configuration(
+                organization=self.get_organization(),
+                actor=request.user,
+                host=serializer.validated_data["host"],
+                port=serializer.validated_data["port"],
+                username=serializer.validated_data["username"],
+                password=serializer.validated_data["password"],
+                clear_password=serializer.validated_data["clear_password"],
+                security=serializer.validated_data["security"],
+                timeout_seconds=serializer.validated_data["timeout_seconds"],
+                enabled=serializer.validated_data["is_enabled"],
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return self.get(request, *args, **kwargs)
+
+
+class OutreachSMTPConnectionTestView(OutreachSMTPSettingsView):
+    def post(self, request, *args, **kwargs):
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        try:
+            return Response(
+                run_connection_test(organization=self.get_organization(), actor=request.user)
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+
+
+class OutreachSMTPTestEmailView(OutreachSMTPSettingsView):
+    def post(self, request, *args, **kwargs):
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["recipient_email"] = serializers.EmailField()
+        serializer.fields["confirmed"] = serializers.BooleanField()
+        serializer.is_valid(raise_exception=True)
+        if not serializer.validated_data["confirmed"]:
+            raise serializers.ValidationError({"detail": "Confirm the controlled test recipient."})
+        try:
+            return Response(
+                run_test_email(
+                    organization=self.get_organization(),
+                    actor=request.user,
+                    recipient_email=serializer.validated_data["recipient_email"],
+                )
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
 
 
 class BatchDeliveryView(ProjectDocumentContextMixin, APIView):

@@ -5,12 +5,42 @@ from .views import (
     BatchDeliveryView,
     CampaignCreateView,
     CampaignRFQPreviewView,
+    CampaignSetupView,
     MessageRetryView,
+    OutreachSenderSettingsView,
+    OutreachSMTPConnectionTestView,
+    OutreachSMTPSettingsView,
+    OutreachSMTPTestEmailView,
     OutreachWorkspaceView,
     RecipientCreateView,
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/outreach-smtp/",
+        OutreachSMTPSettingsView.as_view(),
+        name="outreach-smtp-settings",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/outreach-smtp/test-connection/",
+        OutreachSMTPConnectionTestView.as_view(),
+        name="outreach-smtp-test-connection",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/outreach-smtp/test-email/",
+        OutreachSMTPTestEmailView.as_view(),
+        name="outreach-smtp-test-email",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/outreach-sender/",
+        OutreachSenderSettingsView.as_view(),
+        name="outreach-sender-settings",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/outreach-campaigns/<int:campaign_pk>/setup/",
+        CampaignSetupView.as_view(),
+        name="outreach-campaign-setup",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/outreach-batches/<int:batch_pk>/delivery/<str:action>/",
         BatchDeliveryView.as_view(),

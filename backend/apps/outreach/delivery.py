@@ -1,11 +1,9 @@
-"""Explicit, backend-gated invitation delivery. No real transport is configured here."""
+"""Explicit, backend-gated invitation delivery over configured SMTP only."""
 
 import hashlib
 import json
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 
@@ -18,28 +16,11 @@ from .models import (
     InvitationRecipientStatusEvent,
     OutreachDeliveryAttempt,
     OutreachMessage,
+    OutreachSenderSettings,
 )
 from .rfq import COMPANY_PLACEHOLDER, build_rfq_preview
 from .services import _audit, _authorize, create_outreach_message
-
-
-class DisabledDeliveryProvider:
-    key = "disabled"
-
-    def deliver(self, *, message, idempotency_key):
-        raise ValidationError("Outbound delivery is disabled.")
-
-
-class FakeDeliveryProvider:
-    key = "fake"
-
-    def deliver(self, *, message, idempotency_key):
-        return hashlib.sha256(idempotency_key.encode()).hexdigest()[:32]
-
-
-def _provider():
-    key = settings.OUTREACH_DELIVERY_PROVIDER
-    return FakeDeliveryProvider() if key == "fake" else DisabledDeliveryProvider()
+from .smtp import SMTPDeliveryProvider, provider_status, safe_smtp_failure
 
 
 def _message_fingerprint(recipients):
@@ -50,7 +31,27 @@ def _message_fingerprint(recipients):
     return hashlib.sha256(json.dumps(sorted(payload)).encode()).hexdigest()
 
 
-def readiness(batch, *, require_approval=True, require_messages=True, require_provider=True):
+def _expected_message(message, campaign, sender, preview):
+    return (
+        message.from_name == sender.display_name
+        and message.from_address == sender.from_address
+        and message.reply_to == sender.reply_to
+        and message.to_address == message.recipient.email
+        and message.subject
+        == preview.subject.replace(COMPANY_PLACEHOLDER, message.recipient.company_name)
+        and message.body
+        == preview.body.replace(COMPANY_PLACEHOLDER, message.recipient.company_name)
+        and message.template_version == preview.template_version
+        and message.source_scope_version_id == campaign.scope_version_id
+        and message.campaign_setup_version == campaign.setup_version
+        and message.bid_deadline == campaign.bid_deadline
+        and message.questions_deadline == campaign.questions_deadline
+    )
+
+
+def readiness(
+    batch, *, require_approval=True, require_messages=True, require_provider=True, for_retry=False
+):
     """Stable public blocker codes; every send endpoint re-evaluates these."""
     campaign = batch.campaign
     project = campaign.project
@@ -75,42 +76,79 @@ def readiness(batch, *, require_approval=True, require_messages=True, require_pr
         block("recipient_required", "Add at least one prepared recipient")
     if any(not recipient.email for recipient in recipients):
         block("recipient_email_required", "A prepared recipient is missing an email address")
-    if not project.bid_deadline:
+    if not campaign.bid_deadline:
         block("bid_deadline_required", "Bid deadline required")
-    elif timezone.is_naive(project.bid_deadline) or project.bid_deadline <= timezone.now():
+    elif timezone.is_naive(campaign.bid_deadline) or campaign.bid_deadline <= timezone.now():
         block("bid_deadline_invalid", "Bid deadline must be a valid future date and time")
-    if project.questions_deadline and (
-        timezone.is_naive(project.questions_deadline)
-        or project.questions_deadline <= timezone.now()
-        or (project.bid_deadline and project.questions_deadline > project.bid_deadline)
+    if campaign.questions_deadline and (
+        timezone.is_naive(campaign.questions_deadline)
+        or campaign.questions_deadline <= timezone.now()
+        or (campaign.bid_deadline and campaign.questions_deadline >= campaign.bid_deadline)
     ):
         block(
             "questions_deadline_invalid",
             "Questions deadline must be before the bid deadline and in the future",
         )
-    if not settings.OUTREACH_FROM_NAME or not settings.OUTREACH_FROM_ADDRESS:
-        block("sender_required", "Sender name and email configuration required")
-    else:
-        try:
-            validate_email(settings.OUTREACH_FROM_ADDRESS)
-            if settings.OUTREACH_REPLY_TO:
-                validate_email(settings.OUTREACH_REPLY_TO)
-        except ValidationError:
-            block("sender_invalid", "Sender email configuration is invalid")
-    if require_provider and _provider().key == "disabled":
-        block("delivery_disabled", "Outbound delivery is disabled")
-    fingerprint = _message_fingerprint(
-        list(batch.recipients.exclude(current_status=InvitationRecipient.Status.CANCELLED))
+    sender = OutreachSenderSettings.objects.filter(organization_id=campaign.organization_id).first()
+    if sender is None or not sender.is_enabled:
+        block("sender_required", "Sender configuration required")
+    provider = provider_status(campaign.organization)
+    if require_provider and provider["state"] != "configured":
+        block("delivery_not_configured", "Email delivery is not configured")
+    all_recipients = list(
+        batch.recipients.exclude(current_status=InvitationRecipient.Status.CANCELLED)
     )
+    fingerprint = _message_fingerprint(all_recipients)
     if require_messages and fingerprint is None:
         block("messages_required", "Prepare invitation messages first")
+    messages_current = False
+    if fingerprint and sender:
+        preview = build_rfq_preview(campaign=campaign)
+        messages_current = all(
+            _expected_message(
+                recipient.messages.order_by("-sequence").first(), campaign, sender, preview
+            )
+            for recipient in all_recipients
+        )
+        if require_messages and not messages_current:
+            block("messages_stale", "Messages changed; prepare new versions before sending")
     approval_valid = bool(
         fingerprint
-        and BatchSendApproval.objects.filter(batch=batch, message_fingerprint=fingerprint).exists()
+        and messages_current
+        and BatchSendApproval.objects.filter(
+            batch=batch,
+            message_fingerprint=fingerprint,
+            campaign_setup_version=campaign.setup_version,
+        ).exists()
     )
     if require_approval and not approval_valid:
-        block("send_approval_required", "Explicit send approval required")
-    return {"ready": not blockers, "blockers": blockers, "send_approved": approval_valid}
+        if BatchSendApproval.objects.filter(batch=batch).exists():
+            block(
+                "send_approval_stale", "Messages changed after approval; review and approve again"
+            )
+        else:
+            block("send_approval_required", "Explicit send approval required")
+    if not for_retry and any(
+        recipient.messages.filter(attempts__status=OutreachDeliveryAttempt.Status.FAILED).exists()
+        for recipient in recipients
+    ):
+        block("retry_required", "A failed delivery requires an explicit retry")
+    if any(
+        recipient.messages.filter(
+            attempts__status__in=(
+                OutreachDeliveryAttempt.Status.PENDING,
+                OutreachDeliveryAttempt.Status.UNCERTAIN,
+            )
+        ).exists()
+        for recipient in recipients
+    ):
+        block("delivery_unresolved", "A delivery outcome needs investigation before another send")
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "send_approved": approval_valid,
+        "provider": provider,
+    }
 
 
 def _require_ready(batch, **kwargs):
@@ -127,12 +165,14 @@ def approve_batch_send(*, batch, actor):
         .select_related("campaign__project", "campaign__scope_package", "campaign__scope_version")
         .get(pk=batch.pk)
     )
-    _require_ready(batch, require_approval=False, require_provider=False)
+    _require_ready(batch, require_approval=False)
     fingerprint = _message_fingerprint(
         list(batch.recipients.exclude(current_status=InvitationRecipient.Status.CANCELLED))
     )
     approval, created = BatchSendApproval.objects.get_or_create(
-        batch=batch, message_fingerprint=fingerprint, defaults={"approved_by": actor}
+        batch=batch,
+        message_fingerprint=fingerprint,
+        defaults={"approved_by": actor, "campaign_setup_version": batch.campaign.setup_version},
     )
     if created:
         _audit(actor, "outreach_batch.send_approved", batch, {"approval_id": approval.pk})
@@ -149,18 +189,24 @@ def prepare_batch_messages(*, batch, actor):
     )
     _require_ready(batch, require_approval=False, require_messages=False, require_provider=False)
     preview = build_rfq_preview(campaign=batch.campaign)
+    sender = OutreachSenderSettings.objects.get(organization_id=batch.campaign.organization_id)
     result = []
     for recipient in batch.recipients.filter(current_status=InvitationRecipient.Status.PREPARED):
         body = preview.body.replace(COMPANY_PLACEHOLDER, recipient.company_name)
         subject = preview.subject.replace(COMPANY_PLACEHOLDER, recipient.company_name)
         previous = recipient.messages.order_by("-sequence").first()
         content = (
-            settings.OUTREACH_FROM_NAME,
-            settings.OUTREACH_FROM_ADDRESS,
-            settings.OUTREACH_REPLY_TO,
+            sender.display_name,
+            sender.from_address,
+            sender.reply_to,
             recipient.email,
             subject,
             body,
+            preview.template_version,
+            batch.campaign.scope_version_id,
+            batch.campaign.setup_version,
+            batch.campaign.bid_deadline,
+            batch.campaign.questions_deadline,
         )
         if (
             previous
@@ -171,6 +217,11 @@ def prepare_batch_messages(*, batch, actor):
                 previous.to_address,
                 previous.subject,
                 previous.body,
+                previous.template_version,
+                previous.source_scope_version_id,
+                previous.campaign_setup_version,
+                previous.bid_deadline,
+                previous.questions_deadline,
             )
             == content
         ):
@@ -183,7 +234,12 @@ def prepare_batch_messages(*, batch, actor):
             raise ValidationError("A delivered invitation cannot be silently replaced.")
         if (
             previous
-            and previous.attempts.filter(status=OutreachDeliveryAttempt.Status.PENDING).exists()
+            and previous.attempts.filter(
+                status__in=(
+                    OutreachDeliveryAttempt.Status.PENDING,
+                    OutreachDeliveryAttempt.Status.UNCERTAIN,
+                )
+            ).exists()
         ):
             raise ValidationError("A pending delivery cannot be replaced.")
         result.append(
@@ -195,6 +251,11 @@ def prepare_batch_messages(*, batch, actor):
                 reply_to=content[2],
                 subject=subject,
                 body=body,
+                template_version=preview.template_version,
+                source_scope_version=batch.campaign.scope_version,
+                campaign_setup_version=batch.campaign.setup_version,
+                bid_deadline=batch.campaign.bid_deadline,
+                questions_deadline=batch.campaign.questions_deadline,
                 sequence=(previous.sequence + 1 if previous else 1),
                 kind=(
                     OutreachMessage.Kind.REVISION if previous else OutreachMessage.Kind.INVITATION
@@ -224,15 +285,18 @@ def deliver_message(*, message, actor, retry=False):
         batch = message.recipient.batch
         last = message.attempts.order_by("-sequence").first()
         if last and last.status == OutreachDeliveryAttempt.Status.SUCCEEDED:
-            return last
-        _require_ready(batch, require_messages=True)
+            raise ValidationError("This invitation was already delivered.")
+        _require_ready(batch, require_messages=True, for_retry=retry)
         if message.recipient.current_status != InvitationRecipient.Status.PREPARED:
             raise ValidationError("Only prepared recipients can be sent an invitation.")
         if message.recipient.messages.order_by("-sequence").first().pk != message.pk:
             raise ValidationError("Only the latest immutable message version can be sent.")
         if last:
-            if last.status == OutreachDeliveryAttempt.Status.PENDING:
-                raise ValidationError("Delivery is already in progress; do not resubmit.")
+            if last.status in (
+                OutreachDeliveryAttempt.Status.PENDING,
+                OutreachDeliveryAttempt.Status.UNCERTAIN,
+            ):
+                raise ValidationError("Delivery outcome needs investigation; do not resubmit.")
             if not retry:
                 raise ValidationError("A failed delivery requires an explicit retry.")
         elif retry:
@@ -240,22 +304,37 @@ def deliver_message(*, message, actor, retry=False):
         attempt = OutreachDeliveryAttempt.objects.create(
             message=message,
             sequence=(last.sequence + 1 if last else 1),
-            provider_key=_provider().key,
+            provider_key=SMTPDeliveryProvider.key,
             idempotency_key=_message_key(message),
         )
         _audit(actor, "outreach_delivery.attempted", message, {"attempt_id": attempt.pk})
     try:
-        reference = _provider().deliver(message=message, idempotency_key=attempt.idempotency_key)
-    except Exception:
+        reference = SMTPDeliveryProvider().deliver(
+            message=message, idempotency_key=attempt.idempotency_key
+        )
+    except Exception as error:
         # Never persist/log a raw provider exception (it could contain addresses or secrets).
+        code, safe_message, uncertain = safe_smtp_failure(error)
         with transaction.atomic():
             attempt = OutreachDeliveryAttempt.objects.select_for_update().get(pk=attempt.pk)
-            attempt.status = OutreachDeliveryAttempt.Status.FAILED
+            attempt.status = (
+                OutreachDeliveryAttempt.Status.UNCERTAIN
+                if uncertain
+                else OutreachDeliveryAttempt.Status.FAILED
+            )
             attempt.completed_at = timezone.now()
-            attempt.safe_error_code = "delivery_failed"
-            attempt.safe_error_message = "Delivery failed. You may retry explicitly."
+            attempt.safe_error_code = code
+            attempt.safe_error_message = safe_message
             attempt.save()
-            _audit(actor, "outreach_delivery.failed", message, {"attempt_id": attempt.pk})
+            _audit(
+                actor,
+                "outreach_delivery.failed",
+                message,
+                {
+                    "attempt_id": attempt.pk,
+                    "safe_error_code": code,
+                },
+            )
         return attempt
     with transaction.atomic():
         attempt = OutreachDeliveryAttempt.objects.select_for_update().get(pk=attempt.pk)

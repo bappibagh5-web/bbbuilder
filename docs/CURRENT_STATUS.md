@@ -8,6 +8,8 @@ BB Builders AI Bid Automation System
 
 Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 is committed; M3-02 deterministic RFQ Template V3, M3-03 explicit recipient preparation, and M3-04 guarded delivery infrastructure are **COMPLETE and manually validated**. M3-05 is NEXT / NOT STARTED.
 
+M3-04 live SMTP delivery is **COMPLETE / MANUALLY VALIDATED**. Campaign-specific Bid Due and optional Questions Due, organization-scoped sender identity, Admin-managed encrypted SMTP configuration, immutable message snapshots, exact-message approval, explicit connection/test-email actions, and safe attempt history are implemented. A stable private `OUTREACH_CREDENTIAL_ENCRYPTION_KEY` is required on the server before credentials can be saved or used. The real Resend SMTP connection test succeeded and one explicitly addressed controlled test email was received; no contractor invitation was sent. A failed connection test is diagnostic history, not a permanent send gate. SMTP remains disabled by default on new installations. Project 3's missing Bid Due remains a send blocker. M3-05 is NEXT / NOT STARTED.
+
 ## Current implementation status
 
 The approved frontend demo already exists.

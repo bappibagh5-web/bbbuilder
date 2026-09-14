@@ -169,6 +169,11 @@ def create_outreach_message(
     reply_to="",
     kind=OutreachMessage.Kind.INVITATION,
     sequence=None,
+    template_version=3,
+    source_scope_version=None,
+    campaign_setup_version=0,
+    bid_deadline=None,
+    questions_deadline=None,
 ):
     _authorize(actor, recipient.batch.campaign.organization)
     recipient = InvitationRecipient.objects.select_for_update().get(pk=recipient.pk)
@@ -191,6 +196,11 @@ def create_outreach_message(
         to_address=recipient.email,
         subject=subject,
         body=body,
+        template_version=template_version,
+        source_scope_version=source_scope_version,
+        campaign_setup_version=campaign_setup_version,
+        bid_deadline=bid_deadline,
+        questions_deadline=questions_deadline,
         created_by=actor,
     )
     _audit(actor, "outreach_message.created", message, {"sequence": sequence, "kind": kind})
