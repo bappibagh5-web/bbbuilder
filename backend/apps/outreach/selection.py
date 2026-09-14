@@ -7,9 +7,61 @@ from apps.contractors.models import ScopeContractorCandidate
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
 
 from .delivery import readiness
-from .models import InvitationCampaign, OutreachSenderSettings
+from .models import (
+    InvitationCampaign,
+    OutreachProviderEmail,
+    OutreachSenderSettings,
+    ResendWebhookEvent,
+)
 from .setup import format_project_local
 from .smtp import provider_status
+
+
+def _recipient_activity(recipient):
+    provider_ids = list(
+        OutreachProviderEmail.objects.filter(message__recipient=recipient).values_list(
+            "provider_email_id", flat=True
+        )
+    )
+    provider_events = ResendWebhookEvent.objects.filter(
+        organization=recipient.batch.campaign.organization,
+        provider_email_id__in=provider_ids,
+    )
+    activity = [
+        {
+            "kind": "status",
+            "label": f"Status: {row.new_status.replace('_', ' ')}",
+            "at": row.occurred_at,
+        }
+        for row in recipient.status_events.all()
+    ]
+    activity += [
+        {
+            "kind": "response",
+            "label": f"{row.channel.replace('_', ' ').title()}: {row.outcome.replace('_', ' ')}",
+            "at": row.occurred_at,
+            "note": row.note or (row.body_text[:500] if row.content_status == "retrieved" else ""),
+        }
+        for row in recipient.outreachresponse_set.all()
+    ]
+    activity += [
+        {
+            "kind": "qualification",
+            "label": f"Qualification: {row.state.replace('_', ' ')}",
+            "at": row.occurred_at,
+            "note": row.note,
+        }
+        for row in recipient.qualification_decisions.all()
+    ]
+    activity += [
+        {
+            "kind": "provider",
+            "label": f"Provider reported {row.event_type.removeprefix('email.').replace('_', ' ')}",
+            "at": row.occurred_at,
+        }
+        for row in provider_events
+    ]
+    return sorted(activity, key=lambda item: item["at"])
 
 
 def outreach_workspace(project):
@@ -34,7 +86,13 @@ def outreach_workspace(project):
     campaigns = list(
         InvitationCampaign.objects.filter(project=project)
         .select_related("scope_version")
-        .prefetch_related("batches__recipients__messages__attempts")
+        .prefetch_related(
+            "batches__recipients__messages__attempts",
+            "batches__recipients__status_events",
+            "batches__recipients__qualification_decisions",
+            "batches__recipients__outreachresponse_set",
+            "batches__recipients__resendwebhookevent_set",
+        )
     )
     sender = OutreachSenderSettings.objects.filter(organization=project.organization).first()
     return {
@@ -104,6 +162,15 @@ def outreach_workspace(project):
                                             "contact_name": recipient.contact_name,
                                             "email": recipient.email,
                                             "status": recipient.current_status,
+                                            "delivery_state": recipient.delivery_state,
+                                            "engagement_state": recipient.engagement_state,
+                                            "response_state": recipient.response_state,
+                                            "qualification_state": recipient.qualification_state,
+                                            "activity": _recipient_activity(recipient),
+                                            "attachment_notice": any(
+                                                response.attachment_count > 0
+                                                for response in recipient.outreachresponse_set.all()
+                                            ),
                                             "messages": [
                                                 {
                                                     "id": message.pk,

@@ -18,6 +18,7 @@ from apps.contractors.services import build_trade_coverage, set_candidate_status
 from apps.organizations.models import Membership, Organization
 from apps.outreach.credentials import encrypt_password
 from apps.outreach.delivery import (
+    _message_key,
     approve_batch_send,
     deliver_message,
     prepare_batch_messages,
@@ -755,7 +756,7 @@ def configure_delivery(project, batch, user):
     return campaign
 
 
-def test_delivery_readiness_approval_and_idempotent_smtp_send(setup, user, smtp_ready):
+def test_delivery_readiness_approval_and_idempotent_smtp_send(setup, user, smtp_ready, monkeypatch):
     project, batch = delivery_batch(setup, user)
     assert "bid_deadline_required" in {item["code"] for item in readiness(batch)["blockers"]}
     with pytest.raises(ValidationError):
@@ -770,12 +771,28 @@ def test_delivery_readiness_approval_and_idempotent_smtp_send(setup, user, smtp_
     approval = approve_batch_send(batch=batch, actor=user)
     assert approve_batch_send(batch=batch, actor=user).pk == approval.pk
     assert BatchSendApproval.objects.count() == 1
+
+    def verify_reserved_id(self, *, message, idempotency_key):
+        pending = OutreachDeliveryAttempt.objects.get(message=message)
+        assert pending.status == OutreachDeliveryAttempt.Status.PENDING
+        assert pending.submitted_rfc_message_id == (
+            f"<{idempotency_key}@{message.from_address.rsplit('@', 1)[-1]}>"
+        )
+        return ""
+
+    monkeypatch.setattr("apps.outreach.delivery.SMTPDeliveryProvider.deliver", verify_reserved_id)
     attempt = deliver_message(message=messages[0], actor=user)
     assert attempt.status == OutreachDeliveryAttempt.Status.SUCCEEDED
+    assert attempt.submitted_rfc_message_id == (
+        f"<{_message_key(messages[0])}@{messages[0].from_address.rsplit('@', 1)[-1]}>"
+    )
     with pytest.raises(ValidationError):
         deliver_message(message=messages[0], actor=user)
     assert OutreachDeliveryAttempt.objects.count() == 1
     assert batch.recipients.get().current_status == InvitationRecipient.Status.INVITED
+    assert batch.recipients.get().delivery_state == "sent"
+    assert "all_recipients_sent" in {blocker["code"] for blocker in readiness(batch)["blockers"]}
+    assert "recipient_required" not in {blocker["code"] for blocker in readiness(batch)["blockers"]}
     assert batch.recipients.get().status_events.filter(new_status="invited").count() == 1
     assert AuditEvent.objects.filter(action_code="outreach_delivery.succeeded").count() == 1
     assert all(

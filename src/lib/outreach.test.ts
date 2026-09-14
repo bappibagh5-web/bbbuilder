@@ -32,6 +32,12 @@ test("Viewer can inspect preparation, RFQ, and attempt history but cannot mutate
   assert.match(source, /message\.attempts\.map/);
 });
 
+test("completed batch labels are not misrepresented as prepared recipients", () => {
+  assert.match(source, /Batch \{item\.sequence\} · \{item\.recipients\.length\} recipient/);
+  assert.doesNotMatch(source, /\{item\.recipients\.length\} prepared/);
+  assert.match(source, /Delivery: \{recipient\.delivery_state/);
+});
+
 test("campaign setup and exact immutable message are reviewed before human send approval", () => {
   assert.match(source, /Bid Deadline/);
   assert.match(source, /Questions Deadline \(optional\)/);
@@ -59,4 +65,30 @@ test("SMTP setup and sender settings are Admin-managed with explicit network act
   assert.match(settings, /Password saved securely/);
   assert.match(settings, /password: ""/);
   assert.doesNotMatch(settings, /OUTREACH_SMTP_PASSWORD|Simulated — no emails are sent/);
+});
+
+test("M3-05 Settings keeps the webhook signing secret hidden and shows explicit endpoint setup", () => {
+  const settings = readFileSync(new URL("../components/settings-panel.tsx", import.meta.url), "utf8");
+  assert.match(settings, /Resend webhook/);
+  assert.match(settings, /Signing secret:.*Saved securely/);
+  assert.match(settings, /type="password" value=\{webhookSecret\}/);
+  assert.match(settings, /setWebhookSecret\(""\)/);
+  assert.match(settings, /Webhook endpoint URL/);
+  assert.match(settings, /publicly reachable HTTPS endpoint/);
+});
+
+test("M3-05 recipient tracking separates provider evidence, response, and human qualification", () => {
+  assert.match(source, /Delivery: \{recipient.delivery_state/);
+  assert.match(source, /Engagement: \{recipient.engagement_state/);
+  assert.match(source, /Response: \{recipient.response_state/);
+  assert.match(source, /Qualification: \{recipient.qualification_state/);
+  assert.match(source, /provider-reported/);
+  assert.match(source, /Record response/);
+  assert.match(source, /Mark declined/);
+  assert.match(source, /Mark needs follow-up/);
+  assert.match(source, /Qualify/);
+  assert.match(source, /Mark not qualified/);
+  assert.match(source, /Chronological activity/);
+  assert.match(source, /Attachments received — bid intake pending/);
+  assert.match(source, /!\["prepared", "cancelled"\]\.includes\(recipient.status\)/);
 });

@@ -13,9 +13,39 @@ from .views import (
     OutreachSMTPTestEmailView,
     OutreachWorkspaceView,
     RecipientCreateView,
+    RecipientQualificationView,
+    RecipientResponseView,
+    ResendWebhookSettingsView,
+    ResendWebhookView,
+    UnassignedResponsesView,
 )
 
 urlpatterns = [
+    path(
+        "webhooks/resend/<uuid:endpoint_token>/",
+        ResendWebhookView.as_view(),
+        name="resend-webhook",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/resend-webhook-settings/",
+        ResendWebhookSettingsView.as_view(),
+        name="resend-webhook-settings",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/outreach-unassigned-responses/",
+        UnassignedResponsesView.as_view(),
+        name="outreach-unassigned-responses",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/outreach-recipients/<int:recipient_pk>/response/",
+        RecipientResponseView.as_view(),
+        name="outreach-recipient-response",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/outreach-recipients/<int:recipient_pk>/qualification/",
+        RecipientQualificationView.as_view(),
+        name="outreach-recipient-qualification",
+    ),
     path(
         "organizations/<slug:organization_slug>/outreach-smtp/",
         OutreachSMTPSettingsView.as_view(),

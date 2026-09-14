@@ -4,7 +4,8 @@ export type OutreachContactChoice = { id: number; name: string; title: string; e
 export type OutreachCandidateChoice = { id: number; company_name: string; contacts: OutreachContactChoice[] };
 export type DeliveryAttempt = { id: number; sequence: number; status: "pending" | "succeeded" | "failed" | "uncertain"; safe_error_message: string };
 export type OutreachMessageSummary = { id: number; sequence: number; attempts: DeliveryAttempt[]; from_name: string; from_address: string; reply_to: string; to_address: string; subject: string; body: string; template_version: number; scope_version_id: number };
-export type OutreachRecipient = { id: number; candidate_id: number; company_name: string; contact_name: string; email: string; status: "prepared" | "cancelled" | "invited"; messages: OutreachMessageSummary[] };
+export type OutreachActivity = { kind: string; label: string; at: string; note?: string };
+export type OutreachRecipient = { id: number; candidate_id: number; company_name: string; contact_name: string; email: string; status: string; delivery_state: string; engagement_state: string; response_state: string; qualification_state: string; activity: OutreachActivity[]; attachment_notice: boolean; messages: OutreachMessageSummary[] };
 export type DeliveryReadiness = { ready: boolean; blockers: { code: string; label: string }[]; send_approved: boolean };
 export type OutreachBatch = { id: number; sequence: number; status: string; recipients: OutreachRecipient[]; send_approved: boolean; delivery_readiness: DeliveryReadiness };
 export type OutreachCampaign = { id: number; status: string; batches: OutreachBatch[]; bid_due_local: string; questions_due_local: string; project_timezone: string; setup_version: number };
@@ -12,6 +13,7 @@ export type OutreachTrade = { scope_package_id: number; scope_version_id: number
 export type ProviderStatus = { provider: string; state: string; label: string; host_configured: boolean; port_configured: boolean; username_configured: boolean; password_saved: boolean; encryption_ready: boolean; tls_mode: string };
 export type SMTPSettings = { provider: ProviderStatus; host?: string; port?: number; username?: string; password_saved?: boolean; security?: "starttls" | "ssl" | "none"; timeout_seconds?: number; is_enabled?: boolean; last_test_status?: string };
 export type SMTPTestResult = { success: boolean; code: string; message: string };
+export type ResendWebhookSettings = { enabled: boolean; signing_secret_saved: boolean; endpoint_url: string };
 export type OutreachSender = { display_name: string; from_address: string; reply_to: string; is_enabled?: boolean; configured?: boolean; provider?: ProviderStatus };
 export type OutreachWorkspace = { trades: OutreachTrade[]; sender: OutreachSender; provider: ProviderStatus };
 export type RFQPreview = { template_version: number; source_scope_version_id: number; subject: string; body: string; inclusions: string[]; exclusions: string[]; clarifications: string[]; bid_deadline: string | null; questions_deadline: string | null };
@@ -21,6 +23,17 @@ function base(slug: string, projectId: number) {
 }
 
 export const outreachApi = {
+  webhookSettings(slug: string) { return apiRequest<ResendWebhookSettings>(`/organizations/${encodeURIComponent(slug)}/resend-webhook-settings/`); },
+  saveWebhookSettings(slug: string, data: { signing_secret: string; enabled: boolean }) {
+    return apiRequest<ResendWebhookSettings>(`/organizations/${encodeURIComponent(slug)}/resend-webhook-settings/`, { method: "PUT", body: JSON.stringify(data) });
+  },
+  unassignedResponses(slug: string) { return apiRequest<{ responses: { id: number; from_address: string; subject: string; occurred_at: string; attachment_count: number; content_status: string }[] }>(`/organizations/${encodeURIComponent(slug)}/outreach-unassigned-responses/`); },
+  recordResponse(slug: string, projectId: number, recipientId: number, data: { outcome: string; channel: string; note: string }) {
+    return apiRequest<{ id: number; outcome: string }>(`${base(slug, projectId)}/outreach-recipients/${recipientId}/response/`, { method: "POST", body: JSON.stringify(data) });
+  },
+  qualifyRecipient(slug: string, projectId: number, recipientId: number, data: { state: string; note: string }) {
+    return apiRequest<{ id: number; state: string }>(`${base(slug, projectId)}/outreach-recipients/${recipientId}/qualification/`, { method: "POST", body: JSON.stringify(data) });
+  },
   smtpSettings(slug: string) { return apiRequest<SMTPSettings>(`/organizations/${encodeURIComponent(slug)}/outreach-smtp/`); },
   saveSMTPSettings(slug: string, data: { host: string; port: number; username: string; password: string; clear_password: boolean; security: "starttls" | "ssl" | "none"; timeout_seconds: number; is_enabled: boolean }) {
     return apiRequest<SMTPSettings>(`/organizations/${encodeURIComponent(slug)}/outreach-smtp/`, { method: "PUT", body: JSON.stringify(data) });

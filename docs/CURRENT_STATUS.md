@@ -6,9 +6,10 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 is committed; M3-02 deterministic RFQ Template V3, M3-03 explicit recipient preparation, and M3-04 guarded delivery infrastructure are **COMPLETE and manually validated**. M3-05 is NEXT / NOT STARTED.
+Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 through M3-05 are **COMPLETE and manually validated**. M3-06 is NEXT / NOT STARTED.
 
-M3-04 live SMTP delivery is **COMPLETE / MANUALLY VALIDATED**. Campaign-specific Bid Due and optional Questions Due, organization-scoped sender identity, Admin-managed encrypted SMTP configuration, immutable message snapshots, exact-message approval, explicit connection/test-email actions, and safe attempt history are implemented. A stable private `OUTREACH_CREDENTIAL_ENCRYPTION_KEY` is required on the server before credentials can be saved or used. The real Resend SMTP connection test succeeded and one explicitly addressed controlled test email was received; no contractor invitation was sent. A failed connection test is diagnostic history, not a permanent send gate. SMTP remains disabled by default on new installations. Project 3's missing Bid Due remains a send blocker. M3-05 is NEXT / NOT STARTED.
+M3-04 live SMTP delivery is **COMPLETE / MANUALLY VALIDATED**. Campaign-specific Bid Due and optional Questions Due, organization-scoped sender identity, Admin-managed encrypted SMTP configuration, immutable message snapshots, exact-message approval, explicit connection/test-email actions, and safe attempt history are implemented. A stable private `OUTREACH_CREDENTIAL_ENCRYPTION_KEY` is required on the server before credentials can be saved or used. The real Resend SMTP connection test succeeded and one explicitly addressed controlled test email was received; no contractor invitation was sent. A failed connection test is diagnostic history, not a permanent send gate. SMTP remains disabled by default on new installations. Project 3's missing Bid Due remains a send blocker.
+M3-05 adds signed, replay-safe Resend webhook history; provider-email correlation; inbound reply records that remain unassigned unless an exact thread and sender match; manual phone/email response history; separate human qualification decisions; and read-only Viewer presentation. Provider-reported open/click is not a response or qualification. Inbound attachments are metadata only and bid intake remains M3-06. Real Project 3 validation passed: Batch 4's controlled invitation was sent to the user's test mailbox, signed sent/delivered events were recorded, and a real Gmail reply was retrieved through Resend Receiving. Resend/SES replaced the submitted RFC Message-ID; an older identical invitation made full-content matching ambiguous. Exact sent content plus a unique bounded provider-creation/delivery-attempt window established the outbound mapping, then exact `In-Reply-To`/`References` and address checks assigned the existing inbound response. Batch 4 is Responded, qualification remains Not reviewed, and duplicate response/status/provider records were not created. No additional email was sent during reconciliation.
 
 ## Current implementation status
 
@@ -42,7 +43,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 is COMPLETE. Milestone 2 is COMPLETE. M2A-01, M2B-01 through M2B-06, and the final M2 UI/performance pass are COMPLETE and manually accepted. M3-01 is committed; M3-02, M3-03 and M3-04 are COMPLETE and manually validated. M3-05 is NEXT / NOT STARTED.**
+**Milestone 1 and Milestone 2 are COMPLETE. M3-01 through M3-05 are COMPLETE and manually validated. M3-06 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -154,7 +155,7 @@ M1-04 currently includes:
 - Exact fixture-ID isolation so production projects never inherit demo workflow records
 - Passing backend regression, frontend typecheck/lint/build, and authenticated manual production validation
 
-M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 and M2B-01 through M2B-06 are complete. M3-01 through M3-04 are complete; no outreach has been sent. M3-05 is not started.
+M1-04 through M1-12 are complete. Milestone 1 is complete; M2A-01 and M2B-01 through M2B-06 are complete. M3-01 through M3-05 are complete; the M3-05 invitation/reply used only the user's controlled test mailbox, not a contractor mailbox. M3-06 is not started.
 
 M1-05 currently includes:
 
@@ -823,7 +824,7 @@ Never implement multiple roadmap tasks in one uncontrolled Codex request.
 
 The accepted full-project Scope Coverage Preview for JD Sports Project Information Version 4 is the canonical scope plan: 27 trade scopes, 659 detailed trade work items, and 106 project-wide requirements kept outside subcontractor trade packages. Project 3 generation was manually accepted. It used the deterministic plan fingerprint to create Draft versions while preserving all earlier package versions and human edits; three representative packages were subsequently marked Ready through the normal human action.
 
-Milestone 2 is complete. Canonical 27-trade, project-centered 200-mile Contractor Discovery and the final summary-first Scopes/Contractors UI were manually accepted on Project 3. **M3-01 — Invitation / Outreach Domain Model** is committed. **M3-02 — RFQ Template & Trade Package Invitation Builder**, **M3-03 — Recipient Selection & Invitation Batches**, and **M3-04 — Outreach Delivery Adapter & Retry/Audit** are COMPLETE and manually validated. Project 3 retains one Draft campaign, two batches and one prepared recipient; zero messages, send approvals, or delivery attempts exist. Missing Bid Due blocks sending. M3-05 is NEXT / NOT STARTED.
+Historical checkpoint before M3-05 live validation: Milestone 2 was complete, and Project 3 then retained one Draft campaign, two batches and one prepared recipient with no delivered outreach. This checkpoint is superseded by the current M3-05 state above. M3-06 is NEXT / NOT STARTED.
 
 ## Recovery instruction
 

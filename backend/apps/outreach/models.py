@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
@@ -171,6 +173,12 @@ class InvitationRecipient(ImmutableFieldsMixin):
         PREPARED = "prepared", "Prepared"
         CANCELLED = "cancelled", "Cancelled"
         INVITED = "invited", "Invited"
+        DELIVERED = "delivered", "Delivered"
+        OPENED = "opened", "Opened"
+        RESPONDED = "responded", "Responded"
+        DECLINED = "declined", "Declined"
+        FAILED = "failed", "Failed"
+        NEEDS_FOLLOW_UP = "needs_follow_up", "Needs follow-up"
 
     batch = models.ForeignKey(InvitationBatch, on_delete=models.PROTECT, related_name="recipients")
     candidate = models.ForeignKey(ScopeContractorCandidate, on_delete=models.PROTECT)
@@ -182,6 +190,12 @@ class InvitationRecipient(ImmutableFieldsMixin):
     email = models.EmailField()
     phone = models.CharField(max_length=50, blank=True)
     current_status = models.CharField(max_length=20, choices=Status, default=Status.PREPARED)
+    delivery_state = models.CharField(max_length=20, default="not_sent")
+    delivery_event_at = models.DateTimeField(null=True, blank=True)
+    engagement_state = models.CharField(max_length=20, default="none")
+    engagement_event_at = models.DateTimeField(null=True, blank=True)
+    response_state = models.CharField(max_length=20, default="no_response")
+    qualification_state = models.CharField(max_length=20, default="not_reviewed")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -255,7 +269,10 @@ class InvitationRecipientStatusEvent(ImmutableFieldsMixin):
     )
     previous_status = models.CharField(max_length=20, blank=True)
     new_status = models.CharField(max_length=20, choices=InvitationRecipient.Status)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True
+    )
+    source = models.CharField(max_length=20, default="human")
     reason = models.CharField(max_length=255, blank=True)
     occurred_at = models.DateTimeField(auto_now_add=True)
 
@@ -264,6 +281,7 @@ class InvitationRecipientStatusEvent(ImmutableFieldsMixin):
         "previous_status",
         "new_status",
         "actor_id",
+        "source",
         "reason",
         "occurred_at",
     )
@@ -368,6 +386,7 @@ class OutreachDeliveryAttempt(ImmutableFieldsMixin):
     sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     provider_key = models.CharField(max_length=40)
     idempotency_key = models.CharField(max_length=100)
+    submitted_rfc_message_id = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=20, choices=Status, default=Status.PENDING)
     attempted_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -375,7 +394,14 @@ class OutreachDeliveryAttempt(ImmutableFieldsMixin):
     safe_error_code = models.CharField(max_length=80, blank=True)
     safe_error_message = models.CharField(max_length=255, blank=True)
 
-    immutable_fields = ("message_id", "sequence", "provider_key", "idempotency_key", "attempted_at")
+    immutable_fields = (
+        "message_id",
+        "sequence",
+        "provider_key",
+        "idempotency_key",
+        "submitted_rfc_message_id",
+        "attempted_at",
+    )
 
     class Meta:
         constraints = [
@@ -395,3 +421,153 @@ class OutreachDeliveryAttempt(ImmutableFieldsMixin):
             ):
                 raise ValidationError("Completed delivery attempts are immutable.")
         return super().save(*args, **kwargs)
+
+
+class ResendWebhookConfiguration(models.Model):
+    organization = models.OneToOneField(
+        "organizations.Organization", on_delete=models.PROTECT, related_name="resend_webhook"
+    )
+    endpoint_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    encrypted_signing_secret = models.TextField(blank=True)
+    is_enabled = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ResendWebhookEvent(ImmutableFieldsMixin):
+    configuration = models.ForeignKey(ResendWebhookConfiguration, on_delete=models.PROTECT)
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    webhook_id = models.CharField(max_length=120)
+    event_type = models.CharField(max_length=40)
+    provider_email_id = models.CharField(max_length=120, blank=True)
+    rfc_message_id = models.CharField(max_length=255, blank=True)
+    message = models.ForeignKey(OutreachMessage, on_delete=models.PROTECT, null=True, blank=True)
+    recipient = models.ForeignKey(
+        InvitationRecipient, on_delete=models.PROTECT, null=True, blank=True
+    )
+    occurred_at = models.DateTimeField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "configuration_id",
+        "organization_id",
+        "webhook_id",
+        "event_type",
+        "provider_email_id",
+        "rfc_message_id",
+        "message_id",
+        "recipient_id",
+        "occurred_at",
+        "received_at",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("configuration", "webhook_id"), name="outreach_unique_resend_event"
+            )
+        ]
+
+
+class OutreachProviderEmail(ImmutableFieldsMixin):
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    message = models.ForeignKey(OutreachMessage, on_delete=models.PROTECT)
+    provider_email_id = models.CharField(max_length=120)
+    rfc_message_id = models.CharField(max_length=255)
+    first_event = models.ForeignKey(ResendWebhookEvent, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "organization_id",
+        "message_id",
+        "provider_email_id",
+        "rfc_message_id",
+        "first_event_id",
+        "created_at",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("organization", "provider_email_id"), name="outreach_unique_provider_email"
+            ),
+            models.UniqueConstraint(
+                fields=("organization", "rfc_message_id"),
+                name="outreach_unique_provider_message_id",
+            ),
+        ]
+
+
+class OutreachResponse(ImmutableFieldsMixin):
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    project = models.ForeignKey("projects.Project", on_delete=models.PROTECT, null=True, blank=True)
+    recipient = models.ForeignKey(
+        InvitationRecipient, on_delete=models.PROTECT, null=True, blank=True
+    )
+    message = models.ForeignKey(OutreachMessage, on_delete=models.PROTECT, null=True, blank=True)
+    provider_event = models.OneToOneField(
+        ResendWebhookEvent, on_delete=models.PROTECT, null=True, blank=True
+    )
+    provider_email_id = models.CharField(max_length=120, blank=True)
+    rfc_message_id = models.CharField(max_length=255, blank=True)
+    in_reply_to = models.CharField(max_length=255, blank=True)
+    references = models.CharField(max_length=1000, blank=True)
+    from_address = models.EmailField(blank=True)
+    to_address = models.EmailField(blank=True)
+    subject = models.CharField(max_length=255, blank=True)
+    body_text = models.TextField(blank=True)
+    content_status = models.CharField(max_length=20, default="not_applicable")
+    attachment_count = models.PositiveIntegerField(default=0)
+    channel = models.CharField(max_length=20)
+    outcome = models.CharField(max_length=20, default="responded")
+    note = models.CharField(max_length=1000, blank=True)
+    occurred_at = models.DateTimeField()
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "recipient_id",
+        "message_id",
+        "provider_event_id",
+        "provider_email_id",
+        "rfc_message_id",
+        "in_reply_to",
+        "references",
+        "from_address",
+        "to_address",
+        "subject",
+        "body_text",
+        "content_status",
+        "attachment_count",
+        "channel",
+        "outcome",
+        "note",
+        "occurred_at",
+        "actor_id",
+        "created_at",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("organization", "provider_email_id"),
+                condition=models.Q(channel="inbound_email") & ~models.Q(provider_email_id=""),
+                name="outreach_unique_inbound_email",
+            )
+        ]
+
+
+class OutreachQualificationDecision(ImmutableFieldsMixin):
+    recipient = models.ForeignKey(
+        InvitationRecipient, on_delete=models.PROTECT, related_name="qualification_decisions"
+    )
+    state = models.CharField(max_length=20)
+    note = models.CharField(max_length=1000, blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("recipient_id", "state", "note", "actor_id", "occurred_at")

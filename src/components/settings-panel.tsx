@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useOrganization } from "@/components/organizations/organization-provider";
 import { Card } from "@/components/ui/card";
-import { outreachApi, type OutreachSender, type SMTPSettings } from "@/lib/outreach";
+import { outreachApi, type OutreachSender, type ResendWebhookSettings, type SMTPSettings } from "@/lib/outreach";
 
 type SMTPForm = {
   host: string; port: number; username: string; password: string; clear_password: boolean;
@@ -26,6 +26,9 @@ export function SettingsPanel() {
   const [sender, setSender] = useState<OutreachSender | null>(null);
   const [smtp, setSmtp] = useState<SMTPSettings | null>(null);
   const [smtpForm, setSmtpForm] = useState<SMTPForm | null>(null);
+  const [webhook, setWebhook] = useState<ResendWebhookSettings | null>(null);
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [testRecipient, setTestRecipient] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +45,11 @@ export function SettingsPanel() {
     if (!slug) return;
     const organizationSlug = slug;
     let live = true;
-    Promise.all([outreachApi.sender(organizationSlug), outreachApi.smtpSettings(organizationSlug)])
-      .then(([senderValue, smtpValue]) => {
+    Promise.all([outreachApi.sender(organizationSlug), outreachApi.smtpSettings(organizationSlug), outreachApi.webhookSettings(organizationSlug)])
+      .then(([senderValue, smtpValue, webhookValue]) => {
         if (!live) return;
         setSender(senderValue); setSmtp(smtpValue); setSmtpForm(formFrom(smtpValue));
+        setWebhook(webhookValue); setWebhookEnabled(webhookValue.enabled);
       })
       .catch((reason: unknown) => {
         if (live) setError(reason instanceof Error ? reason.message : "Email settings could not be loaded.");
@@ -80,6 +84,15 @@ export function SettingsPanel() {
       setNotice("SMTP setup saved. Password is never shown again after saving.");
     });
     setSmtpForm((current) => current ? { ...current, password: "", clear_password: false } : null);
+  }
+
+  async function saveWebhook() {
+    if (!slug || !canEdit) return;
+    await act(async () => {
+      const updated = await outreachApi.saveWebhookSettings(slug, { signing_secret: webhookSecret, enabled: webhookEnabled });
+      setWebhook(updated); setWebhookEnabled(updated.enabled); setWebhookSecret("");
+      setNotice("Resend webhook settings saved. The signing secret cannot be displayed again.");
+    });
   }
 
   async function testConnection() {
@@ -135,5 +148,6 @@ export function SettingsPanel() {
       </>}
     </Card>
     <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Outreach sender identity</h2><p className="mt-1 text-sm text-slate-600">The From and Reply-To addresses are frozen into each prepared invitation. SMTP credentials are stored separately and never shown here.</p></div>{sender ? <>{([ ["Sender display name", "display_name"], ["From email", "from_address"], ["Reply-To email", "reply_to"] ] as const).map(([label, field]) => <label key={field} className="block text-sm font-medium">{label}<input type={field === "display_name" ? "text" : "email"} value={sender[field]} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, [field]: event.target.value })} className="mt-1 block w-full rounded-lg border p-2 disabled:bg-slate-50" /></label>)}<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sender.is_enabled ?? false} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, is_enabled: event.target.checked })} />Enable this sender for outreach</label>{canEdit && <button type="button" disabled={busy} onClick={() => void saveSender()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save sender settings</button>}</> : <p className="text-sm text-slate-500">Loading sender settings…</p>}</Card>
+    <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Resend webhook</h2><p className="mt-1 text-sm text-slate-600">Delivery and inbound-reply events are accepted only after signature verification. Set up this endpoint in the Resend dashboard; opening Settings makes no provider request.</p></div><p className="text-sm">Status: {webhook?.enabled ? "Enabled" : "Disabled"} · Signing secret: {webhook?.signing_secret_saved ? "Saved securely" : "Not saved"}</p>{webhook?.endpoint_url && <div className="rounded-lg bg-slate-50 p-3 text-sm"><p className="font-medium">Webhook endpoint URL</p><code className="break-all">{webhook.endpoint_url}</code><p className="mt-1 text-xs text-amber-800">Resend requires a publicly reachable HTTPS endpoint; this local URL is for development only.</p></div>}{canEdit && <><label className="block text-sm font-medium">Resend signing secret<input type="password" value={webhookSecret} disabled={busy} autoComplete="new-password" onChange={(event) => setWebhookSecret(event.target.value)} placeholder={webhook?.signing_secret_saved ? "Leave blank to keep saved secret" : "Paste whsec_ signing secret"} className="mt-1 block w-full rounded-lg border p-2" /></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={webhookEnabled} disabled={busy} onChange={(event) => setWebhookEnabled(event.target.checked)} />Enable verified Resend webhooks</label><button type="button" disabled={busy} onClick={() => void saveWebhook()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save webhook settings</button></>}</Card>
   </div>;
 }

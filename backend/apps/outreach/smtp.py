@@ -83,6 +83,8 @@ def _send(
     email["Reply-To"] = reply_to
     email["Subject"] = subject
     email["Message-ID"] = message_id
+    if config.host.lower() == "smtp.resend.com":
+        email["Resend-Idempotency-Key"] = message_id.strip("<>")
     email.set_content(body)
     with _open_connection(config) as connection:
         refused = connection.send_message(email)

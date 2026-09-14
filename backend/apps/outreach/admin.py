@@ -6,6 +6,10 @@ from .models import (
     InvitationRecipient,
     InvitationRecipientStatusEvent,
     OutreachMessage,
+    OutreachProviderEmail,
+    OutreachQualificationDecision,
+    OutreachResponse,
+    ResendWebhookEvent,
 )
 
 
@@ -48,3 +52,23 @@ class InvitationRecipientStatusEventAdmin(InspectionOnlyAdmin):
 @admin.register(OutreachMessage)
 class OutreachMessageAdmin(InspectionOnlyAdmin):
     list_display = ("id", "recipient", "sequence", "kind", "created_at")
+
+
+@admin.register(ResendWebhookEvent)
+class ResendWebhookEventAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "organization", "event_type", "message", "occurred_at")
+
+
+@admin.register(OutreachProviderEmail)
+class OutreachProviderEmailAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "organization", "message", "created_at")
+
+
+@admin.register(OutreachResponse)
+class OutreachResponseAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "organization", "recipient", "channel", "occurred_at")
+
+
+@admin.register(OutreachQualificationDecision)
+class OutreachQualificationDecisionAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "recipient", "state", "occurred_at")

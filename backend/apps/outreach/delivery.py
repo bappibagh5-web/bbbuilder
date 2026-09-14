@@ -73,7 +73,27 @@ def readiness(
         )
     recipients = list(batch.recipients.filter(current_status=InvitationRecipient.Status.PREPARED))
     if not recipients:
-        block("recipient_required", "Add at least one prepared recipient")
+        if all_recipients := list(
+            batch.recipients.exclude(current_status=InvitationRecipient.Status.CANCELLED)
+        ):
+            if all(
+                recipient.current_status != InvitationRecipient.Status.PREPARED
+                for recipient in all_recipients
+            ):
+                if all(
+                    recipient.messages.filter(
+                        attempts__status=OutreachDeliveryAttempt.Status.SUCCEEDED
+                    ).exists()
+                    for recipient in all_recipients
+                ):
+                    block(
+                        "all_recipients_sent",
+                        "Invitations sent successfully; no unsent recipients remain",
+                    )
+                else:
+                    block("no_unsent_recipients", "No unsent recipients remain in this batch")
+        else:
+            block("recipient_required", "Add at least one prepared recipient")
     if any(not recipient.email for recipient in recipients):
         block("recipient_email_required", "A prepared recipient is missing an email address")
     if not campaign.bid_deadline:
@@ -306,6 +326,9 @@ def deliver_message(*, message, actor, retry=False):
             sequence=(last.sequence + 1 if last else 1),
             provider_key=SMTPDeliveryProvider.key,
             idempotency_key=_message_key(message),
+            submitted_rfc_message_id=(
+                f"<{_message_key(message)}@{message.from_address.rsplit('@', 1)[-1]}>"
+            ),
         )
         _audit(actor, "outreach_delivery.attempted", message, {"attempt_id": attempt.pk})
     try:
@@ -345,14 +368,18 @@ def deliver_message(*, message, actor, retry=False):
         recipient = InvitationRecipient.objects.select_for_update().get(pk=message.recipient_id)
         if recipient.current_status == InvitationRecipient.Status.PREPARED:
             InvitationRecipient.objects.filter(pk=recipient.pk).update(
-                current_status=InvitationRecipient.Status.INVITED
+                current_status=InvitationRecipient.Status.INVITED,
+                delivery_state="sent",
             )
             InvitationRecipientStatusEvent.objects.create(
                 recipient=recipient,
                 previous_status=InvitationRecipient.Status.PREPARED,
                 new_status=InvitationRecipient.Status.INVITED,
                 actor=actor,
+                source="system",
                 reason="Delivery succeeded.",
             )
+        elif recipient.delivery_state == "not_sent":
+            InvitationRecipient.objects.filter(pk=recipient.pk).update(delivery_state="sent")
         _audit(actor, "outreach_delivery.succeeded", message, {"attempt_id": attempt.pk})
     return attempt

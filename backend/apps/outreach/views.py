@@ -1,7 +1,9 @@
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,10 +22,15 @@ from .delivery import approve_batch_send, deliver_message, prepare_batch_message
 from .models import (
     InvitationBatch,
     InvitationCampaign,
+    InvitationRecipient,
     OutreachMessage,
+    OutreachResponse,
     OutreachSenderSettings,
     OutreachSMTPConfiguration,
+    ResendWebhookConfiguration,
 )
+from .resend_webhooks import ingest_verified_event, save_webhook_configuration
+from .responses import decide_qualification, record_manual_response
 from .rfq import build_rfq_preview
 from .selection import outreach_workspace
 from .services import (
@@ -334,6 +341,161 @@ class OutreachSMTPTestEmailView(OutreachSMTPSettingsView):
             )
         except DjangoValidationError as error:
             raise api_validation_error(error) from error
+
+
+class ResendWebhookSettingsView(APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get_organization(self):
+        return get_object_or_404(Organization, slug=self.kwargs["organization_slug"])
+
+    def get(self, request, *args, **kwargs):
+        organization = self.get_organization()
+        config = ResendWebhookConfiguration.objects.filter(organization=organization).first()
+        safe = {
+            "enabled": bool(config and config.is_enabled),
+            "signing_secret_saved": bool(config and config.encrypted_signing_secret),
+            "endpoint_url": (
+                request.build_absolute_uri(
+                    reverse("resend-webhook", kwargs={"endpoint_token": config.endpoint_token})
+                )
+                if config
+                else ""
+            ),
+        }
+        return Response(safe)
+
+    def put(self, request, *args, **kwargs):
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["signing_secret"] = serializers.CharField(
+            allow_blank=True, write_only=True
+        )
+        serializer.fields["enabled"] = serializers.BooleanField()
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_webhook_configuration(
+                organization=self.get_organization(),
+                actor=request.user,
+                signing_secret=serializer.validated_data["signing_secret"],
+                enabled=serializer.validated_data["enabled"],
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return self.get(request, *args, **kwargs)
+
+
+class ResendWebhookView(APIView):
+    authentication_classes = ()
+    permission_classes = ()
+
+    def post(self, request, *args, **kwargs):
+        config = get_object_or_404(
+            ResendWebhookConfiguration, endpoint_token=kwargs["endpoint_token"], is_enabled=True
+        )
+        if len(request.body) > 65536:
+            return JsonResponse({"detail": "Invalid webhook."}, status=413)
+        try:
+            _, created = ingest_verified_event(
+                config,
+                request.body,
+                {
+                    name: request.headers.get(name, "")
+                    for name in ("svix-id", "svix-timestamp", "svix-signature")
+                },
+            )
+        except DjangoValidationError:
+            return JsonResponse({"detail": "Invalid webhook."}, status=400)
+        return Response({"received": True, "created": created})
+
+
+class RecipientResponseView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def post(self, request, *args, **kwargs):
+        if not OrganizationOperator().has_permission(request, self):
+            raise PermissionDenied("Operator access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["outcome"] = serializers.ChoiceField(
+            choices=("responded", "declined", "needs_follow_up")
+        )
+        serializer.fields["channel"] = serializers.ChoiceField(choices=("phone", "email", "other"))
+        serializer.fields["note"] = serializers.CharField(max_length=1000)
+        serializer.fields["occurred_at"] = serializers.DateTimeField(required=False)
+        serializer.is_valid(raise_exception=True)
+        recipient = get_object_or_404(
+            InvitationRecipient,
+            pk=kwargs["recipient_pk"],
+            batch__campaign__project=self.get_project(),
+            batch__campaign__organization=self.get_organization(),
+        )
+        try:
+            response = record_manual_response(
+                recipient=recipient, actor=request.user, **serializer.validated_data
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response({"id": response.pk, "outcome": response.outcome})
+
+
+class RecipientQualificationView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def post(self, request, *args, **kwargs):
+        if not OrganizationOperator().has_permission(request, self):
+            raise PermissionDenied("Operator access required.")
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["state"] = serializers.ChoiceField(
+            choices=("needs_follow_up", "qualified", "not_qualified")
+        )
+        serializer.fields["note"] = serializers.CharField(
+            max_length=1000, allow_blank=True, required=False
+        )
+        serializer.is_valid(raise_exception=True)
+        recipient = get_object_or_404(
+            InvitationRecipient,
+            pk=kwargs["recipient_pk"],
+            batch__campaign__project=self.get_project(),
+            batch__campaign__organization=self.get_organization(),
+        )
+        try:
+            decision = decide_qualification(
+                recipient=recipient, actor=request.user, **serializer.validated_data
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response({"id": decision.pk, "state": decision.state})
+
+
+class UnassignedResponsesView(APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get_organization(self):
+        return get_object_or_404(Organization, slug=self.kwargs["organization_slug"])
+
+    def get(self, request, *args, **kwargs):
+        if not OrganizationAdmin().has_permission(request, self):
+            raise PermissionDenied("Organization Admin access required.")
+        organization = self.get_organization()
+        rows = OutreachResponse.objects.filter(
+            organization=organization, channel="inbound_email", recipient__isnull=True
+        ).order_by("-occurred_at")[:50]
+        return Response(
+            {
+                "responses": [
+                    {
+                        "id": row.pk,
+                        "from_address": row.from_address,
+                        "subject": row.subject,
+                        "occurred_at": row.occurred_at,
+                        "attachment_count": row.attachment_count,
+                        "content_status": row.content_status,
+                    }
+                    for row in rows
+                ]
+            }
+        )
 
 
 class BatchDeliveryView(ProjectDocumentContextMixin, APIView):
