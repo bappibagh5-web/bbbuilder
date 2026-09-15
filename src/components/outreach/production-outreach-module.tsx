@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { Mail, Users } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
+import { bidsApi, type QuoteSubmission } from "@/lib/bids";
+import { pendingQuoteAttachments } from "@/lib/outreach-attachment-state";
+import { quoteImportFailure } from "@/lib/quote-import-presentation";
 import type { OrganizationMembership } from "@/lib/auth";
 import { outreachApi, type OutreachRecipient, type OutreachTrade, type OutreachWorkspace, type RFQPreview } from "@/lib/outreach";
 import type { ProductionProject } from "@/lib/projects";
@@ -20,6 +23,8 @@ export function ProductionOutreachModule({ project, membership }: { project: Pro
   const [selectedContact, setSelectedContact] = useState<Record<number, number>>({});
   const [deadlineDrafts, setDeadlineDrafts] = useState<Record<number, { bid: string; questions: string }>>({});
   const [unassigned, setUnassigned] = useState<{ id: number; from_address: string; subject: string; occurred_at: string; attachment_count: number; content_status: string }[]>([]);
+  const [quotes, setQuotes] = useState<QuoteSubmission[]>([]);
+  const [importFailures, setImportFailures] = useState<Record<number, string>>({});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -35,12 +40,39 @@ export function ProductionOutreachModule({ project, membership }: { project: Pro
     outreachApi.unassignedResponses(slug).then((result) => setUnassigned(result.responses)).catch(() => {});
   }, [slug, membership.role]);
 
-  async function refresh() { setWorkspace(await outreachApi.workspace(slug, project.id)); }
+  useEffect(() => {
+    bidsApi.list(slug, project.id).then((result) => setQuotes(result.submissions)).catch(() => {});
+  }, [slug, project.id]);
+
+  async function refresh() {
+    const [outreach, list] = await Promise.all([outreachApi.workspace(slug, project.id), bidsApi.list(slug, project.id)]);
+    setWorkspace(outreach); setQuotes(list.submissions);
+  }
+  async function downloadQuote(quote: QuoteSubmission, attachment: QuoteSubmission["attachments"][number]) {
+    setError(null);
+    try {
+      const blob = await bidsApi.download(slug, project.id, quote.id, attachment.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = url; link.download = attachment.filename; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The private quote file could not be opened."); }
+  }
   async function act(action: () => Promise<void>) {
     setBusy(true); setError(null);
     try { await action(); await refresh(); return true; }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The preparation step could not be completed."); return false; }
     finally { setBusy(false); }
+  }
+  async function importInboundQuote(responseId: number) {
+    setImportFailures((current) => { const next = { ...current }; delete next[responseId]; return next; });
+    return act(async () => {
+      try { await bidsApi.importReceived(slug, project.id, responseId); }
+      catch (reason) {
+        const safeMessage = quoteImportFailure(reason);
+        setImportFailures((current) => ({ ...current, [responseId]: safeMessage }));
+        throw new Error(safeMessage);
+      }
+    });
   }
 
   async function createCampaign(trade: OutreachTrade) {
@@ -89,7 +121,7 @@ export function ProductionOutreachModule({ project, membership }: { project: Pro
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 p-3"><p className="w-full text-xs font-semibold text-slate-600">Campaign Setup · Project Timezone: {trade.campaign.project_timezone}</p><label className="text-xs font-semibold">Bid Deadline<input type="datetime-local" disabled={!canPrepare || busy} value={deadlineDrafts[trade.campaign.id]?.bid ?? trade.campaign.bid_due_local} onChange={(event) => setDeadlineDrafts((current) => ({ ...current, [trade.campaign!.id]: { bid: event.target.value, questions: current[trade.campaign!.id]?.questions ?? trade.campaign!.questions_due_local } }))} className="mt-1 block rounded border p-2" /></label><label className="text-xs font-semibold">Questions Deadline (optional)<input type="datetime-local" disabled={!canPrepare || busy} value={deadlineDrafts[trade.campaign.id]?.questions ?? trade.campaign.questions_due_local} onChange={(event) => setDeadlineDrafts((current) => ({ ...current, [trade.campaign!.id]: { bid: current[trade.campaign!.id]?.bid ?? trade.campaign!.bid_due_local, questions: event.target.value } }))} className="mt-1 block rounded border p-2" /></label>{canPrepare && <button type="button" disabled={busy} onClick={() => void saveSetup(trade)} className="rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-800">Save Campaign Setup</button>}</div>
           {preview[trade.scope_package_id] && <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4"><p className="text-xs font-bold uppercase text-indigo-700">RFQ preview · Template V{preview[trade.scope_package_id].template_version}</p><p className="mt-2 font-semibold text-slate-900">{preview[trade.scope_package_id].subject}</p><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{preview[trade.scope_package_id].body}</pre><p className="mt-3 text-xs text-slate-500">Preview only. No message has been prepared or sent.</p></div>}
           {trade.campaign.batches.length > 0 && <div><label className="text-xs font-semibold text-slate-700">Invitation batch<select aria-label={`Invitation batch for ${trade.trade}`} value={selectedBatch[trade.scope_package_id] ?? ""} onChange={(event) => setSelectedBatch((current) => ({ ...current, [trade.scope_package_id]: Number(event.target.value) }))} className="mt-1 block h-10 rounded-lg border bg-white px-3 text-sm"><option value="">Select a batch</option>{trade.campaign.batches.map((item) => <option key={item.id} value={item.id}>Batch {item.sequence} · {item.recipients.length} recipient{item.recipients.length === 1 ? "" : "s"}</option>)}</select></label></div>}
-          {batch && <><div className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Users className="h-4 w-4" />Batch {batch.sequence} · {batch.recipients.length} recipient{batch.recipients.length === 1 ? "" : "s"}</div>{batch.recipients.map((recipient) => <RecipientTracking key={recipient.id} recipient={recipient} canEdit={canPrepare} busy={busy} record={(data) => act(async () => { await outreachApi.recordResponse(slug, project.id, recipient.id, data); })} qualify={(data) => act(async () => { await outreachApi.qualifyRecipient(slug, project.id, recipient.id, data); })} />)}</>}
+          {batch && <><div className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Users className="h-4 w-4" />Batch {batch.sequence} · {batch.recipients.length} recipient{batch.recipients.length === 1 ? "" : "s"}</div>{batch.recipients.map((recipient) => <RecipientTracking key={recipient.id} recipient={recipient} quotes={quotes.filter((quote) => quote.recipient_id === recipient.id)} downloadQuote={downloadQuote} importFailures={importFailures} canEdit={canPrepare} busy={busy} record={(data) => act(async () => { await outreachApi.recordResponse(slug, project.id, recipient.id, data); })} qualify={(data) => act(async () => { await outreachApi.qualifyRecipient(slug, project.id, recipient.id, data); })} importQuote={importInboundQuote} />)}</>}
           {batch && <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4" aria-label={`Send readiness for ${trade.trade}`}>
             <h4 className="text-sm font-semibold text-slate-900">Send readiness</h4>
             {delivery.ready ? <p className="mt-1 text-sm text-emerald-700">Ready for explicit send</p> : <ul className="mt-2 list-inside list-disc text-sm text-amber-900">{delivery.blockers.map((blocker) => <li key={blocker.code}>{blocker.label}</li>)}</ul>}
@@ -108,10 +140,13 @@ export function ProductionOutreachModule({ project, membership }: { project: Pro
   </div>;
 }
 
-function RecipientTracking({ recipient, canEdit, busy, record, qualify }: {
-  recipient: OutreachRecipient; canEdit: boolean; busy: boolean;
+function RecipientTracking({ recipient, quotes, downloadQuote, importFailures, canEdit, busy, record, qualify, importQuote }: {
+  recipient: OutreachRecipient; quotes: QuoteSubmission[]; canEdit: boolean; busy: boolean;
+  importFailures: Record<number, string>;
+  downloadQuote: (quote: QuoteSubmission, attachment: QuoteSubmission["attachments"][number]) => Promise<void>;
   record: (data: { outcome: string; channel: string; note: string }) => Promise<boolean>;
   qualify: (data: { state: string; note: string }) => Promise<boolean>;
+  importQuote: (responseId: number) => Promise<boolean>;
 }) {
   const [channel, setChannel] = useState("phone");
   const [note, setNote] = useState("");
@@ -120,7 +155,8 @@ function RecipientTracking({ recipient, canEdit, busy, record, qualify }: {
   return <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
     <p className="font-semibold text-slate-900">{recipient.company_name} · {recipient.contact_name}</p><p>{recipient.email}</p>
     <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-blue-100 px-2 py-1">Delivery: {recipient.delivery_state.replaceAll("_", " ")}</span><span className="rounded-full bg-indigo-100 px-2 py-1">Engagement: {recipient.engagement_state.replaceAll("_", " ")} (provider-reported)</span><span className="rounded-full bg-amber-100 px-2 py-1">Response: {recipient.response_state.replaceAll("_", " ")}</span><span className="rounded-full bg-emerald-100 px-2 py-1">Qualification: {recipient.qualification_state.replaceAll("_", " ")}</span></div>
-    {recipient.attachment_notice && <p className="mt-2 font-medium text-amber-800">Attachments received — bid intake pending</p>}
+    {quotes.length > 0 && <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-white p-3"><p className="font-semibold text-emerald-800">Stored quote submissions · {quotes.length}</p>{quotes.map((quote) => <div key={quote.id} className="border-t pt-2"><p>{quote.source === "inbound_email" ? "Received by email" : "Uploaded manually"} · {new Date(quote.received_at).toLocaleString()} · {quote.file_count} file{quote.file_count === 1 ? "" : "s"}</p>{quote.attachments.map((attachment) => <div key={attachment.id} className="mt-1 flex flex-wrap items-center gap-2"><span>{attachment.filename}</span><button type="button" onClick={() => void downloadQuote(quote, attachment)} className="font-semibold text-blue-700">Download privately</button></div>)}</div>)}</div>}
+    {pendingQuoteAttachments(recipient).map((item) => <div key={item.id} className="mt-2 text-sm"><div className="flex flex-wrap items-center gap-2"><span className="font-medium text-amber-800">Quote attachment received · {item.attachment_count} file{item.attachment_count === 1 ? "" : "s"} · not imported</span>{canEdit && <button type="button" disabled={busy} onClick={() => void importQuote(item.id)} className="rounded border border-blue-300 px-2 py-1 font-semibold text-blue-800 disabled:opacity-50">Import Quote</button>}</div>{importFailures[item.id] && <p role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-red-800">{importFailures[item.id]}</p>}</div>)}
     {canTrack && <div className="mt-3 space-y-2 rounded-lg border bg-white p-3"><p className="font-semibold">Record a response or human decision</p><div className="flex flex-wrap gap-2"><select aria-label={`Response channel for ${recipient.company_name}`} value={channel} onChange={(event) => setChannel(event.target.value)} className="rounded border p-2"><option value="phone">Phone</option><option value="email">Email outside tracked thread</option><option value="other">Other</option></select><input aria-label={`Response note for ${recipient.company_name}`} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Short response note" className="min-w-48 flex-1 rounded border p-2" /></div><div className="flex flex-wrap gap-2">{([ ["Record response", "responded"], ["Mark declined", "declined"], ["Mark needs follow-up", "needs_follow_up"] ] as const).map(([label, outcome]) => <button key={outcome} type="button" disabled={busy || !note.trim()} onClick={() => void record({ outcome, channel, note }).then((saved) => { if (saved) setNote(""); })} className="rounded border border-blue-200 px-3 py-2 font-medium text-blue-800 disabled:opacity-50">{label}</button>)}</div><div className="border-t pt-3"><input aria-label={`Qualification note for ${recipient.company_name}`} value={qualificationNote} onChange={(event) => setQualificationNote(event.target.value)} placeholder="Qualification note (required if not qualified)" className="w-full rounded border p-2" /><div className="mt-2 flex flex-wrap gap-2">{([ ["Needs follow-up", "needs_follow_up"], ["Qualify", "qualified"], ["Mark not qualified", "not_qualified"] ] as const).map(([label, state]) => <button key={state} type="button" disabled={busy || (state === "not_qualified" && !qualificationNote.trim())} onClick={() => void qualify({ state, note: qualificationNote }).then((saved) => { if (saved) setQualificationNote(""); })} className="rounded border border-emerald-200 px-3 py-2 font-medium text-emerald-800 disabled:opacity-50">{label}</button>)}</div></div></div>}
     <details className="mt-3"><summary className="cursor-pointer font-medium text-blue-800">Chronological activity · {recipient.activity.length}</summary>{recipient.activity.length === 0 ? <p className="mt-2 text-slate-500">No tracked activity yet.</p> : <ol className="mt-2 space-y-2 border-l pl-4">{recipient.activity.map((item, index) => <li key={`${item.at}-${index}`}><time className="text-xs text-slate-500">{new Date(item.at).toLocaleString()}</time><p>{item.label}</p>{item.note && <p className="text-xs text-slate-600">{item.note}</p>}</li>)}</ol>}</details>
   </div>;

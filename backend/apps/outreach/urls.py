@@ -3,9 +3,12 @@ from django.urls import path
 from .views import (
     BatchCreateView,
     BatchDeliveryView,
+    BidAttachmentDownloadView,
+    BidSubmissionListView,
     CampaignCreateView,
     CampaignRFQPreviewView,
     CampaignSetupView,
+    InboundBidImportView,
     MessageRetryView,
     OutreachSenderSettingsView,
     OutreachSMTPConnectionTestView,
@@ -21,6 +24,21 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/",
+        BidSubmissionListView.as_view(),
+        name="bid-submission-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/inbound-responses/<int:response_pk>/import-quote/",
+        InboundBidImportView.as_view(),
+        name="inbound-bid-import",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/attachments/<int:attachment_pk>/download/",
+        BidAttachmentDownloadView.as_view(),
+        name="bid-attachment-download",
+    ),
     path(
         "webhooks/resend/<uuid:endpoint_token>/",
         ResendWebhookView.as_view(),

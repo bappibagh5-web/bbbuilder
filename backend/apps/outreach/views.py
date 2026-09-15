@@ -1,25 +1,32 @@
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from rest_framework import serializers
+from rest_framework.exceptions import NotFound
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.contractors.models import Contact, ScopeContractorCandidate
-from apps.documents.views import ProjectDocumentContextMixin
+from apps.documents.storage import ObjectStorageError, get_object_storage
+from apps.documents.views import ProjectDocumentContextMixin, StorageUnavailable
 from apps.organizations.models import Organization
 from apps.organizations.permissions import (
     ActiveOrganizationMember,
     OrganizationAdmin,
     OrganizationOperator,
+    OrganizationReadWritePermission,
 )
 from apps.scope_packages.models import ScopePackage, ScopePackageVersion
 
+from .bid_intake import import_inbound_quote, record_manual_quote
 from .delivery import approve_batch_send, deliver_message, prepare_batch_messages, readiness
 from .models import (
+    BidAttachment,
+    BidSubmission,
     InvitationBatch,
     InvitationCampaign,
     InvitationRecipient,
@@ -47,6 +54,156 @@ def api_validation_error(error):
     if hasattr(error, "message_dict"):
         return serializers.ValidationError(error.message_dict)
     return serializers.ValidationError({"detail": error.messages})
+
+
+def bid_submission_data(submission):
+    return {
+        "id": submission.pk,
+        "recipient_id": submission.recipient_id,
+        "campaign_id": submission.campaign_id,
+        "batch_id": submission.batch_id,
+        "company_id": submission.company_id,
+        "contact_id": submission.contact_id,
+        "trade": submission.campaign.trade_category,
+        "scope_version_id": submission.scope_version_id,
+        "company_name": submission.recipient.company_name,
+        "source": submission.source,
+        "status": submission.status,
+        "received_at": submission.received_at,
+        "file_count": len(submission.attachments.all()),
+        "attachments": [
+            {
+                "id": attachment.pk,
+                "filename": attachment.original_filename,
+                "content_type": attachment.content_type,
+                "byte_size": attachment.byte_size,
+            }
+            for attachment in submission.attachments.all()
+        ],
+    }
+
+
+class BidSubmissionListView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationReadWritePermission,)
+    parser_classes = (MultiPartParser, FormParser)
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        organization = self.get_organization()
+        submissions = (
+            BidSubmission.objects.filter(project=project, organization=organization)
+            .select_related("campaign", "recipient")
+            .prefetch_related("attachments")
+        )
+        recipients = (
+            InvitationRecipient.objects.filter(
+                batch__campaign__project=project,
+                batch__campaign__organization=organization,
+            )
+            .exclude(current_status__in=("prepared", "cancelled"))
+            .select_related("batch__campaign")
+        )
+        return Response(
+            {
+                "submissions": [bid_submission_data(item) for item in submissions],
+                "recipient_choices": [
+                    {
+                        "id": item.pk,
+                        "label": (
+                            f"{item.batch.campaign.trade_category} · {item.company_name}"
+                            f" · Batch {item.batch.sequence}"
+                        ),
+                    }
+                    for item in recipients
+                ],
+            }
+        )
+
+    def post(self, request, *args, **kwargs):
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["recipient_id"] = serializers.IntegerField(min_value=1)
+        serializer.fields["received_at"] = serializers.DateTimeField()
+        serializer.fields["note"] = serializers.CharField(
+            required=False, allow_blank=True, max_length=1000
+        )
+        serializer.fields["request_key"] = serializers.UUIDField(required=False)
+        serializer.is_valid(raise_exception=True)
+        recipient = get_object_or_404(
+            InvitationRecipient,
+            pk=serializer.validated_data["recipient_id"],
+            batch__campaign__project=self.get_project(),
+            batch__campaign__organization=self.get_organization(),
+        )
+        try:
+            submission = record_manual_quote(
+                recipient=recipient,
+                actor=request.user,
+                files=request.FILES.getlist("files"),
+                received_at=serializer.validated_data["received_at"],
+                note=serializer.validated_data.get("note", ""),
+                request_key=serializer.validated_data.get("request_key"),
+            )
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(
+            bid_submission_data(
+                BidSubmission.objects.prefetch_related("attachments").get(pk=submission.pk)
+            )
+        )
+
+
+class InboundBidImportView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        response = get_object_or_404(
+            OutreachResponse,
+            pk=self.kwargs["response_pk"],
+            organization=self.get_organization(),
+            recipient__batch__campaign__project=self.get_project(),
+            channel="inbound_email",
+        )
+        try:
+            submission = import_inbound_quote(response=response, actor=request.user)
+        except DjangoValidationError as error:
+            raise api_validation_error(error) from error
+        return Response(
+            bid_submission_data(
+                BidSubmission.objects.prefetch_related("attachments").get(pk=submission.pk)
+            )
+        )
+
+
+class BidAttachmentDownloadView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        submission = get_object_or_404(
+            BidSubmission,
+            pk=self.kwargs["submission_pk"],
+            project=self.get_project(),
+            organization=self.get_organization(),
+        )
+        attachment = get_object_or_404(
+            BidAttachment.objects.select_related("file_asset"),
+            pk=self.kwargs["attachment_pk"],
+            submission=submission,
+        )
+        asset = attachment.file_asset
+        try:
+            stored_file = get_object_storage().open(asset.storage_key)
+        except ObjectStorageError as error:
+            raise StorageUnavailable() from error
+        if stored_file is None:
+            raise NotFound("The stored quote attachment is unavailable.")
+        response = FileResponse(
+            stored_file,
+            as_attachment=True,
+            filename=asset.original_filename,
+            content_type=attachment.content_type or "application/octet-stream",
+        )
+        response["Content-Length"] = attachment.byte_size
+        return response
 
 
 class OutreachWorkspaceView(ProjectDocumentContextMixin, APIView):

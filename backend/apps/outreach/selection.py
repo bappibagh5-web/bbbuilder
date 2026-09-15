@@ -91,6 +91,7 @@ def outreach_workspace(project):
             "batches__recipients__status_events",
             "batches__recipients__qualification_decisions",
             "batches__recipients__outreachresponse_set",
+            "batches__recipients__bidsubmission_set",
             "batches__recipients__resendwebhookevent_set",
         )
     )
@@ -171,6 +172,24 @@ def outreach_workspace(project):
                                                 response.attachment_count > 0
                                                 for response in recipient.outreachresponse_set.all()
                                             ),
+                                            "inbound_attachment_responses": [
+                                                {
+                                                    "id": response.pk,
+                                                    "attachment_count": response.attachment_count,
+                                                }
+                                                for response in recipient.outreachresponse_set.all()
+                                                if response.channel == "inbound_email"
+                                                and response.attachment_count > 0
+                                            ],
+                                            "quote_submissions": [
+                                                submission.pk
+                                                for submission in recipient.bidsubmission_set.all()
+                                            ],
+                                            "imported_response_ids": [
+                                                submission.source_response_id
+                                                for submission in recipient.bidsubmission_set.all()
+                                                if submission.source_response_id
+                                            ],
                                             "messages": [
                                                 {
                                                     "id": message.pk,

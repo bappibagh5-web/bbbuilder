@@ -22,6 +22,7 @@ _PROGRESS = {
     "opened": 3,
     "needs_follow_up": 3,
     "responded": 4,
+    "bid_submitted": 5,
     "declined": 5,
 }
 

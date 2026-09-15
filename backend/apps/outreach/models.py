@@ -176,6 +176,7 @@ class InvitationRecipient(ImmutableFieldsMixin):
         DELIVERED = "delivered", "Delivered"
         OPENED = "opened", "Opened"
         RESPONDED = "responded", "Responded"
+        BID_SUBMITTED = "bid_submitted", "Quote received"
         DECLINED = "declined", "Declined"
         FAILED = "failed", "Failed"
         NEEDS_FOLLOW_UP = "needs_follow_up", "Needs follow-up"
@@ -559,6 +560,138 @@ class OutreachResponse(ImmutableFieldsMixin):
                 name="outreach_unique_inbound_email",
             )
         ]
+
+
+class BidSubmission(ImmutableFieldsMixin):
+    class Source(models.TextChoices):
+        INBOUND_EMAIL = "inbound_email", "Received by email"
+        MANUAL_UPLOAD = "manual_upload", "Uploaded manually"
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    project = models.ForeignKey("projects.Project", on_delete=models.PROTECT)
+    scope_package = models.ForeignKey(ScopePackage, on_delete=models.PROTECT)
+    scope_version = models.ForeignKey(ScopePackageVersion, on_delete=models.PROTECT)
+    campaign = models.ForeignKey(InvitationCampaign, on_delete=models.PROTECT)
+    batch = models.ForeignKey(InvitationBatch, on_delete=models.PROTECT)
+    recipient = models.ForeignKey(InvitationRecipient, on_delete=models.PROTECT)
+    company = models.ForeignKey("contractors.Company", on_delete=models.PROTECT)
+    contact = models.ForeignKey("contractors.Contact", on_delete=models.PROTECT)
+    source_response = models.OneToOneField(
+        OutreachResponse, on_delete=models.PROTECT, null=True, blank=True
+    )
+    source = models.CharField(max_length=20, choices=Source)
+    status = models.CharField(max_length=20, choices=Status, default=Status.RECEIVED)
+    received_at = models.DateTimeField()
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    intake_note = models.CharField(max_length=1000, blank=True)
+    request_key = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "scope_package_id",
+        "scope_version_id",
+        "campaign_id",
+        "batch_id",
+        "recipient_id",
+        "company_id",
+        "contact_id",
+        "source_response_id",
+        "source",
+        "status",
+        "received_at",
+        "recorded_by_id",
+        "intake_note",
+        "request_key",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-received_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("organization", "request_key"),
+                condition=models.Q(request_key__isnull=False),
+                name="outreach_unique_bid_request_key",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        campaign = self.recipient.batch.campaign
+        if (
+            self.organization_id != campaign.organization_id
+            or self.project_id != campaign.project_id
+            or self.scope_package_id != campaign.scope_package_id
+            or self.scope_version_id != campaign.scope_version_id
+            or self.campaign_id != campaign.pk
+            or self.batch_id != self.recipient.batch_id
+            or self.company_id != self.recipient.company_id
+            or self.contact_id != self.recipient.contact_id
+        ):
+            raise ValidationError("Quote must match the exact invitation, scope, and contractor.")
+        if self.source == self.Source.INBOUND_EMAIL:
+            if (
+                not self.source_response_id
+                or self.source_response.recipient_id != self.recipient_id
+                or self.source_response.organization_id != self.organization_id
+                or self.source_response.channel != "inbound_email"
+                or self.source_response.attachment_count < 1
+            ):
+                raise ValidationError(
+                    "Import requires a correlated inbound reply with attachments."
+                )
+        elif self.source_response_id:
+            raise ValidationError("Manual upload cannot claim an inbound reply.")
+
+
+class BidAttachment(ImmutableFieldsMixin):
+    submission = models.ForeignKey(
+        BidSubmission, on_delete=models.PROTECT, related_name="attachments"
+    )
+    file_asset = models.OneToOneField("documents.FileAsset", on_delete=models.PROTECT)
+    original_filename = models.CharField(max_length=500)
+    content_type = models.CharField(max_length=255)
+    byte_size = models.PositiveBigIntegerField(validators=[MinValueValidator(1)])
+    checksum = models.CharField(max_length=64)
+    provider_attachment_id = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "submission_id",
+        "file_asset_id",
+        "original_filename",
+        "content_type",
+        "byte_size",
+        "checksum",
+        "provider_attachment_id",
+        "created_at",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("submission", "provider_attachment_id"),
+                condition=~models.Q(provider_attachment_id=""),
+                name="outreach_unique_bid_provider_attachment",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        asset = self.file_asset
+        if (
+            asset.organization_id != self.submission.organization_id
+            or self.original_filename != asset.original_filename
+            or self.content_type != (asset.detected_mime_type or asset.declared_mime_type)
+            or self.byte_size != asset.byte_size
+            or self.checksum != asset.checksum
+        ):
+            raise ValidationError("Quote attachment must match its immutable stored file.")
 
 
 class OutreachQualificationDecision(ImmutableFieldsMixin):
