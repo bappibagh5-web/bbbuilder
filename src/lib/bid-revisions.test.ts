@@ -38,7 +38,7 @@ test("commercial display groups Decimal strings without JavaScript arithmetic", 
 test("AI suggestion presentation respects money, duration, condition, fee, and tax semantics", () => {
   const candidate = (values: Partial<Parameters<typeof displayBidCandidateValue>[0]>) => ({
     kind: "condition", title: "", description: "", amount: null, currency: null,
-    treatment: null, excerpt: "", ...values,
+    treatment: null, included_in_base_bid: null, excerpt: "", ...values,
   });
   assert.equal(displayBidCandidateValue(candidate({ kind: "validity", title: "Bid Validity", amount: "30.00", excerpt: "Bid Validity: 30 days" })), "30 days");
   assert.equal(displayBidCandidateValue(candidate({ kind: "schedule", title: "Schedule", amount: "4.00", excerpt: "Schedule: 4 weeks from mobilization" })), "4 weeks from mobilization");
@@ -46,6 +46,7 @@ test("AI suggestion presentation respects money, duration, condition, fee, and t
   assert.equal(displayBidCandidateValue(candidate({ kind: "fee", title: "Mechanical permit", treatment: "included", excerpt: "Permit:\nMechanical permit included." })), "Included");
   assert.equal(displayBidCandidateValue(candidate({ kind: "tax", title: "HST", treatment: "extra", excerpt: "HST: Extra" })), "Extra");
   assert.equal(displayBidCandidateValue(candidate({ kind: "alternate", title: "Controls Upgrade", amount: "6500.00", currency: "CAD", treatment: "add" })), "CAD $6,500.00 · Add");
+  assert.equal(displayBidCandidateValue(candidate({ kind: "allowance", title: "Controls Allowance", amount: "5000.00", currency: "CAD", treatment: "allowance", included_in_base_bid: true })), "CAD $5,000.00 · Allowance · Included in Base Bid");
 });
 
 test("AI extraction is explicit, suggestion-only, and never triggers on page load", () => {
@@ -63,4 +64,12 @@ test("Viewer stays read-only and Ready requires a separate human action", () => 
   assert.match(editor, /selected\.readiness_blockers\.length > 0/);
   assert.match(api, /method: "POST"/);
   assert.match(api, /bidReadinessCopy/);
+});
+
+test("unlinked scope suggestions explain why confirmation is unavailable", () => {
+  assert.match(editor, /No exact Ready scope item is linked/);
+  assert.match(editor, /Ignore this suggestion/);
+  assert.match(editor, /candidate\.scope_item_id === null/);
+  assert.match(editor, /!missingScopeItem && <button/);
+  assert.match(editor, />Human confirm<\/button>/);
 });

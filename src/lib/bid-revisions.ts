@@ -35,6 +35,7 @@ export type BidScopeItemChoice = { id: number; title: string; sequence: number }
 export type BidCandidate = {
   kind: string; title: string; description: string; amount: string | null;
   currency: string | null; treatment: string | null; scope_item_id: number | null;
+  included_in_base_bid: boolean | null;
   page_number: number; excerpt: string;
 };
 export type BidExtraction = {

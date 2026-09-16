@@ -294,6 +294,7 @@ def test_ai_candidate_requires_exact_page_and_safe_amount():
         "currency": "CAD",
         "treatment": None,
         "scope_item_id": None,
+        "included_in_base_bid": None,
         "page_number": 1,
         "excerpt": "Base Bid $6,500",
     }
@@ -316,6 +317,7 @@ def test_ai_candidate_classifies_commercial_permit_without_reclassifying_scope()
         "currency": None,
         "treatment": None,
         "scope_item_id": None,
+        "included_in_base_bid": None,
         "page_number": 1,
     }
     permit = {
@@ -339,6 +341,171 @@ def test_ai_candidate_classifies_commercial_permit_without_reclassifying_scope()
     assert result[0]["treatment"] == "included"
     assert result[1]["kind"] == "scope_coverage"
     assert result[1]["treatment"] is None
+
+
+def test_ai_candidate_preserves_allowance_inclusion_and_separates_lead_time_from_schedule():
+    text = (
+        "Controls Allowance CAD 5,000.00 Included in Base Bid\n"
+        "Equipment lead time is 14 weeks.\n"
+        "Schedule: 5 weeks from mobilization"
+    )
+    page = [{"page_number": 1, "text": text}]
+    common = {
+        "amount": None,
+        "currency": None,
+        "treatment": None,
+        "scope_item_id": None,
+        "included_in_base_bid": None,
+        "page_number": 1,
+    }
+    allowance = {
+        **common,
+        "kind": "allowance",
+        "title": "Controls Allowance",
+        "description": "Controls allowance",
+        "amount": "5000",
+        "currency": "CAD",
+        "excerpt": "Controls Allowance CAD 5,000.00 Included in Base Bid",
+    }
+    lead_time = {
+        **common,
+        "kind": "schedule",
+        "title": "Equipment lead time",
+        "description": "Equipment lead time is 14 weeks.",
+        "excerpt": "Equipment lead time is 14 weeks.",
+    }
+    schedule = {
+        **common,
+        "kind": "schedule",
+        "title": "Schedule",
+        "description": "5 weeks from mobilization",
+        "excerpt": "Schedule: 5 weeks from mobilization",
+    }
+
+    result = validate_candidates({"candidates": [allowance, lead_time, schedule]}, page, {998})
+
+    assert result[0]["kind"] == "allowance"
+    assert result[0]["amount"] == "5000.00"
+    assert result[0]["currency"] == "CAD"
+    assert result[0]["included_in_base_bid"] is True
+    assert result[1]["kind"] == "condition"
+    assert result[2]["kind"] == "schedule"
+    assert all(candidate["scope_item_id"] is None for candidate in result)
+
+
+def test_accepting_allowance_candidate_preserves_included_in_base(
+    setup, user, storage, monkeypatch
+):
+    _, submission = source(setup, user)
+    revision = create_revision(submission=submission, actor=user)
+    run = BidExtractionRun.objects.create(
+        submission=submission,
+        attachment=submission.attachments.first(),
+        requested_by=user,
+        provider="openai",
+        model="gpt-5-mini",
+        schema_version=3,
+        status="succeeded",
+        candidates=[
+            {
+                "kind": "allowance",
+                "title": "Controls Allowance",
+                "description": "Controls allowance",
+                "amount": "5000.00",
+                "currency": "CAD",
+                "treatment": "allowance",
+                "scope_item_id": None,
+                "included_in_base_bid": True,
+                "page_number": 1,
+                "excerpt": "Controls Allowance CAD 5,000.00 Included in Base Bid",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "apps.outreach.bid_extraction.quote_pages",
+        lambda _: [
+            {
+                "page_number": 1,
+                "text": "Controls Allowance CAD 5,000.00 Included in Base Bid",
+            }
+        ],
+    )
+
+    decision = decide_candidate(
+        run=run, revision=revision, actor=user, index=0, decision="accepted"
+    )
+
+    assert decision.commercial_item.kind == "allowance"
+    assert decision.commercial_item.amount == Decimal("5000.00")
+    assert decision.commercial_item.currency == "CAD"
+    assert decision.commercial_item.included_in_base == "yes"
+
+
+def test_confirmed_summary_candidates_map_currency_validity_and_schedule_without_duplicates(
+    setup, user, storage, monkeypatch
+):
+    _, submission = source(setup, user)
+    revision = create_revision(submission=submission, actor=user)
+    excerpt = {
+        "base_bid": "Base Bid: CAD 176,500.00",
+        "validity": "Bid Validity: 21 days",
+        "schedule": "Schedule: 5 weeks from mobilization",
+        "condition": "Equipment lead time is 14 weeks.",
+    }
+    candidates = [
+        {
+            "kind": kind,
+            "title": title,
+            "description": description,
+            "amount": amount,
+            "currency": currency,
+            "treatment": None,
+            "scope_item_id": None,
+            "included_in_base_bid": None,
+            "page_number": 1,
+            "excerpt": excerpt[kind],
+        }
+        for kind, title, description, amount, currency in (
+            ("base_bid", "Base Bid", "Base bid amount", "176500.00", "CAD"),
+            ("validity", "Bid Validity", "Bid validity period", None, None),
+            ("schedule", "Schedule", "Work schedule", None, None),
+            ("condition", "Equipment lead time", "Equipment lead time", None, None),
+        )
+    ]
+    run = BidExtractionRun.objects.create(
+        submission=submission,
+        attachment=submission.attachments.first(),
+        requested_by=user,
+        provider="openai",
+        model="gpt-5-mini",
+        schema_version=3,
+        status="succeeded",
+        candidates=candidates,
+    )
+    monkeypatch.setattr(
+        "apps.outreach.bid_extraction.quote_pages",
+        lambda _: [{"page_number": 1, "text": "\n".join(excerpt.values())}],
+    )
+
+    for index in range(len(candidates)):
+        decide_candidate(run=run, revision=revision, actor=user, index=index, decision="accepted")
+
+    revision.refresh_from_db()
+    assert revision.base_bid == Decimal("176500.00")
+    assert revision.currency == "CAD"
+    assert revision.currency_review == "confirmed"
+    assert revision.validity_days == 21
+    assert revision.schedule_text == "5 weeks from mobilization"
+    assert list(revision.commercial_items.values_list("title", flat=True)) == [
+        "Equipment lead time"
+    ]
+    assert set(revision.evidence.values_list("field_key", flat=True)) == {
+        "base_bid",
+        "currency",
+        "validity_days",
+        "schedule_text",
+        "",
+    }
 
 
 def test_viewer_reads_revision_but_cannot_structure_or_ready(
@@ -436,6 +603,7 @@ def test_explicit_mocked_real_provider_proposal_is_evidence_grounded_and_not_rea
                 "currency": "CAD",
                 "treatment": None,
                 "scope_item_id": None,
+                "included_in_base_bid": None,
                 "page_number": 1,
                 "excerpt": "Base Bid $6,500",
             },
@@ -447,6 +615,7 @@ def test_explicit_mocked_real_provider_proposal_is_evidence_grounded_and_not_rea
                 "currency": "CAD",
                 "treatment": None,
                 "scope_item_id": None,
+                "included_in_base_bid": None,
                 "page_number": 1,
                 "excerpt": "Base Bid $7,000",
             },
@@ -503,6 +672,7 @@ def test_human_candidate_correction_is_a_draft_decision_with_exact_quote_evidenc
         "currency": "CAD",
         "treatment": None,
         "scope_item_id": None,
+        "included_in_base_bid": None,
         "page_number": 1,
         "excerpt": "Base Bid $6,500.01",
     }

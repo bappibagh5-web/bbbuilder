@@ -335,16 +335,20 @@ function BidCandidateRow({ candidate, index, decision, canReview, decide }: {
 }) {
   const [correction, setCorrection] = useState("");
   const [correctionNote, setCorrectionNote] = useState("");
+  const missingScopeItem = candidate.kind === "scope_coverage" && candidate.scope_item_id === null;
   return <div className="space-y-2 rounded-lg border p-3 text-sm">
     <strong>{candidate.title}</strong> · {candidate.kind} · Source page {candidate.page_number}
     <p>{displayBidCandidateValue(candidate)}</p>
     <blockquote className="border-l-2 border-indigo-200 pl-2 text-slate-600">{candidate.excerpt}</blockquote>
     {decision ? <p className="font-semibold text-emerald-700">{decision === "ignored" ? "Ignored by you" : decision === "corrected" ? "Human corrected" : "Human confirmed"}</p> : canReview && <>
+      {missingScopeItem && <p className="rounded-lg bg-amber-50 p-2 text-amber-900">No exact Ready scope item is linked. Ignore this suggestion; record coverage manually only if you can identify the exact scope item.</p>}
+      {!missingScopeItem && <>
       <input aria-label={`Correct suggestion ${index + 1}`} value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder={candidate.kind === "tax" ? "included / extra / exempt / not_stated" : candidate.kind === "currency" ? "Three-letter currency code" : candidate.kind === "scope_coverage" ? "included / excluded / qualified / not_addressed / needs_clarification" : "Correct amount or description before confirming"} className="w-full rounded-lg border p-2" />
       <input aria-label={`Correction reason ${index + 1}`} value={correctionNote} onChange={(event) => setCorrectionNote(event.target.value)} placeholder="Why you corrected this suggestion" className="w-full rounded-lg border p-2" />
+      </>}
       <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={() => void decide("accepted")} className="font-semibold text-emerald-700">Human confirm</button>
-        <button type="button" disabled={!correction || !correctionNote} onClick={() => void decide("corrected", correction, correctionNote)} className="font-semibold text-blue-700 disabled:opacity-50">Correct & confirm</button>
+        {!missingScopeItem && <button type="button" onClick={() => void decide("accepted")} className="font-semibold text-emerald-700">Human confirm</button>}
+        {!missingScopeItem && <button type="button" disabled={!correction || !correctionNote} onClick={() => void decide("corrected", correction, correctionNote)} className="font-semibold text-blue-700 disabled:opacity-50">Correct & confirm</button>}
         <button type="button" onClick={() => void decide("ignored")} className="font-semibold text-slate-600">Ignore</button>
       </div>
     </>}

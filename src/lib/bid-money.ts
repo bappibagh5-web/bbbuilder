@@ -15,6 +15,7 @@ type BidCandidateDisplay = {
   amount: string | null;
   currency: string | null;
   treatment: string | null;
+  included_in_base_bid?: boolean | null;
   excerpt: string;
 };
 
@@ -50,7 +51,11 @@ export function displayBidCandidateValue(candidate: BidCandidateDisplay): string
     const money = candidate.amount === null
       ? ""
       : displayBidMoney(candidate.amount, candidate.currency ?? "");
-    return [money, treatment].filter(Boolean).join(" · ") || exactEvidenceValue(candidate);
+    const baseBid = candidate.kind === "allowance" && candidate.included_in_base_bid !== null
+      && candidate.included_in_base_bid !== undefined
+      ? candidate.included_in_base_bid ? "Included in Base Bid" : "Excluded from Base Bid"
+      : "";
+    return [money, treatment, baseBid].filter(Boolean).join(" · ") || exactEvidenceValue(candidate);
   }
   return treatment || candidate.description.trim();
 }

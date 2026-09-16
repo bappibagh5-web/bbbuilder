@@ -19,7 +19,7 @@ from .models import BidAttachment, BidExtractionRun
 
 MAX_AI_QUOTE_BYTES = 20 * 1024 * 1024
 MAX_AI_QUOTE_TEXT = 100_000
-BID_EXTRACTION_SCHEMA_VERSION = 2
+BID_EXTRACTION_SCHEMA_VERSION = 3
 EXTRACTION_KINDS = {
     "base_bid",
     "tax",
@@ -46,6 +46,17 @@ COMMERCIAL_TREATMENTS = {
 }
 FEE_SUBJECT_PATTERN = re.compile(
     r"\b(permits?|inspection fees?|bonds?|freight|delivery|duties|fees?|charges?)\b",
+    re.IGNORECASE,
+)
+LEAD_TIME_PATTERN = re.compile(
+    r"\b(lead[\s-]?time|procurement duration|manufacturing duration|delivery duration)\b",
+    re.IGNORECASE,
+)
+INCLUDED_IN_BASE_PATTERN = re.compile(
+    r"\b(included in (?:the )?base bid|included in base price)\b", re.IGNORECASE
+)
+EXCLUDED_FROM_BASE_PATTERN = re.compile(
+    r"\b(not included in (?:the )?base bid|excluded from (?:the )?base bid)\b",
     re.IGNORECASE,
 )
 
@@ -75,6 +86,15 @@ def normalize_candidate(raw):
     )
     if candidate.get("kind") == "scope_coverage" and FEE_SUBJECT_PATTERN.search(evidence):
         candidate["kind"] = "fee"
+    if candidate.get("kind") == "schedule" and LEAD_TIME_PATTERN.search(evidence):
+        candidate["kind"] = "condition"
+    if candidate.get("kind") == "allowance":
+        if EXCLUDED_FROM_BASE_PATTERN.search(evidence):
+            candidate["included_in_base_bid"] = False
+        elif INCLUDED_IN_BASE_PATTERN.search(evidence):
+            candidate["included_in_base_bid"] = True
+    else:
+        candidate["included_in_base_bid"] = None
     if candidate.get("kind") in {"fee", "tax"}:
         candidate["treatment"] = commercial_treatment(candidate.get("treatment"), evidence)
     elif candidate.get("kind") == "alternate" and candidate.get("treatment"):
@@ -112,6 +132,7 @@ def extraction_schema():
                 "enum": [*sorted(COMMERCIAL_TREATMENTS), None],
             },
             "scope_item_id": {"type": ["integer", "null"]},
+            "included_in_base_bid": {"type": ["boolean", "null"]},
             "page_number": {"type": "integer"},
             "excerpt": {"type": "string"},
         },
@@ -123,6 +144,7 @@ def extraction_schema():
             "currency",
             "treatment",
             "scope_item_id",
+            "included_in_base_bid",
             "page_number",
             "excerpt",
         ],
@@ -188,6 +210,8 @@ def validate_candidates(output, pages, scope_item_ids):
             and (
                 not isinstance(raw["scope_item_id"], int) or isinstance(raw["scope_item_id"], bool)
             )
+            or raw["included_in_base_bid"] is not None
+            and not isinstance(raw["included_in_base_bid"], bool)
         ):
             continue
         page = raw["page_number"]
@@ -298,7 +322,10 @@ def process_bid_extraction(run_id):
                 "commercial charges as kind fee, never scope_coverage. Use only controlled "
                 "treatments add, deduct, no_cost, price_on_request, included, excluded, extra, "
                 "allowance, or not_stated. Ordinary physical construction obligations remain "
-                "scope_coverage. "
+                "scope_coverage. Preserve an explicit allowance statement that it is included "
+                "in or excluded from the base bid in included_in_base_bid; otherwise use null. "
+                "Classify procurement, equipment, manufacturing, or delivery lead time as a "
+                "condition, not schedule. Keep actual work or mobilization duration as schedule. "
                 "Do not infer missing amounts, taxes, currency or exclusions from silence. "
                 "Do not compare contractors or recommend a winner."
             ),

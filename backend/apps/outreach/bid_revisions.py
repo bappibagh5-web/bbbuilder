@@ -23,6 +23,7 @@ from .models import (
 )
 
 MONEY_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$")
+VALIDITY_DAYS_PATTERN = re.compile(r"\b([1-9][0-9]{0,4})\s+days?\b", re.IGNORECASE)
 
 
 def decimal_money(value):
@@ -38,6 +39,30 @@ def decimal_money(value):
     if not amount.is_finite() or amount >= Decimal("10000000000000000"):
         raise ValidationError({"amount": "Amount is outside the supported range."})
     return amount.quantize(Decimal("0.01"))
+
+
+def candidate_validity_days(values):
+    """Recover only an explicitly stated day count from grounded candidate text."""
+    evidence = " ".join(str(values.get(field) or "") for field in ("description", "excerpt"))
+    match = VALIDITY_DAYS_PATTERN.search(evidence)
+    if not match:
+        raise ValidationError("Bid validity must state an exact number of days.")
+    return int(match.group(1))
+
+
+def candidate_schedule_text(values):
+    """Keep the grounded schedule wording without turning it into a condition item."""
+    description = str(values.get("description") or "").strip()
+    excerpt_lines = [
+        line.strip() for line in str(values.get("excerpt") or "").splitlines() if line.strip()
+    ]
+    exact = excerpt_lines[-1] if excerpt_lines else ""
+    if exact.lower().startswith("schedule:"):
+        exact = exact.split(":", 1)[1].strip()
+    schedule = exact or description
+    if not schedule:
+        raise ValidationError("Schedule wording is required.")
+    return schedule
 
 
 def audit(revision, actor, action, metadata=None):
@@ -321,16 +346,35 @@ def decide_candidate(*, run, revision, actor, index, decision, corrections=None)
     if decision != BidCandidateDecision.Decision.IGNORED:
         kind = candidate["kind"]
         if kind == "base_bid":
+            summary = {
+                "base_bid": values["amount"],
+                "base_bid_review": BidRevision.ReviewState.CONFIRMED
+                if values["amount"] is not None
+                else BidRevision.ReviewState.NOT_STATED,
+            }
+            if values.get("currency"):
+                summary.update(
+                    {
+                        "currency": values["currency"],
+                        "currency_review": BidRevision.ReviewState.CONFIRMED,
+                    }
+                )
             save_summary(
                 revision=revision,
                 actor=actor,
-                values={
-                    "base_bid": values["amount"],
-                    "base_bid_review": BidRevision.ReviewState.CONFIRMED
-                    if values["amount"] is not None
-                    else BidRevision.ReviewState.NOT_STATED,
-                },
+                values=summary,
             )
+            if values.get("currency"):
+                add_evidence(
+                    revision=revision,
+                    actor=actor,
+                    attachment=run.attachment,
+                    field_key="currency",
+                    source=BidEvidence.Source.QUOTE,
+                    page_number=candidate["page_number"],
+                    excerpt=candidate["excerpt"],
+                    note=values.get("note", ""),
+                )
             field_key = "base_bid"
         elif kind == "currency":
             save_summary(
@@ -357,6 +401,20 @@ def decide_candidate(*, run, revision, actor, index, decision, corrections=None)
                 },
             )
             field_key = "tax_treatment"
+        elif kind == "validity":
+            save_summary(
+                revision=revision,
+                actor=actor,
+                values={"validity_days": candidate_validity_days(values)},
+            )
+            field_key = "validity_days"
+        elif kind == "schedule":
+            save_summary(
+                revision=revision,
+                actor=actor,
+                values={"schedule_text": candidate_schedule_text(values)},
+            )
+            field_key = "schedule_text"
         elif kind == "scope_coverage":
             from apps.scope_packages.models import ScopeItem
 
@@ -393,11 +451,19 @@ def decide_candidate(*, run, revision, actor, index, decision, corrections=None)
                 "fee": BidCommercialItem.Kind.FEE,
                 "exclusion": BidCommercialItem.Kind.EXCLUSION,
                 "condition": BidCommercialItem.Kind.CONDITION,
-                "validity": BidCommercialItem.Kind.CONDITION,
-                "schedule": BidCommercialItem.Kind.CONDITION,
             }
             if kind not in mapped:
                 raise ValidationError("This suggestion cannot be applied as commercial truth.")
+            included_in_base = values.get("included_in_base")
+            if included_in_base is None:
+                included_flag = values.get("included_in_base_bid")
+                included_in_base = (
+                    "yes"
+                    if included_flag is True
+                    else "no"
+                    if included_flag is False
+                    else "unclear"
+                )
             item = save_commercial_item(
                 revision=revision,
                 actor=actor,
@@ -409,7 +475,7 @@ def decide_candidate(*, run, revision, actor, index, decision, corrections=None)
                     "amount": values.get("amount"),
                     "currency": values.get("currency") or "",
                     "category": values.get("category", ""),
-                    "included_in_base": values.get("included_in_base", "unclear"),
+                    "included_in_base": included_in_base,
                 },
             )
             field_key = ""
