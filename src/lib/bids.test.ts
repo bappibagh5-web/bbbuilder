@@ -33,3 +33,11 @@ test("inbound quote import is explicit and Viewer cannot trigger it", () => {
   assert.match(outreach, /Stored quote submissions/);
   assert.match(outreach, /Download privately/);
 });
+
+test("inbox separates received intake from structured bid readiness", () => {
+  assert.match(api, /structured_status: "not_started" \| "draft" \| "ready"/);
+  assert.match(bids, /Structured bid: /);
+  assert.match(bids, /Ready for Comparison/);
+  assert.match(bids, /Not started/);
+  assert.match(bids, /setSelectedQuoteId\(0\); void refresh\(\)/);
+});

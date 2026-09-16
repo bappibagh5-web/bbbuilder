@@ -5,7 +5,8 @@ export type QuoteSubmission = {
   id: number; recipient_id: number; campaign_id: number; batch_id: number;
   company_id: number; contact_id: number; trade: string; scope_version_id: number;
   company_name: string; source: "inbound_email" | "manual_upload";
-  status: string; received_at: string; file_count: number; attachments: QuoteAttachment[];
+  status: string; structured_status: "not_started" | "draft" | "ready";
+  received_at: string; file_count: number; attachments: QuoteAttachment[];
 };
 export type QuoteRecipientChoice = { id: number; label: string };
 

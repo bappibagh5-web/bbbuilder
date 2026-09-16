@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -7,7 +8,7 @@ from django.db import models
 
 from apps.contractors.models import ScopeContractorCandidate
 from apps.documents.models import ImmutableFieldsMixin
-from apps.scope_packages.models import ScopePackage, ScopePackageVersion
+from apps.scope_packages.models import ScopeItem, ScopePackage, ScopePackageVersion
 
 
 class InvitationCampaign(ImmutableFieldsMixin):
@@ -704,3 +705,495 @@ class OutreachQualificationDecision(ImmutableFieldsMixin):
     occurred_at = models.DateTimeField(auto_now_add=True)
 
     immutable_fields = ("recipient_id", "state", "note", "actor_id", "occurred_at")
+
+
+class BidRevision(ImmutableFieldsMixin):
+    """Human-controlled commercial interpretation; the source quote remains immutable."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        READY = "ready", "Ready for Comparison"
+        SUPERSEDED = "superseded", "Superseded"
+
+    class TaxTreatment(models.TextChoices):
+        INCLUDED = "included", "Included"
+        EXTRA = "extra", "Extra"
+        EXEMPT = "exempt", "Exempt"
+        NOT_STATED = "not_stated", "Not stated / needs confirmation"
+
+    class ReviewState(models.TextChoices):
+        UNREVIEWED = "unreviewed", "Not yet reviewed"
+        CONFIRMED = "confirmed", "Human confirmed"
+        NOT_STATED = "not_stated", "Not stated in quote"
+
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    project = models.ForeignKey("projects.Project", on_delete=models.PROTECT)
+    scope_package = models.ForeignKey(ScopePackage, on_delete=models.PROTECT)
+    scope_version = models.ForeignKey(ScopePackageVersion, on_delete=models.PROTECT)
+    company = models.ForeignKey("contractors.Company", on_delete=models.PROTECT)
+    recipient = models.ForeignKey(InvitationRecipient, on_delete=models.PROTECT)
+    submission = models.ForeignKey(
+        BidSubmission, on_delete=models.PROTECT, related_name="revisions"
+    )
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    contractor_label = models.CharField(max_length=120, blank=True)
+    request_key = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    currency = models.CharField(max_length=3, blank=True)
+    currency_review = models.CharField(
+        max_length=20, choices=ReviewState, default=ReviewState.UNREVIEWED
+    )
+    base_bid = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    base_bid_review = models.CharField(
+        max_length=20, choices=ReviewState, default=ReviewState.UNREVIEWED
+    )
+    tax_treatment = models.CharField(
+        max_length=20, choices=TaxTreatment, default=TaxTreatment.NOT_STATED
+    )
+    tax_reviewed = models.BooleanField(default=False)
+    commercial_items_reviewed = models.BooleanField(default=False)
+    scope_reviewed = models.BooleanField(default=False)
+    validity_date = models.DateField(null=True, blank=True)
+    validity_days = models.PositiveIntegerField(null=True, blank=True)
+    schedule_text = models.CharField(max_length=500, blank=True)
+    estimator_notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_bid_revisions"
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ready_bid_revisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "scope_package_id",
+        "scope_version_id",
+        "company_id",
+        "recipient_id",
+        "submission_id",
+        "supersedes_id",
+        "sequence",
+        "request_key",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-sequence", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("recipient", "sequence"), name="outreach_unique_bid_revision_sequence"
+            ),
+            models.UniqueConstraint(
+                fields=("submission", "request_key"),
+                condition=models.Q(request_key__isnull=False),
+                name="outreach_unique_bid_revision_request",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        source = self.submission
+        if (
+            self.organization_id != source.organization_id
+            or self.project_id != source.project_id
+            or self.scope_package_id != source.scope_package_id
+            or self.scope_version_id != source.scope_version_id
+            or self.company_id != source.company_id
+            or self.recipient_id != source.recipient_id
+        ):
+            raise ValidationError("Structured bid must match the exact source submission.")
+        if self.supersedes_id and (
+            self.supersedes_id == self.pk
+            or self.supersedes.recipient_id != self.recipient_id
+            or self.supersedes.scope_version_id != self.scope_version_id
+            or self.supersedes.sequence >= self.sequence
+        ):
+            raise ValidationError("Superseded revision must be earlier for this exact invitation.")
+        if self.currency and (
+            len(self.currency) != 3
+            or not self.currency.isalpha()
+            or self.currency != self.currency.upper()
+        ):
+            raise ValidationError({"currency": "Enter a three-letter uppercase currency code."})
+        if self.currency_review == self.ReviewState.CONFIRMED and not self.currency:
+            raise ValidationError({"currency": "A confirmed currency requires a value."})
+        if self.currency_review == self.ReviewState.NOT_STATED and self.currency:
+            raise ValidationError({"currency": "Not stated currency must remain blank."})
+        if self.base_bid is not None and (
+            not self.base_bid.is_finite() or self.base_bid < Decimal("0")
+        ):
+            raise ValidationError({"base_bid": "Enter a nonnegative finite amount."})
+        if self.base_bid_review == self.ReviewState.CONFIRMED and self.base_bid is None:
+            raise ValidationError({"base_bid": "A confirmed base bid requires an amount."})
+        if self.base_bid_review == self.ReviewState.NOT_STATED and self.base_bid is not None:
+            raise ValidationError({"base_bid": "Not stated base bid must remain blank."})
+        if self.validity_date and self.validity_days:
+            raise ValidationError("Use either a validity date or stated number of days.")
+        if self.status != self.Status.DRAFT and (not self.reviewed_by_id or not self.reviewed_at):
+            raise ValidationError("Ready commercial data requires an explicit reviewer and time.")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values("status").first()
+            if previous and previous["status"] != self.Status.DRAFT:
+                raise ValidationError("Ready bid history is frozen. Create a successor revision.")
+        return super().save(*args, **kwargs)
+
+
+class BidCommercialItem(ImmutableFieldsMixin):
+    class Kind(models.TextChoices):
+        ALTERNATE = "alternate", "Alternate / option"
+        ALLOWANCE = "allowance", "Allowance"
+        FEE = "fee", "Permit / fee / tax"
+        EXCLUSION = "exclusion", "Explicit exclusion"
+        CONDITION = "condition", "Qualification / condition"
+
+    class Treatment(models.TextChoices):
+        ADD = "add", "Add"
+        DEDUCT = "deduct", "Deduct"
+        NO_COST = "no_cost", "No cost"
+        PRICE_ON_REQUEST = "price_on_request", "Price on request"
+        INCLUDED = "included", "Included"
+        EXCLUDED = "excluded", "Excluded"
+        EXTRA = "extra", "Extra"
+        ALLOWANCE = "allowance", "Allowance"
+        NOT_STATED = "not_stated", "Not stated"
+
+    class Inclusion(models.TextChoices):
+        YES = "yes", "Yes"
+        NO = "no", "No"
+        UNCLEAR = "unclear", "Unclear"
+
+    revision = models.ForeignKey(
+        BidRevision, on_delete=models.PROTECT, related_name="commercial_items"
+    )
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    kind = models.CharField(max_length=20, choices=Kind)
+    contractor_label = models.CharField(max_length=120, blank=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=40, blank=True)
+    treatment = models.CharField(max_length=30, choices=Treatment, blank=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, blank=True)
+    included_in_base = models.CharField(max_length=10, choices=Inclusion, default=Inclusion.UNCLEAR)
+    scope_item = models.ForeignKey(ScopeItem, null=True, blank=True, on_delete=models.PROTECT)
+    estimator_note = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("revision_id", "sequence", "created_at")
+
+    class Meta:
+        ordering = ("sequence", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("revision", "sequence"), name="outreach_unique_bid_item_sequence"
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready bid items are frozen.")
+        if (
+            self.scope_item_id
+            and self.scope_item.package_version_id != self.revision.scope_version_id
+        ):
+            raise ValidationError("Scope item must belong to the exact quoted Ready scope version.")
+        if self.amount is not None and (not self.amount.is_finite() or self.amount < Decimal("0")):
+            raise ValidationError({"amount": "Enter a nonnegative finite amount."})
+        if self.amount is not None and not self.currency:
+            raise ValidationError({"currency": "An amount requires an explicit currency."})
+        if self.currency and (
+            len(self.currency) != 3
+            or not self.currency.isalpha()
+            or self.currency != self.currency.upper()
+        ):
+            raise ValidationError({"currency": "Enter a three-letter uppercase currency code."})
+        if self.kind == self.Kind.ALTERNATE:
+            if (
+                self.treatment in (self.Treatment.ADD, self.Treatment.DEDUCT)
+                and self.amount is None
+            ):
+                raise ValidationError("Priced add/deduct alternates require an explicit amount.")
+            if self.treatment == self.Treatment.NO_COST and self.amount not in (None, Decimal("0")):
+                raise ValidationError("No-cost alternate cannot have a positive amount.")
+
+    def delete(self, *args, **kwargs):
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready bid items are frozen.")
+        return super().delete(*args, **kwargs)
+
+
+class BidScopeCoverage(ImmutableFieldsMixin):
+    class State(models.TextChoices):
+        INCLUDED = "included", "Confirmed included"
+        EXCLUDED = "excluded", "Confirmed excluded"
+        QUALIFIED = "qualified", "Qualified / conditional"
+        NOT_ADDRESSED = "not_addressed", "Not addressed"
+        NEEDS_CLARIFICATION = "needs_clarification", "Needs clarification"
+
+    revision = models.ForeignKey(
+        BidRevision, on_delete=models.PROTECT, related_name="scope_coverage"
+    )
+    scope_item = models.ForeignKey(ScopeItem, on_delete=models.PROTECT)
+    state = models.CharField(max_length=30, choices=State, default=State.NOT_ADDRESSED)
+    wording = models.TextField(blank=True)
+    estimator_note = models.CharField(max_length=1000, blank=True)
+    reviewed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("revision_id", "scope_item_id", "created_at")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("revision", "scope_item"), name="outreach_unique_bid_scope_coverage"
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready scope coverage is frozen.")
+        if self.scope_item.package_version_id != self.revision.scope_version_id:
+            raise ValidationError("Coverage must use the exact quoted Ready scope version.")
+        if (
+            self.state in (self.State.INCLUDED, self.State.EXCLUDED, self.State.QUALIFIED)
+            and not self.wording.strip()
+        ):
+            raise ValidationError("Confirmed coverage requires contractor wording or evidence.")
+
+    def delete(self, *args, **kwargs):
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready scope coverage is frozen.")
+        return super().delete(*args, **kwargs)
+
+
+class BidEvidence(ImmutableFieldsMixin):
+    class Source(models.TextChoices):
+        QUOTE = "quote", "Original quote"
+        ESTIMATOR = "estimator", "Estimator note"
+        CONTRACTOR = "contractor", "Contractor clarification"
+        AI_SUGGESTED = "ai_suggested", "AI suggested"
+
+    revision = models.ForeignKey(BidRevision, on_delete=models.PROTECT, related_name="evidence")
+    attachment = models.ForeignKey(BidAttachment, null=True, blank=True, on_delete=models.PROTECT)
+    commercial_item = models.ForeignKey(
+        BidCommercialItem, null=True, blank=True, on_delete=models.PROTECT, related_name="evidence"
+    )
+    coverage = models.ForeignKey(
+        BidScopeCoverage, null=True, blank=True, on_delete=models.PROTECT, related_name="evidence"
+    )
+    field_key = models.CharField(max_length=50, blank=True)
+    source = models.CharField(max_length=20, choices=Source)
+    page_number = models.PositiveIntegerField(null=True, blank=True)
+    excerpt = models.TextField(blank=True)
+    note = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "revision_id",
+        "attachment_id",
+        "commercial_item_id",
+        "coverage_id",
+        "field_key",
+        "source",
+        "page_number",
+        "excerpt",
+        "note",
+        "created_at",
+    )
+
+    def clean(self):
+        super().clean()
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready bid evidence is frozen.")
+        if self.attachment_id and self.attachment.submission_id != self.revision.submission_id:
+            raise ValidationError("Evidence file must belong to the exact source submission.")
+        if self.commercial_item_id and self.commercial_item.revision_id != self.revision_id:
+            raise ValidationError("Evidence item must belong to this structured revision.")
+        if self.coverage_id and self.coverage.revision_id != self.revision_id:
+            raise ValidationError("Evidence coverage must belong to this structured revision.")
+        if (
+            sum(
+                bool(value) for value in (self.commercial_item_id, self.coverage_id, self.field_key)
+            )
+            != 1
+        ):
+            raise ValidationError(
+                "Evidence must support one commercial field, item or scope decision."
+            )
+        if self.page_number and not self.attachment_id:
+            raise ValidationError("A page reference requires a source attachment.")
+        if self.source == self.Source.QUOTE and not self.attachment_id:
+            raise ValidationError("Original-quote evidence requires its exact source attachment.")
+        if self.source != self.Source.QUOTE and not self.note.strip():
+            raise ValidationError("Estimator or contractor evidence requires a human note.")
+        if (
+            self.source == self.Source.QUOTE
+            and self.attachment_id
+            and self.attachment.content_type == "application/pdf"
+            and self.excerpt
+            and not self.page_number
+        ):
+            raise ValidationError("A PDF excerpt requires its exact source page.")
+        if (
+            self.source == self.Source.QUOTE
+            and self.attachment_id
+            and self.page_number
+            and self.excerpt
+            and self.attachment.content_type == "application/pdf"
+        ):
+            from .bid_extraction import quote_pages
+
+            page = next(
+                (
+                    item
+                    for item in quote_pages(self.attachment)
+                    if item["page_number"] == self.page_number
+                ),
+                None,
+            )
+            if page is None or self.excerpt not in page["text"]:
+                raise ValidationError("Quote excerpt must occur exactly on the source PDF page.")
+
+    def delete(self, *args, **kwargs):
+        if not BidRevision.objects.filter(
+            pk=self.revision_id, status=BidRevision.Status.DRAFT
+        ).exists():
+            raise ValidationError("Ready bid evidence is frozen.")
+        return super().delete(*args, **kwargs)
+
+
+class BidExtractionRun(ImmutableFieldsMixin):
+    """Durable provider proposal, never a commercial decision or Ready revision."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    submission = models.ForeignKey(
+        BidSubmission, on_delete=models.PROTECT, related_name="extraction_runs"
+    )
+    attachment = models.ForeignKey(BidAttachment, on_delete=models.PROTECT)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    provider = models.CharField(max_length=40)
+    model = models.CharField(max_length=100)
+    schema_version = models.PositiveIntegerField(default=1)
+    request_key = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status, default=Status.QUEUED)
+    candidates = models.JSONField(default=list, blank=True)
+    request_id = models.CharField(max_length=120, blank=True)
+    usage = models.JSONField(default=dict, blank=True)
+    safe_error_code = models.CharField(max_length=60, blank=True)
+    safe_error_message = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "submission_id",
+        "attachment_id",
+        "requested_by_id",
+        "provider",
+        "model",
+        "schema_version",
+        "request_key",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("submission", "request_key"),
+                condition=models.Q(request_key__isnull=False),
+                name="outreach_unique_bid_extraction_request",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.attachment.submission_id != self.submission_id:
+            raise ValidationError("Extraction file must belong to the exact quote submission.")
+        if self.pk:
+            old = type(self).objects.filter(pk=self.pk).values("status").first()
+            if old and old["status"] in (self.Status.SUCCEEDED, self.Status.FAILED):
+                raise ValidationError("Completed AI extraction history is frozen.")
+
+
+class BidCandidateDecision(ImmutableFieldsMixin):
+    class Decision(models.TextChoices):
+        ACCEPTED = "accepted", "Accepted by human"
+        CORRECTED = "corrected", "Corrected by human"
+        IGNORED = "ignored", "Ignored by human"
+
+    run = models.ForeignKey(BidExtractionRun, on_delete=models.PROTECT, related_name="decisions")
+    candidate_index = models.PositiveIntegerField()
+    revision = models.ForeignKey(BidRevision, on_delete=models.PROTECT)
+    decision = models.CharField(max_length=20, choices=Decision)
+    commercial_item = models.ForeignKey(
+        BidCommercialItem, null=True, blank=True, on_delete=models.PROTECT
+    )
+    evidence = models.ForeignKey(BidEvidence, null=True, blank=True, on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "run_id",
+        "candidate_index",
+        "revision_id",
+        "decision",
+        "commercial_item_id",
+        "evidence_id",
+        "actor_id",
+        "created_at",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("run", "candidate_index", "revision"),
+                name="outreach_unique_bid_candidate_decision",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.run.submission_id != self.revision.submission_id
+            or not BidRevision.objects.filter(
+                pk=self.revision_id, status=BidRevision.Status.DRAFT
+            ).exists()
+            or self.candidate_index >= len(self.run.candidates)
+            or self.run.status != BidExtractionRun.Status.SUCCEEDED
+        ):
+            raise ValidationError("Candidate decision must belong to this Draft and source quote.")
+        if self.commercial_item_id and self.commercial_item.revision_id != self.revision_id:
+            raise ValidationError("Candidate item must belong to this Draft.")
+        if self.evidence_id and self.evidence.revision_id != self.revision_id:
+            raise ValidationError("Candidate evidence must belong to this Draft.")

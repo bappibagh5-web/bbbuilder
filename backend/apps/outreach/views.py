@@ -57,6 +57,14 @@ def api_validation_error(error):
 
 
 def bid_submission_data(submission):
+    revision_statuses = {revision.status for revision in submission.revisions.all()}
+    structured_status = (
+        "ready"
+        if "ready" in revision_statuses
+        else "draft"
+        if "draft" in revision_statuses
+        else "not_started"
+    )
     return {
         "id": submission.pk,
         "recipient_id": submission.recipient_id,
@@ -69,6 +77,7 @@ def bid_submission_data(submission):
         "company_name": submission.recipient.company_name,
         "source": submission.source,
         "status": submission.status,
+        "structured_status": structured_status,
         "received_at": submission.received_at,
         "file_count": len(submission.attachments.all()),
         "attachments": [
@@ -93,7 +102,7 @@ class BidSubmissionListView(ProjectDocumentContextMixin, APIView):
         submissions = (
             BidSubmission.objects.filter(project=project, organization=organization)
             .select_related("campaign", "recipient")
-            .prefetch_related("attachments")
+            .prefetch_related("attachments", "revisions")
         )
         recipients = (
             InvitationRecipient.objects.filter(

@@ -6,7 +6,9 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 through M3-06 are **COMPLETE and manually validated**. M3-07 is NEXT / NOT STARTED.
+Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 through M3-07 are **COMPLETE and manually validated**. M3-08 is NEXT / NOT STARTED.
+
+M3-07 keeps each original BidSubmission/BidAttachment/FileAsset immutable and adds an explicitly created, human-controlled structured BidRevision bound to the exact invitation and Ready ScopePackageVersion. Decimal-string money, base-bid review, currency and tax treatment, distinct alternates/allowances/fees/exclusions/conditions, exact-version ScopeItem coverage, and compact source evidence are separate. Not stated is not zero; Not addressed is not excluded. Draft commercial data is editable; Ready for Comparison requires explicit Admin/Estimator review and freezes its commercial meaning. A later submission never silently supersedes an earlier revision. Optional native-text PDF OpenAI extraction is user-triggered, suggestion-only, and persists grounded evidence without marking a bid Ready. Schema V2 live validation passed with `gpt-5-mini`: Run 4 produced the accepted grounded commercial suggestions, including fee/included permit treatment and evidence-aware non-money units. Runs 2 and 3 remain preserved provider-unavailable history caused by restricted local Celery outbound socket access, not OpenAI authentication or model availability; production Celery must run with normal outbound HTTPS access. M3-08 comparison/leveling and contractor selection are not started.
 
 M3-06 adds explicit manual quote intake and explicit import of attachments from an already-correlated Resend reply. Each received submission freezes the exact Ready scope version, invitation campaign/batch/recipient, company and contact; each original file is privately stored as an immutable checked FileAsset with SHA-256 and an associated BidAttachment. Multiple original files and later separate submissions remain historical. Receiving a webhook never imports or qualifies a quote automatically; only an authorized human intake action advances the recipient to Bid Submitted. The production Bids tab lists submissions and offers authenticated downloads. Real Project 3 manual validation passed: an inbound quote attachment was imported and privately downloaded, while a separate manual upload remained a distinct immutable submission. The exact Ready scope version 79, Campaign 1, Batch 4, recipient and project bindings were preserved; qualification remains Not reviewed. Pricing extraction, comparison, award, and M3-07 are not implemented.
 
@@ -45,7 +47,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 and Milestone 2 are COMPLETE. M3-01 through M3-06 are COMPLETE and manually validated. M3-07 is NEXT / NOT STARTED.**
+**Milestone 1 and Milestone 2 are COMPLETE. M3-01 through M3-07 are COMPLETE and manually validated. M3-08 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 

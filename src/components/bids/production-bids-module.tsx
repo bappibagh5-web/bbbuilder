@@ -5,6 +5,7 @@ import { bidsApi, type QuoteRecipientChoice, type QuoteSubmission } from "@/lib/
 import type { OrganizationMembership } from "@/lib/auth";
 import type { ProductionProject } from "@/lib/projects";
 import { Card } from "@/components/ui/card";
+import { StructuredBidEditor } from "@/components/bids/structured-bid-editor";
 
 export function ProductionBidsModule({ project, membership }: { project: ProductionProject; membership: OrganizationMembership }) {
   const slug = membership.organization.slug;
@@ -19,6 +20,7 @@ export function ProductionBidsModule({ project, membership }: { project: Product
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
   const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
+  const [selectedQuoteId, setSelectedQuoteId] = useState(0);
 
   async function refresh() {
     const list = await bidsApi.list(slug, project.id);
@@ -52,6 +54,12 @@ export function ProductionBidsModule({ project, membership }: { project: Product
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The private attachment could not be opened."); }
   }
+  const selectedQuote = quotes.find((quote) => quote.id === selectedQuoteId);
+  if (selectedQuote) return <StructuredBidEditor
+    quote={selectedQuote} slug={slug} projectId={project.id} canEdit={canRecord}
+    onBack={() => { setSelectedQuoteId(0); void refresh().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Bid status could not be refreshed.")); }}
+    download={(attachment) => { void download(selectedQuote, attachment); }}
+  />;
   return <div className="space-y-5">
     <div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold uppercase text-indigo-700">Bid inbox</span><h2 className="mt-3 text-xl font-semibold text-slate-950">Received trade quotes</h2><p className="mt-1 text-sm text-slate-600">Store the original quote files against the exact invitation and Ready scope version. This page does not compare or approve pricing.</p></div>
     {error && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">{error}</Card>}
@@ -62,6 +70,6 @@ export function ProductionBidsModule({ project, membership }: { project: Product
       <textarea aria-label="Intake note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional intake note" className="w-full rounded-lg border p-2 text-sm" />
       <button type="button" disabled={busy || !recipientId || !receivedAt || files.length === 0} onClick={() => void upload()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Record Quote</button>
     </Card>}
-    {loading ? <Card className="p-5 text-sm">Loading received quotes…</Card> : quotes.length === 0 ? <Card className="p-5 text-sm text-slate-600">No quotes have been recorded for this project.</Card> : quotes.map((quote) => <Card key={quote.id} className="p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold text-slate-950">{quote.trade} · {quote.company_name}</h3><p className="text-sm text-slate-600">{quote.source === "inbound_email" ? "Received email attachment" : "Manual quote upload"} · {new Date(quote.received_at).toLocaleString()} · Exact scope version #{quote.scope_version_id} · Campaign #{quote.campaign_id}, Batch #{quote.batch_id}</p></div><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">Received</span></div><ul className="mt-3 space-y-2">{quote.attachments.map((attachment) => <li key={attachment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 text-sm"><span>{attachment.filename} · {(attachment.byte_size / 1024).toFixed(1)} KB</span><button type="button" onClick={() => void download(quote, attachment)} className="font-semibold text-blue-700">Download privately</button></li>)}</ul></Card>)}
+    {loading ? <Card className="p-5 text-sm">Loading received quotes…</Card> : quotes.length === 0 ? <Card className="p-5 text-sm text-slate-600">No quotes have been recorded for this project.</Card> : quotes.map((quote) => <Card key={quote.id} className="p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold text-slate-950">{quote.trade} · {quote.company_name}</h3><p className="text-sm text-slate-600">{quote.source === "inbound_email" ? "Received email attachment" : "Manual quote upload"} · {new Date(quote.received_at).toLocaleString()} · Exact scope version #{quote.scope_version_id} · Campaign #{quote.campaign_id}, Batch #{quote.batch_id}</p></div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">Received</span><span className={`rounded-full px-2 py-1 text-xs font-semibold ${quote.structured_status === "ready" ? "bg-green-100 text-green-800" : quote.structured_status === "draft" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>Structured bid: {quote.structured_status === "ready" ? "Ready for Comparison" : quote.structured_status === "draft" ? "Draft" : "Not started"}</span></div></div><ul className="mt-3 space-y-2">{quote.attachments.map((attachment) => <li key={attachment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 text-sm"><span>{attachment.filename} · {(attachment.byte_size / 1024).toFixed(1)} KB</span><button type="button" onClick={() => void download(quote, attachment)} className="font-semibold text-blue-700">Download privately</button></li>)}</ul><button type="button" onClick={() => setSelectedQuoteId(quote.id)} className="mt-3 rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-800">{canRecord ? "Structure Bid / View History" : "View structured bid"}</button></Card>)}
   </div>;
 }

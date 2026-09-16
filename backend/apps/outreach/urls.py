@@ -1,5 +1,15 @@
 from django.urls import path
 
+from .bid_views import (
+    BidCandidateDecisionView,
+    BidCommercialItemView,
+    BidEvidenceView,
+    BidExtractionView,
+    BidRevisionDetailView,
+    BidRevisionListView,
+    BidRevisionReadyView,
+    BidScopeCoverageView,
+)
 from .views import (
     BatchCreateView,
     BatchDeliveryView,
@@ -24,6 +34,56 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/extractions/",
+        BidExtractionView.as_view(),
+        name="bid-extraction-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/extractions/<int:run_pk>/decisions/",
+        BidCandidateDecisionView.as_view(),
+        name="bid-candidate-decision",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/",
+        BidRevisionListView.as_view(),
+        name="bid-revision-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/",
+        BidRevisionDetailView.as_view(),
+        name="bid-revision-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/ready/",
+        BidRevisionReadyView.as_view(),
+        name="bid-revision-ready",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/items/",
+        BidCommercialItemView.as_view(),
+        name="bid-revision-items",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/items/<int:item_pk>/",
+        BidCommercialItemView.as_view(),
+        name="bid-revision-item-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/scope-items/<int:scope_item_pk>/",
+        BidScopeCoverageView.as_view(),
+        name="bid-revision-scope-item",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/evidence/",
+        BidEvidenceView.as_view(),
+        name="bid-revision-evidence",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/revisions/<int:revision_pk>/evidence/<int:evidence_pk>/",
+        BidEvidenceView.as_view(),
+        name="bid-revision-evidence-detail",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/",
         BidSubmissionListView.as_view(),
