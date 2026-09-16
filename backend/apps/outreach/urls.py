@@ -10,6 +10,15 @@ from .bid_views import (
     BidRevisionReadyView,
     BidScopeCoverageView,
 )
+from .comparison_views import (
+    BidComparisonAdjustmentDetailView,
+    BidComparisonAdjustmentListView,
+    BidComparisonDetailView,
+    BidComparisonEntryDetailView,
+    BidComparisonEntryListView,
+    BidComparisonListView,
+    BidComparisonReadyView,
+)
 from .views import (
     BatchCreateView,
     BatchDeliveryView,
@@ -34,6 +43,41 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/",
+        BidComparisonListView.as_view(),
+        name="bid-comparison-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/",
+        BidComparisonDetailView.as_view(),
+        name="bid-comparison-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/entries/",
+        BidComparisonEntryListView.as_view(),
+        name="bid-comparison-entry-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/entries/<int:entry_pk>/",
+        BidComparisonEntryDetailView.as_view(),
+        name="bid-comparison-entry-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/entries/<int:entry_pk>/adjustments/",
+        BidComparisonAdjustmentListView.as_view(),
+        name="bid-comparison-adjustment-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/entries/<int:entry_pk>/adjustments/<int:adjustment_pk>/",
+        BidComparisonAdjustmentDetailView.as_view(),
+        name="bid-comparison-adjustment-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/ready/",
+        BidComparisonReadyView.as_view(),
+        name="bid-comparison-ready",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/extractions/",
         BidExtractionView.as_view(),

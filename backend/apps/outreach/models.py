@@ -1197,3 +1197,190 @@ class BidCandidateDecision(ImmutableFieldsMixin):
             raise ValidationError("Candidate item must belong to this Draft.")
         if self.evidence_id and self.evidence.revision_id != self.revision_id:
             raise ValidationError("Candidate evidence must belong to this Draft.")
+
+
+class BidComparison(ImmutableFieldsMixin):
+    """Human-created leveling workspace bound to one exact Ready scope version."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        READY = "ready", "Ready for Human Review"
+
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    project = models.ForeignKey("projects.Project", on_delete=models.PROTECT)
+    scope_package = models.ForeignKey(ScopePackage, on_delete=models.PROTECT)
+    scope_version = models.ForeignKey(ScopePackageVersion, on_delete=models.PROTECT)
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_bid_comparisons"
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reviewed_bid_comparisons",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "scope_package_id",
+        "scope_version_id",
+        "supersedes_id",
+        "sequence",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("project", "scope_version", "sequence"),
+                name="outreach_unique_comparison_sequence",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        package = self.scope_version.package
+        if (
+            self.organization_id != self.project.organization_id
+            or self.project_id != package.project_id
+            or self.scope_package_id != package.pk
+        ):
+            raise ValidationError("Comparison must match one exact project scope version.")
+        if self.supersedes_id and (
+            self.supersedes_id == self.pk
+            or self.supersedes.scope_version_id != self.scope_version_id
+            or self.supersedes.sequence >= self.sequence
+        ):
+            raise ValidationError("Superseded comparison must be earlier for this scope version.")
+        if self.status == self.Status.READY and (not self.reviewed_by_id or not self.reviewed_at):
+            raise ValidationError("Ready comparison requires an explicit human reviewer and time.")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values("status").first()
+            if previous and previous["status"] == self.Status.READY:
+                raise ValidationError("Ready comparison history is frozen. Create a successor.")
+        return super().save(*args, **kwargs)
+
+
+class BidComparisonEntry(ImmutableFieldsMixin):
+    comparison = models.ForeignKey(BidComparison, on_delete=models.PROTECT, related_name="entries")
+    revision = models.ForeignKey(BidRevision, on_delete=models.PROTECT)
+    company = models.ForeignKey("contractors.Company", on_delete=models.PROTECT)
+    company_name = models.CharField(max_length=255)
+    revision_label = models.CharField(max_length=120, blank=True)
+    added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "comparison_id",
+        "revision_id",
+        "company_id",
+        "company_name",
+        "revision_label",
+        "added_by_id",
+        "added_at",
+    )
+
+    class Meta:
+        ordering = ("company_name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("comparison", "revision"), name="outreach_unique_comparison_revision"
+            ),
+            models.UniqueConstraint(
+                fields=("comparison", "company"), name="outreach_unique_comparison_company"
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        revision = self.revision
+        comparison = self.comparison
+        if comparison.status != BidComparison.Status.DRAFT:
+            raise ValidationError("Ready comparison entries are frozen.")
+        if (
+            revision.status != BidRevision.Status.READY
+            or revision.organization_id != comparison.organization_id
+            or revision.project_id != comparison.project_id
+            or revision.scope_package_id != comparison.scope_package_id
+            or revision.scope_version_id != comparison.scope_version_id
+            or revision.company_id != self.company_id
+        ):
+            raise ValidationError("Select a Ready bid for this exact project scope version.")
+
+    def delete(self, *args, **kwargs):
+        if self.comparison.status != BidComparison.Status.DRAFT:
+            raise ValidationError("Ready comparison entries are frozen.")
+        return super().delete(*args, **kwargs)
+
+
+class BidLevelingAdjustment(ImmutableFieldsMixin):
+    class Direction(models.TextChoices):
+        ADD = "add", "Add"
+        DEDUCT = "deduct", "Deduct"
+
+    class Category(models.TextChoices):
+        SCOPE_GAP = "scope_gap", "Scope gap"
+        EXCLUSION = "exclusion_normalization", "Exclusion normalization"
+        ALTERNATE = "alternate_option", "Alternate / option"
+        ALLOWANCE = "allowance_normalization", "Allowance normalization"
+        PERMIT_FEE = "permit_fee", "Permit / fee"
+        OTHER = "other", "Other estimator adjustment"
+
+    entry = models.ForeignKey(
+        BidComparisonEntry, on_delete=models.PROTECT, related_name="adjustments"
+    )
+    direction = models.CharField(max_length=10, choices=Direction)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    category = models.CharField(max_length=40, choices=Category)
+    description = models.CharField(max_length=500)
+    scope_item = models.ForeignKey(ScopeItem, null=True, blank=True, on_delete=models.PROTECT)
+    source_commercial_item = models.ForeignKey(
+        BidCommercialItem, null=True, blank=True, on_delete=models.PROTECT
+    )
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = ("entry_id", "created_by_id", "created_at")
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def clean(self):
+        super().clean()
+        comparison = self.entry.comparison
+        if comparison.status != BidComparison.Status.DRAFT:
+            raise ValidationError("Ready leveling adjustments are frozen.")
+        if not self.amount.is_finite() or self.amount <= Decimal("0"):
+            raise ValidationError({"amount": "Enter a positive finite amount."})
+        if len(self.currency) != 3 or not self.currency.isalpha() or not self.currency.isupper():
+            raise ValidationError({"currency": "Enter a three-letter uppercase currency code."})
+        revision = self.entry.revision
+        if revision.currency and self.currency != revision.currency:
+            raise ValidationError("Adjustment currency must match the selected bid currency.")
+        if self.scope_item_id and self.scope_item.package_version_id != comparison.scope_version_id:
+            raise ValidationError("Adjustment scope item must belong to the frozen scope version.")
+        if self.source_commercial_item_id and (
+            self.source_commercial_item.revision_id != revision.pk
+        ):
+            raise ValidationError("Source commercial item must belong to this selected bid.")
+
+    def delete(self, *args, **kwargs):
+        if self.entry.comparison.status != BidComparison.Status.DRAFT:
+            raise ValidationError("Ready leveling adjustments are frozen.")
+        return super().delete(*args, **kwargs)

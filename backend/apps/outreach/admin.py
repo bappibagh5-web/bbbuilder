@@ -1,6 +1,9 @@
 from django.contrib import admin
 
 from .models import (
+    BidComparison,
+    BidComparisonEntry,
+    BidLevelingAdjustment,
     InvitationBatch,
     InvitationCampaign,
     InvitationRecipient,
@@ -72,3 +75,18 @@ class OutreachResponseAdmin(InspectionOnlyAdmin):
 @admin.register(OutreachQualificationDecision)
 class OutreachQualificationDecisionAdmin(InspectionOnlyAdmin):
     list_display = ("id", "recipient", "state", "occurred_at")
+
+
+@admin.register(BidComparison)
+class BidComparisonAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "project", "scope_version", "sequence", "status", "created_at")
+
+
+@admin.register(BidComparisonEntry)
+class BidComparisonEntryAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "comparison", "company_name", "revision", "added_at")
+
+
+@admin.register(BidLevelingAdjustment)
+class BidLevelingAdjustmentAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "entry", "direction", "amount", "currency", "category")
