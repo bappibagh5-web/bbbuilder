@@ -3,6 +3,8 @@ from django.contrib import admin
 from .models import (
     BidComparison,
     BidComparisonEntry,
+    BidHumanDecision,
+    BidHumanReview,
     BidLevelingAdjustment,
     InvitationBatch,
     InvitationCampaign,
@@ -90,3 +92,13 @@ class BidComparisonEntryAdmin(InspectionOnlyAdmin):
 @admin.register(BidLevelingAdjustment)
 class BidLevelingAdjustmentAdmin(InspectionOnlyAdmin):
     list_display = ("id", "entry", "direction", "amount", "currency", "category")
+
+
+@admin.register(BidHumanReview)
+class BidHumanReviewAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "comparison", "sequence", "status", "outcome", "finalized_at")
+
+
+@admin.register(BidHumanDecision)
+class BidHumanDecisionAdmin(InspectionOnlyAdmin):
+    list_display = ("id", "review", "comparison_entry", "state", "decided_at")

@@ -114,3 +114,12 @@ These rules are implementation invariants. Where a rule requires a technical cho
 3. Redis and Celery transport work but do not own authoritative business state.
 4. OpenAI responses are inputs to persisted analysis records, not an independent store of approved truth.
 5. n8n may coordinate later integrations but must not own authoritative project, document, review, or approval state.
+## Human bid review
+
+- Human bid review may start only from one exact BidComparison that is Ready for Human Review.
+- Every frozen comparison entry starts Undecided; no price, adjustment, score, AI output or company state may shortlist or select it automatically.
+- Bid-review Shortlisted/Not Shortlisted is separate from contractor-discovery shortlist and outreach approval.
+- Selected for Proposal requires exactly one Shortlisted entry from the same comparison plus explicit human rationale. It is not an award or contractor notification.
+- No Acceptable Bid is a valid outcome and requires a null selected entry plus explicit human rationale.
+- Finalization requires every entry decided, a legal explicit outcome and rationale, then freezes decisions, selection, actor and time. Corrections preserve the finalized record through a successor review.
+- Admin and Estimator may mutate Draft reviews; Viewer is read-only. Actual award belongs to later workflow.

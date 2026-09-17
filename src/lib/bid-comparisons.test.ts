@@ -34,7 +34,7 @@ test("scope matrix preserves missing coverage as not addressed", () => {
 
 test("ready is a human review gate and not an award", () => {
   assert.match(workspace, /Mark Ready for Human Review/);
-  assert.match(workspace, /does not recommend or award a contractor/i);
+  assert.match(workspace, /separate human review records the procurement decision/i);
 });
 
 test("grounded condition detail and evidence remain visible", () => {

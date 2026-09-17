@@ -1384,3 +1384,159 @@ class BidLevelingAdjustment(ImmutableFieldsMixin):
         if self.entry.comparison.status != BidComparison.Status.DRAFT:
             raise ValidationError("Ready leveling adjustments are frozen.")
         return super().delete(*args, **kwargs)
+
+
+class BidHumanReview(ImmutableFieldsMixin):
+    """Append-only human procurement decision over one frozen bid comparison."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        FINALIZED = "finalized", "Human Review Finalized"
+
+    class Outcome(models.TextChoices):
+        SELECTED_FOR_PROPOSAL = "selected_for_proposal", "Selected for Proposal"
+        NO_ACCEPTABLE_BID = "no_acceptable_bid", "No Acceptable Bid"
+
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.PROTECT)
+    project = models.ForeignKey("projects.Project", on_delete=models.PROTECT)
+    comparison = models.ForeignKey(
+        BidComparison, on_delete=models.PROTECT, related_name="human_reviews"
+    )
+    scope_package = models.ForeignKey(ScopePackage, on_delete=models.PROTECT)
+    scope_version = models.ForeignKey(ScopePackageVersion, on_delete=models.PROTECT)
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    sequence = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    outcome = models.CharField(max_length=30, choices=Outcome, blank=True)
+    selected_entry = models.ForeignKey(
+        BidComparisonEntry,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="proposal_selections",
+    )
+    rationale = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_bid_human_reviews"
+    )
+    finalized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="finalized_bid_human_reviews",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    finalized_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "comparison_id",
+        "scope_package_id",
+        "scope_version_id",
+        "supersedes_id",
+        "sequence",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-sequence", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("comparison", "sequence"), name="outreach_unique_human_review_sequence"
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        comparison = self.comparison
+        if (
+            comparison.status != BidComparison.Status.READY
+            or self.organization_id != comparison.organization_id
+            or self.project_id != comparison.project_id
+            or self.scope_package_id != comparison.scope_package_id
+            or self.scope_version_id != comparison.scope_version_id
+        ):
+            raise ValidationError("Human review requires this project's exact Ready comparison.")
+        if self.selected_entry_id and self.selected_entry.comparison_id != comparison.pk:
+            raise ValidationError("Selected bid must belong to the exact comparison.")
+        if self.outcome == self.Outcome.NO_ACCEPTABLE_BID and self.selected_entry_id:
+            raise ValidationError("No Acceptable Bid cannot include a selected bid.")
+        if self.outcome == self.Outcome.SELECTED_FOR_PROPOSAL and not self.selected_entry_id:
+            raise ValidationError("Selected for Proposal requires one comparison entry.")
+        if self.supersedes_id and (
+            self.supersedes_id == self.pk
+            or self.supersedes.comparison_id != comparison.pk
+            or self.supersedes.status != self.Status.FINALIZED
+            or self.supersedes.sequence >= self.sequence
+        ):
+            raise ValidationError("A correction must supersede an earlier finalized review.")
+        if self.status == self.Status.FINALIZED and (
+            not self.finalized_by_id or not self.finalized_at or not self.rationale.strip()
+        ):
+            raise ValidationError("Finalized human review requires a reviewer, time and rationale.")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values("status").first()
+            if previous and previous["status"] == self.Status.FINALIZED:
+                raise ValidationError("Finalized human review is immutable. Create a successor.")
+        return super().save(*args, **kwargs)
+
+
+class BidHumanDecision(ImmutableFieldsMixin):
+    """Explicit human classification of one frozen comparison entry."""
+
+    class State(models.TextChoices):
+        UNDECIDED = "undecided", "Undecided"
+        SHORTLISTED = "shortlisted", "Shortlisted"
+        NOT_SHORTLISTED = "not_shortlisted", "Not Shortlisted"
+
+    review = models.ForeignKey(BidHumanReview, on_delete=models.PROTECT, related_name="decisions")
+    comparison_entry = models.ForeignKey(
+        BidComparisonEntry, on_delete=models.PROTECT, related_name="human_decisions"
+    )
+    state = models.CharField(max_length=30, choices=State, default=State.UNDECIDED)
+    note = models.TextField(blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="bid_human_decisions",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    immutable_fields = ("review_id", "comparison_entry_id")
+
+    class Meta:
+        ordering = ("comparison_entry__company_name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("review", "comparison_entry"),
+                name="outreach_unique_human_decision_entry",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.review.status != BidHumanReview.Status.DRAFT:
+            raise ValidationError("Finalized bidder decisions are immutable.")
+        if self.comparison_entry.comparison_id != self.review.comparison_id:
+            raise ValidationError("Bidder decision must belong to the exact comparison.")
+        if self.state == self.State.UNDECIDED:
+            if self.decided_by_id or self.decided_at:
+                raise ValidationError("Undecided bidder cannot have decision attribution.")
+        elif not self.decided_by_id or not self.decided_at:
+            raise ValidationError("Bidder decision requires an explicit human actor and time.")
+
+    def delete(self, *args, **kwargs):
+        if self.review.status != BidHumanReview.Status.DRAFT:
+            raise ValidationError("Finalized bidder decisions are immutable.")
+        return super().delete(*args, **kwargs)

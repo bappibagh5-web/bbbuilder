@@ -1,5 +1,11 @@
 from django.urls import path
 
+from .bid_selection_views import (
+    BidHumanDecisionView,
+    BidHumanReviewDetailView,
+    BidHumanReviewFinalizeView,
+    BidHumanReviewListView,
+)
 from .bid_views import (
     BidCandidateDecisionView,
     BidCommercialItemView,
@@ -77,6 +83,26 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/ready/",
         BidComparisonReadyView.as_view(),
         name="bid-comparison-ready",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/human-reviews/",
+        BidHumanReviewListView.as_view(),
+        name="bid-human-review-list",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/human-reviews/<int:review_pk>/",
+        BidHumanReviewDetailView.as_view(),
+        name="bid-human-review-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/human-reviews/<int:review_pk>/decisions/<int:decision_pk>/",
+        BidHumanDecisionView.as_view(),
+        name="bid-human-decision",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-comparisons/<int:comparison_pk>/human-reviews/<int:review_pk>/finalize/",
+        BidHumanReviewFinalizeView.as_view(),
+        name="bid-human-review-finalize",
     ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/bid-submissions/<int:submission_pk>/extractions/",
