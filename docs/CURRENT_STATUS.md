@@ -6,7 +6,11 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestone 2 — Trade Scope Builder & Contractor Discovery is **COMPLETE**. Milestone 3 — Bid Invitations & Qualification has begun. M3-01 through M3-09 are **COMPLETE and manually validated**. M3-10 is **NEXT / NOT STARTED**.
+Milestones 1, 2, and 3 are **COMPLETE and manually validated**. M3-01 through M3-10 are complete. Milestone 4 — Proposal Generator & Award Workflow is **NEXT / NOT STARTED**.
+
+M3-10 is complete and manually validated against Project 3's integrated procurement workflow. Exact HVAC Ready ScopePackageVersion 79 remained intact from outreach through the frozen comparison and finalized human review. The existing controlled ACR recipient remained delivered/responded and received one explicit persisted `qualified` decision; private quote access, structured commercial truth, provenance, comparison totals, finalized bidder decisions, and Viewer read-only behavior all passed hard-refresh validation. No new campaign, batch, email, provider request, proposal, award, subcontract, or purchase order was created. Milestone 3 comparison evidence used controlled validation quote PDFs rather than genuine contractor-issued commercial pricing; real production infrastructure was separately validated for SMTP delivery, Resend webhooks/Receiving, inbound responses and attachments, private quote intake, structured-bid processing, comparison, and human procurement decisions. **Selected for Proposal remains an internal procurement state and is not an award.**
+
+The M3-10 performance checkpoint found and removed repeated Outreach-workspace readiness queries without changing delivery rules. Project 3 Outreach changed from 134 queries to 53 and averaged approximately 363 ms over five local requests (28.6 KB). Bids averaged approximately 42 ms / 12 queries / 1.9 KB; the comparison list approximately 46 ms / 11 queries / 1.1 KB; and comparison detail approximately 65 ms / 17 queries / 17.8 KB.
 
 M3-09 is complete and manually validated. It adds a separate human procurement-review layer over one exact immutable M3-08 Ready BidComparison. Every frozen comparison entry begins Undecided and must be explicitly marked Shortlisted or Not Shortlisted by an Admin/Estimator; price never selects or recommends a bidder. The overall human outcome is either Selected for Proposal (exactly one Shortlisted entry plus rationale) or No Acceptable Bid (no selected entry plus rationale). Finalization requires every entry decided and freezes the exact comparison, bidder decisions, outcome, rationale, actor and time; later correction uses an append-only successor review. Selected for Proposal is an internal decision, not an award. Bid shortlisting is independent from contractor-discovery shortlisting and outreach state. Real Project 3 validation finalized V1 over HVAC comparison #1/scope version 79: ACR Mechanical Ltd was explicitly Shortlisted and Selected for Proposal, D.Peppard Mechanical Inc was explicitly Not Shortlisted, the required rationale/reviewer/time were preserved, and the comparison, bids, adjustment, outreach and discovery state remained unchanged.
 
@@ -51,7 +55,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestone 1 and Milestone 2 are COMPLETE. M3-01 through M3-09 are COMPLETE and manually validated. M3-10 is NEXT / NOT STARTED.**
+**Milestones 1, 2, and 3 are COMPLETE and manually validated. M4 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -704,7 +708,7 @@ Important future concepts:
 
 Do not implement during Milestone 1.
 
-## Milestone 3 — Future
+## Milestone 3 — Historical planning baseline (completed)
 
 **Outreach, Bid Intake, Qualification & Bid Leveling**
 

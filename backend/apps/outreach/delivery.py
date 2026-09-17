@@ -23,8 +23,18 @@ from .services import _audit, _authorize, create_outreach_message
 from .smtp import SMTPDeliveryProvider, provider_status, safe_smtp_failure
 
 
+def _related_rows(instance, relation):
+    cached = getattr(instance, "_prefetched_objects_cache", {}).get(relation)
+    return list(cached) if cached is not None else list(getattr(instance, relation).all())
+
+
+def _latest_message(recipient):
+    messages = _related_rows(recipient, "messages")
+    return max(messages, key=lambda message: message.sequence, default=None)
+
+
 def _message_fingerprint(recipients):
-    latest = [recipient.messages.order_by("-sequence").first() for recipient in recipients]
+    latest = [_latest_message(recipient) for recipient in recipients]
     if not recipients or any(message is None for message in latest):
         return None
     payload = [(message.recipient_id, message.pk, message.sequence) for message in latest]
@@ -50,7 +60,14 @@ def _expected_message(message, campaign, sender, preview):
 
 
 def readiness(
-    batch, *, require_approval=True, require_messages=True, require_provider=True, for_retry=False
+    batch,
+    *,
+    require_approval=True,
+    require_messages=True,
+    require_provider=True,
+    for_retry=False,
+    sender=None,
+    provider=None,
 ):
     """Stable public blocker codes; every send endpoint re-evaluates these."""
     campaign = batch.campaign
@@ -71,19 +88,28 @@ def readiness(
         block(
             "scope_version_not_current_ready", "The exact Ready scope version is no longer current"
         )
-    recipients = list(batch.recipients.filter(current_status=InvitationRecipient.Status.PREPARED))
+    batch_recipients = _related_rows(batch, "recipients")
+    recipients = [
+        recipient
+        for recipient in batch_recipients
+        if recipient.current_status == InvitationRecipient.Status.PREPARED
+    ]
     if not recipients:
-        if all_recipients := list(
-            batch.recipients.exclude(current_status=InvitationRecipient.Status.CANCELLED)
-        ):
+        if all_recipients := [
+            recipient
+            for recipient in batch_recipients
+            if recipient.current_status != InvitationRecipient.Status.CANCELLED
+        ]:
             if all(
                 recipient.current_status != InvitationRecipient.Status.PREPARED
                 for recipient in all_recipients
             ):
                 if all(
-                    recipient.messages.filter(
-                        attempts__status=OutreachDeliveryAttempt.Status.SUCCEEDED
-                    ).exists()
+                    any(
+                        attempt.status == OutreachDeliveryAttempt.Status.SUCCEEDED
+                        for message in _related_rows(recipient, "messages")
+                        for attempt in _related_rows(message, "attempts")
+                    )
                     for recipient in all_recipients
                 ):
                     block(
@@ -109,10 +135,14 @@ def readiness(
             "questions_deadline_invalid",
             "Questions deadline must be before the bid deadline and in the future",
         )
-    sender = OutreachSenderSettings.objects.filter(organization_id=campaign.organization_id).first()
+    if sender is None:
+        sender = OutreachSenderSettings.objects.filter(
+            organization_id=campaign.organization_id
+        ).first()
     if sender is None or not sender.is_enabled:
         block("sender_required", "Sender configuration required")
-    provider = provider_status(campaign.organization)
+    if provider is None:
+        provider = provider_status(campaign.organization)
     if require_provider and provider["state"] != "configured":
         block("delivery_not_configured", "Email delivery is not configured")
     all_recipients = list(
@@ -125,9 +155,7 @@ def readiness(
     if fingerprint and sender:
         preview = build_rfq_preview(campaign=campaign)
         messages_current = all(
-            _expected_message(
-                recipient.messages.order_by("-sequence").first(), campaign, sender, preview
-            )
+            _expected_message(_latest_message(recipient), campaign, sender, preview)
             for recipient in all_recipients
         )
         if require_messages and not messages_current:
@@ -135,31 +163,38 @@ def readiness(
     approval_valid = bool(
         fingerprint
         and messages_current
-        and BatchSendApproval.objects.filter(
-            batch=batch,
-            message_fingerprint=fingerprint,
-            campaign_setup_version=campaign.setup_version,
-        ).exists()
+        and any(
+            approval.message_fingerprint == fingerprint
+            and approval.campaign_setup_version == campaign.setup_version
+            for approval in _related_rows(batch, "send_approvals")
+        )
     )
     if require_approval and not approval_valid:
-        if BatchSendApproval.objects.filter(batch=batch).exists():
+        if _related_rows(batch, "send_approvals"):
             block(
                 "send_approval_stale", "Messages changed after approval; review and approve again"
             )
         else:
             block("send_approval_required", "Explicit send approval required")
     if not for_retry and any(
-        recipient.messages.filter(attempts__status=OutreachDeliveryAttempt.Status.FAILED).exists()
+        any(
+            attempt.status == OutreachDeliveryAttempt.Status.FAILED
+            for message in _related_rows(recipient, "messages")
+            for attempt in _related_rows(message, "attempts")
+        )
         for recipient in recipients
     ):
         block("retry_required", "A failed delivery requires an explicit retry")
     if any(
-        recipient.messages.filter(
-            attempts__status__in=(
+        any(
+            attempt.status
+            in (
                 OutreachDeliveryAttempt.Status.PENDING,
                 OutreachDeliveryAttempt.Status.UNCERTAIN,
             )
-        ).exists()
+            for message in _related_rows(recipient, "messages")
+            for attempt in _related_rows(message, "attempts")
+        )
         for recipient in recipients
     ):
         block("delivery_unresolved", "A delivery outcome needs investigation before another send")

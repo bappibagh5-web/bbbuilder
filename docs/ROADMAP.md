@@ -179,6 +179,8 @@ Validate scopes, trades, and subcontractor matching against real BB Builders pro
 
 **40 hours / $1,000**
 
+**Status: COMPLETE / MANUALLY VALIDATED (M3-01 through M3-10).** Controlled validation quote PDFs were accepted for commercial comparison; real SMTP, webhook, response, attachment, private-download, and human procurement infrastructure was validated separately. No proposal or award functionality is included.
+
 **Business objective:** Allow BB Builders to invite selected subcontractors, track outreach and qualification, collect quote revisions, and compare bids on a structured, scope-aware basis.
 
 The following is a **planned implementation breakdown**:
@@ -230,6 +232,8 @@ Validate with actual BB Builders subtrade quotes and workflow evidence. Complete
 ## 9. Milestone 4 — Proposal Generator & Award Workflow
 
 **30 hours / $750**
+
+**Status: NEXT / NOT STARTED.**
 
 **Business objective:** Turn reviewed and selected trade bids and project intelligence into deterministic estimate/proposal versions, client-ready output, and a controlled award workflow.
 

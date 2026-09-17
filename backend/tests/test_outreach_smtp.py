@@ -212,9 +212,12 @@ def test_connection_only_and_test_email_are_explicit_and_audited(admin, monkeypa
     assert config.last_test_status == "smtp_authentication"
     # A failed diagnostic test does not permanently block an otherwise valid test send.
     StubSMTP.fail_login = False
-    assert run_test_email(
-        organization=organization, actor=user, recipient_email="controlled@example.invalid"
-    )["success"] is True
+    assert (
+        run_test_email(
+            organization=organization, actor=user, recipient_email="controlled@example.invalid"
+        )["success"]
+        is True
+    )
     StubSMTP.fail_login = True
     failure = run_test_email(
         organization=organization, actor=user, recipient_email="controlled@example.invalid"

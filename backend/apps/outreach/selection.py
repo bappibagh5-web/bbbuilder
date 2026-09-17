@@ -85,9 +85,10 @@ def outreach_workspace(project):
     )
     campaigns = list(
         InvitationCampaign.objects.filter(project=project)
-        .select_related("scope_version")
+        .select_related("organization", "project", "scope_package", "scope_version")
         .prefetch_related(
             "batches__recipients__messages__attempts",
+            "batches__send_approvals",
             "batches__recipients__status_events",
             "batches__recipients__qualification_decisions",
             "batches__recipients__outreachresponse_set",
@@ -96,6 +97,12 @@ def outreach_workspace(project):
         )
     )
     sender = OutreachSenderSettings.objects.filter(organization=project.organization).first()
+    provider = provider_status(project.organization)
+    batch_readiness = {
+        batch.pk: readiness(batch, sender=sender, provider=provider)
+        for campaign in campaigns
+        for batch in campaign.batches.all()
+    }
     return {
         "sender": {
             "configured": bool(sender and sender.is_enabled),
@@ -103,7 +110,7 @@ def outreach_workspace(project):
             "from_address": sender.from_address if sender else "",
             "reply_to": sender.reply_to if sender else "",
         },
-        "provider": provider_status(project.organization),
+        "provider": provider,
         "trades": [
             {
                 "scope_package_id": package.pk,
@@ -153,8 +160,8 @@ def outreach_workspace(project):
                                     "id": batch.pk,
                                     "sequence": batch.sequence,
                                     "status": batch.status,
-                                    "delivery_readiness": readiness(batch),
-                                    "send_approved": readiness(batch)["send_approved"],
+                                    "delivery_readiness": batch_readiness[batch.pk],
+                                    "send_approved": batch_readiness[batch.pk]["send_approved"],
                                     "recipients": [
                                         {
                                             "id": recipient.pk,
