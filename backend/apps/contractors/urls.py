@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     CandidateListView,
     CandidateStatusView,
+    CompanyDirectoryDetailView,
+    CompanyDirectoryView,
     CompanyProfileView,
     ContactDetailView,
     ContactEnrichmentView,
@@ -12,6 +14,16 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/contractor-companies/",
+        CompanyDirectoryView.as_view(),
+        name="contractor-company-directory",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/contractor-companies/<int:company_pk>/",
+        CompanyDirectoryDetailView.as_view(),
+        name="contractor-company-directory-detail",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/contractor-candidates/",
         CandidateListView.as_view(),

@@ -1,5 +1,16 @@
 # Architecture and Decision Log
 
+## 2026-09-20 — The global subcontractor directory is a bounded read model over existing contractor truth
+
+- `/subcontractors` uses organization-scoped `Company` records as its identity source; it does not introduce a directory/CRM duplicate.
+- Active `Contact` and `TradeCapability` records supply contact readiness and trade/service-area presentation. Project participation, outreach and bid counts/history remain derived from their existing exact records.
+- Global list and detail responses are bounded. The list is paginated and annotated; full quote files, messages, comparison matrices and document evidence are never loaded for directory presentation.
+- Recipient qualification is displayed only as project/campaign-specific history. A decision on one invitation never becomes a universal Company qualification.
+- Preserved fake-provider validation records remain in history but are excluded from production-facing directory results.
+- Contractor discovery deduplicates into the same Company truth used by the global directory and project relationships; it does not create a parallel company record for presentation.
+- Company-detail project participation groups historical candidates only by exact Project ID plus controlled trade key. It prefers the active package's current scope version, then Approved, Shortlisted, Candidate, Rejected, and recency; different trades stay separate and every underlying record remains expandable.
+- PRE-M5-01 adds no schema migration, external provider action, Prospecting behavior or M5 synchronization. Prospecting remains a separate future capability.
+
 ## How to use this log
 
 This file records decisions that constrain implementation and explicitly identifies unresolved choices. A decided item should be changed only through a new dated decision entry describing the reason and consequences. Do not silently treat an unresolved item as approved.

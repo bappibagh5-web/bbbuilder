@@ -11,8 +11,28 @@ export type ContractorContactSuggestion = Required<ContractorContactInput> & { s
 export type ContractorContactEnrichment = { suggestions: ContractorContactSuggestion[]; pages_checked: string[] };
 export type ContractorTradeCapability = { id: number; trade_key: string; trade_label: string; keywords: string[]; service_cities: string[]; province: string; is_active: boolean };
 export type ContractorCompanyProfile = ContractorCompany & { trade_capabilities: ContractorTradeCapability[]; contacts: ContractorContact[]; contact_ready: boolean; shortlist_statuses: { scope_package: number; trade_category: string; status: ContractorCandidate["status"] }[]; google_rating: number | null; google_review_count: number | null };
+export type DirectoryTrade = { trade_key: string; trade_label: string; service_cities: string[]; province: string };
+export type DirectoryCompany = ContractorCompany & { legal_name: string; trades: DirectoryTrade[]; usable_contact_count: number; primary_email_ready: boolean; project_count: number; outreach_count: number; bid_count: number; last_activity_at: string | null };
+export type DirectoryResponse = {
+  count: number; next: string | null; previous: string | null; page: number; page_size: number;
+  results: DirectoryCompany[];
+  summary: { total: number; active: number; contact_ready: number; trades_covered: number };
+  filters: { trades: { trade_key: string; trade_label: string }[]; cities: string[]; provinces: string[]; countries: string[] };
+};
+export type DirectoryDetail = {
+  company: ContractorCompany & { legal_name: string };
+  contacts: ContractorContact[];
+  trade_capabilities: ContractorTradeCapability[];
+  contact_ready: boolean;
+  project_history: { project_id: number; project_number: string; project_name: string; trade_key: string; scope_package_id: number; scope_version_id: number; trade: string; candidate_status: string; last_activity_at: string; history_count: number; history: { candidate_id: number; scope_package_id: number; scope_version_id: number; candidate_status: string; is_current_scope: boolean; last_activity_at: string }[] }[];
+  outreach_history: { recipient_id: number; project_id: number; project_name: string; campaign_id: number; batch_id: number; trade: string; invitation_state: string; response_state: string; qualification_state: string; created_at: string }[];
+  bid_history: { submission_id: number; project_id: number; project_name: string; trade: string; received_at: string; source: string; structured_status: "ready" | "draft" | "not_started" }[];
+  history_note: string;
+};
 function base(slug: string, projectId: number) { return `/organizations/${encodeURIComponent(slug)}/projects/${projectId}`; }
 export const contractorsApi = {
+  directory(slug: string, query: URLSearchParams, signal?: AbortSignal) { const suffix = query.toString(); return apiRequest<DirectoryResponse>(`/organizations/${encodeURIComponent(slug)}/contractor-companies/${suffix ? `?${suffix}` : ""}`, { signal }); },
+  directoryDetail(slug: string, companyId: number, signal?: AbortSignal) { return apiRequest<DirectoryDetail>(`/organizations/${encodeURIComponent(slug)}/contractor-companies/${companyId}/`, { signal }); },
   candidates(slug: string, projectId: number, signal?: AbortSignal, scopePackageId?: number) { const query = scopePackageId ? `?scope_package=${scopePackageId}` : ""; return apiRequest<ContractorCandidate[]>(`${base(slug, projectId)}/contractor-candidates/${query}`, { signal }); },
   coverage(slug: string, projectId: number, signal?: AbortSignal) { return apiRequest<TradeCoverageResponse>(`${base(slug, projectId)}/contractor-coverage/`, { signal }); },
   profile(slug: string, projectId: number, companyId: number) { return apiRequest<ContractorCompanyProfile>(`${base(slug, projectId)}/contractor-companies/${companyId}/`); },

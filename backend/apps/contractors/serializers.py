@@ -28,6 +28,52 @@ class CompanySerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class CompanyDirectorySerializer(serializers.ModelSerializer):
+    trades = serializers.SerializerMethodField()
+    usable_contact_count = serializers.IntegerField(read_only=True)
+    primary_email_ready = serializers.BooleanField(read_only=True)
+    project_count = serializers.IntegerField(read_only=True)
+    outreach_count = serializers.IntegerField(read_only=True)
+    bid_count = serializers.IntegerField(read_only=True)
+    last_activity_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+    def get_trades(self, company):
+        return [
+            {
+                "trade_key": capability.trade_key,
+                "trade_label": capability.get_trade_key_display(),
+                "service_cities": capability.service_cities,
+                "province": capability.province,
+            }
+            for capability in company.trade_capabilities.all()
+            if capability.is_active
+        ]
+
+    class Meta:
+        model = Company
+        fields = (
+            "id",
+            "display_name",
+            "legal_name",
+            "is_active",
+            "source_type",
+            "external_provider",
+            "city",
+            "province",
+            "country",
+            "website",
+            "phone",
+            "trades",
+            "usable_contact_count",
+            "primary_email_ready",
+            "project_count",
+            "outreach_count",
+            "bid_count",
+            "last_activity_at",
+        )
+        read_only_fields = fields
+
+
 class CandidateSerializer(serializers.ModelSerializer):
     company = CompanySerializer(read_only=True)
     match_score = serializers.SerializerMethodField()

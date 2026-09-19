@@ -2,6 +2,16 @@
 
 These rules are implementation invariants. Where a rule requires a technical choice that has not been finalized, the invariant remains binding while the mechanism is recorded as unresolved in [DECISIONS.md](./DECISIONS.md).
 
+## Organization contractor directory
+
+1. `Company` is the organization-wide contractor source of truth. Contacts and trade capabilities belong to that shared Company record.
+2. Project contractor participation, outreach and bids reference Company; they never copy a contractor into a second directory domain.
+3. Contractor discovery deduplicates against organization Company truth using the controlled identity rules before creating a new Company.
+4. Global company history is a bounded projection of existing project candidates, outreach recipients and bid submissions. It does not rewrite those records or expose private quote files.
+5. Qualification is contextual to an exact invitation/project decision. One contextual result never becomes universal Company qualification.
+6. Same-project/same-trade historical candidate records may be grouped for display, with a deterministic relevant record and expandable preserved history. Different trades remain separate.
+7. Prospecting is a separate future capability and is not part of the production Subcontractor Directory.
+
 ## M4 estimate and proposal foundation
 
 1. Estimate and Proposal are separate stable project aggregates; their versions are append-only.

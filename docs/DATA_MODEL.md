@@ -289,7 +289,7 @@ Responsibility findings should represent supply, installation, GC coordination/s
 | TradePackage | Approved project-specific collection of scope items and RFQ documents. |
 | Subcontractor | Company/business entity, separate from people and project relationships. |
 | Contact | Person/contact method, potentially associated with multiple companies over time. |
-| TradeCapability | Company-to-trade capability with geography, qualification, and evidence. |
+| TradeCapability | Company-to-trade capability with stored service areas and source/provenance metadata. |
 | BidInvitation | Controlled invitation from a trade package to a project subcontractor relationship. |
 | BidSubmission | Received quotation envelope and metadata, separate from its revisions. |
 | QuoteVersion | Immutable commercial revision with price, scope, alternates, allowances, exclusions, taxes, and attachments. |
