@@ -233,7 +233,7 @@ Validate with actual BB Builders subtrade quotes and workflow evidence. Complete
 
 **30 hours / $750**
 
-**Status: NEXT / NOT STARTED.**
+**Status: IN PROGRESS. M4-01 through M4-04 are complete and manually validated; M4-05 is next/not started.**
 
 **Business objective:** Turn reviewed and selected trade bids and project intelligence into deterministic estimate/proposal versions, client-ready output, and a controlled award workflow.
 
@@ -247,17 +247,25 @@ Create estimate/proposal entities, immutable versions, project/customer relation
 
 Financial arithmetic must be deterministic; language models are not the calculator of record. Handle subtotal, markups, allowances, alternates, taxes and other explicitly defined calculations with deterministic rounding.
 
+**Status: COMPLETE / MANUALLY VALIDATED.**
+
 ### M4-03 Selected Bid → Estimate Assembly
 
 Use human-selected and qualified bids to assemble estimate package/line structure while preserving source-bid references.
+
+**Status: COMPLETE / MANUALLY VALIDATED.**
 
 ### M4-04 Allowances, Alternates & Exclusions
 
 Represent commercial conditions explicitly rather than burying them in prose, including proposal options where applicable.
 
+**Status: COMPLETE / MANUALLY VALIDATED.**
+
 ### M4-05 Proposal Versioning & Immutable Revisions
 
 Preserve estimate and proposal revisions and client PO/award evidence. Never overwrite prior client proposal versions.
+
+**Status: NEXT / NOT STARTED.**
 
 ### M4-06 Client Proposal PDF Generation
 

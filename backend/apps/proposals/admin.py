@@ -1,6 +1,16 @@
 from django.contrib import admin
 
-from .models import Estimate, EstimateVersion, Proposal, ProposalVersion
+from .models import (
+    Estimate,
+    EstimateAllowance,
+    EstimateAlternate,
+    EstimateExclusion,
+    EstimateFinancialAdjustment,
+    EstimateLine,
+    EstimateVersion,
+    Proposal,
+    ProposalVersion,
+)
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -42,3 +52,13 @@ class ProposalVersionAdmin(ReadOnlyAdmin):
         "estimate_version",
         "created_at",
     )
+
+
+for model in (
+    EstimateLine,
+    EstimateAllowance,
+    EstimateAlternate,
+    EstimateExclusion,
+    EstimateFinancialAdjustment,
+):
+    admin.site.register(model, ReadOnlyAdmin)

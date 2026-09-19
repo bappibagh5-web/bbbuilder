@@ -9,7 +9,24 @@ from apps.organizations.permissions import ActiveOrganizationMember, Organizatio
 from apps.organizations.services import active_membership
 from apps.projects.models import ProjectContact
 
-from .models import Estimate, EstimateVersion, Proposal
+from .calculations import calculate_estimate_version, calculation_queryset
+from .commercial import (
+    assemble_selected_reviews,
+    eligible_selected_reviews,
+    save_allowance,
+    save_alternate,
+    save_exclusion,
+    save_financial_adjustment,
+)
+from .models import (
+    Estimate,
+    EstimateAllowance,
+    EstimateAlternate,
+    EstimateExclusion,
+    EstimateFinancialAdjustment,
+    EstimateVersion,
+    Proposal,
+)
 from .services import (
     create_estimate,
     create_estimate_version,
@@ -54,6 +71,99 @@ def _proposal_version(version):
     }
 
 
+def _money(value):
+    return str(value) if value is not None else None
+
+
+def _estimate_detail(version, project):
+    lines = list(
+        version.source_lines.select_related(
+            "source_human_review",
+            "source_comparison_entry",
+            "source_bid_revision",
+            "source_scope_version",
+            "source_company",
+            "source_leveling_adjustment",
+        ).all()
+    )
+    allowances = list(version.allowances.all())
+    alternates = list(version.alternates.all())
+    exclusions = list(version.exclusions.all())
+    adjustments = list(version.financial_adjustments.all())
+    return {
+        "id": version.pk,
+        "version": version.version,
+        "status": version.status,
+        "calculation": calculate_estimate_version(version).as_dict(),
+        "eligible_selected_reviews": eligible_selected_reviews(project, version),
+        "source_lines": [
+            {
+                "id": item.pk,
+                "line_type": item.line_type,
+                "description": item.description,
+                "amount": _money(item.amount),
+                "currency": item.currency,
+                "direction": item.direction,
+                "sequence": item.sequence,
+                "review_id": item.source_human_review_id,
+                "comparison_entry_id": item.source_comparison_entry_id,
+                "bid_revision_id": item.source_bid_revision_id,
+                "scope_version_id": item.source_scope_version_id,
+                "company_id": item.source_company_id,
+                "company_name": item.company_name_snapshot,
+                "trade": item.trade_snapshot,
+                "source_category": item.source_category_snapshot,
+                "leveling_adjustment_id": item.source_leveling_adjustment_id,
+            }
+            for item in lines
+        ],
+        "allowances": [
+            {
+                "id": item.pk,
+                "description": item.description,
+                "amount": _money(item.amount),
+                "currency": item.currency,
+                "treatment": item.treatment,
+                "sequence": item.sequence,
+            }
+            for item in allowances
+        ],
+        "alternates": [
+            {
+                "id": item.pk,
+                "description": item.description,
+                "direction": item.direction,
+                "amount": _money(item.amount),
+                "currency": item.currency,
+                "included_in_estimate": item.included_in_estimate,
+                "sequence": item.sequence,
+            }
+            for item in alternates
+        ],
+        "exclusions": [
+            {"id": item.pk, "description": item.description, "sequence": item.sequence}
+            for item in exclusions
+        ],
+        "financial_adjustments": [
+            {
+                "id": item.pk,
+                "category": item.category,
+                "description": item.description,
+                "method": item.method,
+                "basis": item.basis,
+                "fixed_amount": _money(item.fixed_amount),
+                "percentage_rate": str(item.percentage_rate)
+                if item.percentage_rate is not None
+                else None,
+                "calculated_amount": _money(item.calculated_amount),
+                "currency": item.currency,
+                "sequence": item.sequence,
+            }
+            for item in adjustments
+        ],
+    }
+
+
 def proposal_workspace(project, user):
     estimate = (
         Estimate.objects.filter(project=project)
@@ -73,6 +183,23 @@ def proposal_workspace(project, user):
         and membership
         and membership.role in {membership.Role.ADMIN, membership.Role.ESTIMATOR_OPERATOR}
     )
+    current_estimate_version = None
+    if estimate is not None:
+        latest = estimate.versions.order_by("-version").first()
+        if latest is not None:
+            latest = calculation_queryset().get(pk=latest.pk)
+            current_estimate_version = _estimate_detail(latest, project)
+    bound_proposal_estimate = None
+    if proposal is not None:
+        latest_proposal = proposal.versions.order_by("-version").first()
+        if latest_proposal is not None:
+            exact_version = calculation_queryset().get(pk=latest_proposal.estimate_version_id)
+            bound_proposal_estimate = {
+                "proposal_version_id": latest_proposal.pk,
+                "estimate_version_id": exact_version.pk,
+                "estimate_version": exact_version.version,
+                "calculation": calculate_estimate_version(exact_version).as_dict(),
+            }
     return {
         "project": {
             "id": project.id,
@@ -81,6 +208,8 @@ def proposal_workspace(project, user):
             "client_name": project.client_name,
         },
         "can_edit": can_edit,
+        "current_estimate_version": current_estimate_version,
+        "bound_proposal_estimate": bound_proposal_estimate,
         "estimate": None
         if estimate is None
         else {
@@ -212,3 +341,99 @@ class ProposalVersionCreateView(ProjectDocumentContextMixin, APIView):
         except DjangoValidationError as error:
             raise _validation_error(error) from error
         return Response(proposal_workspace(project, request.user), status=status.HTTP_201_CREATED)
+
+
+class EstimateAssemblyView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["review_ids"] = serializers.ListField(
+            child=serializers.IntegerField(min_value=1), allow_empty=False
+        )
+        serializer.is_valid(raise_exception=True)
+        project = self.get_project()
+        version = get_object_or_404(
+            EstimateVersion,
+            pk=self.kwargs["version_pk"],
+            estimate__project=project,
+        )
+        try:
+            assemble_selected_reviews(
+                version=version,
+                review_ids=serializer.validated_data["review_ids"],
+                actor=request.user,
+            )
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))
+
+
+class CommercialInputSerializer(serializers.Serializer):
+    description = serializers.CharField(max_length=500, required=False)
+    amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    currency = serializers.CharField(max_length=3, required=False, allow_blank=True)
+    treatment = serializers.CharField(max_length=20, required=False)
+    direction = serializers.CharField(max_length=10, required=False)
+    included_in_estimate = serializers.BooleanField(required=False)
+    category = serializers.CharField(max_length=20, required=False)
+    method = serializers.CharField(max_length=20, required=False)
+    basis = serializers.CharField(max_length=30, required=False)
+    fixed_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    percentage_rate = serializers.DecimalField(
+        max_digits=9, decimal_places=6, required=False, allow_null=True
+    )
+
+
+COMMERCIAL_TYPES = {
+    "allowances": (EstimateAllowance, save_allowance),
+    "alternates": (EstimateAlternate, save_alternate),
+    "exclusions": (EstimateExclusion, save_exclusion),
+    "adjustments": (EstimateFinancialAdjustment, save_financial_adjustment),
+}
+
+
+class EstimateCommercialView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def _context(self):
+        project = self.get_project()
+        version = get_object_or_404(
+            EstimateVersion,
+            pk=self.kwargs["version_pk"],
+            estimate__project=project,
+        )
+        model_service = COMMERCIAL_TYPES.get(self.kwargs["kind"])
+        if model_service is None:
+            raise serializers.ValidationError({"detail": "Unknown commercial item type."})
+        return project, version, model_service
+
+    def post(self, request, *args, **kwargs):
+        project, version, (_, service) = self._context()
+        serializer = CommercialInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            service(version=version, data=serializer.validated_data, actor=request.user)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user), status=status.HTTP_201_CREATED)
+
+    def patch(self, request, *args, **kwargs):
+        project, version, (model, service) = self._context()
+        instance = get_object_or_404(model, pk=self.kwargs["item_pk"], estimate_version=version)
+        serializer = CommercialInputSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            service(
+                version=version,
+                data=serializer.validated_data,
+                actor=request.user,
+                instance=instance,
+            )
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))

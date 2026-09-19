@@ -7,9 +7,13 @@ These rules are implementation invariants. Where a rule requires a technical cho
 1. Estimate and Proposal are separate stable project aggregates; their versions are append-only.
 2. A ProposalVersion permanently references one exact EstimateVersion and never follows a later estimate dynamically.
 3. Estimate and Proposal creation is an explicit Admin/Estimator action. M3 Selected for Proposal never creates M4 records automatically, and Viewer remains read-only.
-4. Subcontractor bid/comparison amounts are procurement evidence, not client sell pricing. M4-01 copies no M3 amount and performs no arithmetic.
-5. Deterministic subtotal, markup, overhead, profit, contingency, tax, and proposal-price calculations begin in M4-02.
-6. Proposal finalization, client-facing documents, awards, subcontracts, and purchase orders remain later human-controlled work.
+4. Subcontractor bid/comparison amounts remain procurement evidence until an Admin/Estimator explicitly assembles a finalized Selected-for-Proposal review into one exact Draft EstimateVersion.
+5. The contractor Base Bid and BB Builders M3 leveling adjustments remain separate immutable EstimateLines with exact review, comparison-entry, BidRevision, ScopePackageVersion, company, and adjustment provenance.
+6. Estimate arithmetic uses backend Decimal only. Order is Base Bid, signed M3 leveling, included allowances, explicitly included ADD/DEDUCT alternates, sequenced explicit non-tax adjustments, pre-tax subtotal, then explicit tax. Each calculated adjustment rounds `ROUND_HALF_UP` to 0.01.
+7. Missing financial values are null, never zero. Mixed currencies block totals; no FX, markup, overhead, profit, contingency, tax rate, allowance amount, or alternate inclusion may be inferred.
+8. Exclusions are explicit non-arithmetic statements. Contractor commercial terms are never promoted into estimate treatment without a separate human action.
+9. Historical EstimateVersions do not follow later M3 records or later Estimate versions. ProposalVersion continues to bind one exact EstimateVersion.
+10. Proposal finalization, client-facing documents, awards, subcontracts, and purchase orders remain later human-controlled work.
 
 ## Organization and access
 

@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    EstimateAssemblyView,
+    EstimateCommercialView,
     EstimateCreateView,
     EstimateVersionCreateView,
     ProposalCreateView,
@@ -23,6 +25,21 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/estimates/<int:estimate_pk>/versions/",
         EstimateVersionCreateView.as_view(),
         name="estimate-version-create",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/estimate-versions/<int:version_pk>/assemble/",
+        EstimateAssemblyView.as_view(),
+        name="estimate-version-assemble",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/estimate-versions/<int:version_pk>/<str:kind>/",
+        EstimateCommercialView.as_view(),
+        name="estimate-commercial-create",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/estimate-versions/<int:version_pk>/<str:kind>/<int:item_pk>/",
+        EstimateCommercialView.as_view(),
+        name="estimate-commercial-detail",
     ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposals/",
