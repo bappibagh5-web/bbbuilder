@@ -6,6 +6,10 @@ from .views import (
     EstimateCreateView,
     EstimateVersionCreateView,
     ProposalCreateView,
+    ProposalFinalizeView,
+    ProposalPdfDownloadView,
+    ProposalPdfGenerateView,
+    ProposalVersionContentView,
     ProposalVersionCreateView,
     ProposalWorkspaceView,
 )
@@ -50,5 +54,25 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposals/<int:proposal_pk>/versions/",
         ProposalVersionCreateView.as_view(),
         name="proposal-version-create",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-versions/<int:version_pk>/content/",
+        ProposalVersionContentView.as_view(),
+        name="proposal-version-content",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-versions/<int:version_pk>/finalize/",
+        ProposalFinalizeView.as_view(),
+        name="proposal-version-finalize",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-versions/<int:version_pk>/pdf/",
+        ProposalPdfGenerateView.as_view(),
+        name="proposal-pdf-generate",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-pdfs/<int:artifact_pk>/download/",
+        ProposalPdfDownloadView.as_view(),
+        name="proposal-pdf-download",
     ),
 ]

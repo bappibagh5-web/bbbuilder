@@ -13,7 +13,11 @@ These rules are implementation invariants. Where a rule requires a technical cho
 7. Missing financial values are null, never zero. Mixed currencies block totals; no FX, markup, overhead, profit, contingency, tax rate, allowance amount, or alternate inclusion may be inferred.
 8. Exclusions are explicit non-arithmetic statements. Contractor commercial terms are never promoted into estimate treatment without a separate human action.
 9. Historical EstimateVersions do not follow later M3 records or later Estimate versions. ProposalVersion continues to bind one exact EstimateVersion.
-10. Proposal finalization, client-facing documents, awards, subcontracts, and purchase orders remain later human-controlled work.
+10. Proposal finalization is explicit and atomically freezes both the ProposalVersion and its exact EstimateVersion; later correction requires successor versions.
+11. Finalized proposals preserve structured client/project/financial snapshots and deterministic fingerprints so mutable upstream metadata cannot change history.
+12. Client proposal previews/PDFs never expose contractor Base Bid, M3 leveling, internal rates, procurement rationale or internal source identifiers.
+13. Final PDFs are private append-only, artifact-versioned and template-versioned immutable FileAssets generated locally without an external provider. Corrected rendering creates a new artifact and never overwrites historical files; repeated generation for the same template is idempotent.
+14. Proposal finalization is not acceptance or award; awards, subcontracts and purchase orders remain later human-controlled work.
 
 ## Organization and access
 

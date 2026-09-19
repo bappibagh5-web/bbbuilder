@@ -36,6 +36,7 @@ class Estimate(ImmutableFieldsMixin):
 class EstimateVersion(ImmutableFieldsMixin):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
+        FROZEN = "frozen", "Frozen"
 
     estimate = models.ForeignKey(Estimate, on_delete=models.PROTECT, related_name="versions")
     version = models.PositiveIntegerField()
@@ -47,6 +48,15 @@ class EstimateVersion(ImmutableFieldsMixin):
         null=True,
     )
     status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    frozen_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="frozen_estimate_versions",
+        blank=True,
+        null=True,
+    )
+    frozen_at = models.DateTimeField(blank=True, null=True)
+    calculation_fingerprint = models.CharField(max_length=64, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -58,7 +68,6 @@ class EstimateVersion(ImmutableFieldsMixin):
         "estimate_id",
         "version",
         "supersedes_id",
-        "status",
         "created_by_id",
     )
 
@@ -73,11 +82,27 @@ class EstimateVersion(ImmutableFieldsMixin):
 
     def clean(self):
         super().clean()
+        if self.status == self.Status.FROZEN and (
+            not self.frozen_by_id or not self.frozen_at or not self.calculation_fingerprint
+        ):
+            raise ValidationError("Frozen estimate versions require actor, time, and fingerprint.")
         if self.supersedes_id:
             if self.supersedes.estimate_id != self.estimate_id:
                 raise ValidationError({"supersedes": "A predecessor must belong to this estimate."})
             if self.supersedes.version >= self.version:
                 raise ValidationError({"supersedes": "A predecessor must be an earlier version."})
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.get(pk=self.pk)
+            if original.status == self.Status.FROZEN and (
+                self.status != original.status
+                or self.frozen_by_id != original.frozen_by_id
+                or self.frozen_at != original.frozen_at
+                or self.calculation_fingerprint != original.calculation_fingerprint
+            ):
+                raise ValidationError("Frozen estimate versions are immutable.")
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.estimate} V{self.version}"
@@ -133,6 +158,7 @@ class Proposal(ImmutableFieldsMixin):
 class ProposalVersion(ImmutableFieldsMixin):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
+        FINALIZED = "finalized", "Finalized"
 
     proposal = models.ForeignKey(Proposal, on_delete=models.PROTECT, related_name="versions")
     estimate_version = models.ForeignKey(
@@ -147,6 +173,31 @@ class ProposalVersion(ImmutableFieldsMixin):
         null=True,
     )
     status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    proposal_number = models.CharField(max_length=120, blank=True)
+    issue_date = models.DateField(blank=True, null=True)
+    introduction = models.TextField(blank=True)
+    scope_summary = models.TextField(blank=True)
+    commercial_notes = models.TextField(blank=True)
+    terms_conditions = models.TextField(blank=True)
+    client_contact = models.ForeignKey(
+        ProjectContact,
+        on_delete=models.PROTECT,
+        related_name="proposal_versions",
+        blank=True,
+        null=True,
+    )
+    client_project_snapshot = models.JSONField(default=dict, blank=True)
+    commercial_snapshot = models.JSONField(default=dict, blank=True)
+    snapshot_fingerprint = models.CharField(max_length=64, blank=True)
+    finalized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="finalized_proposal_versions",
+        blank=True,
+        null=True,
+    )
+    finalized_at = models.DateTimeField(blank=True, null=True)
+    finalization_note = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -159,7 +210,6 @@ class ProposalVersion(ImmutableFieldsMixin):
         "estimate_version_id",
         "version",
         "supersedes_id",
-        "status",
         "created_by_id",
     )
 
@@ -181,6 +231,20 @@ class ProposalVersion(ImmutableFieldsMixin):
             and self.estimate_version.estimate_id != self.proposal.estimate_id
         ):
             errors["estimate_version"] = "Proposal version must use its proposal's estimate."
+        if (
+            self.client_contact_id
+            and self.proposal_id
+            and self.client_contact.project_id != self.proposal.project_id
+        ):
+            errors["client_contact"] = "Proposal contact must belong to its project."
+        if self.status == self.Status.FINALIZED and (
+            not self.finalized_by_id
+            or not self.finalized_at
+            or not self.snapshot_fingerprint
+            or not self.client_project_snapshot
+            or not self.commercial_snapshot
+        ):
+            errors["status"] = "Finalized proposals require complete immutable snapshots."
         if self.supersedes_id:
             if self.supersedes.proposal_id != self.proposal_id:
                 errors["supersedes"] = "A predecessor must belong to this proposal."
@@ -189,8 +253,76 @@ class ProposalVersion(ImmutableFieldsMixin):
         if errors:
             raise ValidationError(errors)
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.get(pk=self.pk)
+            frozen_fields = (
+                "status",
+                "proposal_number",
+                "issue_date",
+                "introduction",
+                "scope_summary",
+                "commercial_notes",
+                "terms_conditions",
+                "client_contact_id",
+                "client_project_snapshot",
+                "commercial_snapshot",
+                "snapshot_fingerprint",
+                "finalized_by_id",
+                "finalized_at",
+                "finalization_note",
+            )
+            if original.status == self.Status.FINALIZED and any(
+                getattr(self, field) != getattr(original, field) for field in frozen_fields
+            ):
+                raise ValidationError("Finalized proposal versions are immutable.")
+        return super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.proposal} V{self.version}"
+
+
+class ProposalPdfArtifact(ImmutableFieldsMixin):
+    proposal_version = models.ForeignKey(
+        ProposalVersion, on_delete=models.PROTECT, related_name="pdf_artifacts"
+    )
+    file_asset = models.OneToOneField(
+        "documents.FileAsset", on_delete=models.PROTECT, related_name="proposal_pdf_artifact"
+    )
+    template_version = models.CharField(max_length=30)
+    version = models.PositiveIntegerField(default=1)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="generated_proposal_pdfs"
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "proposal_version_id",
+        "file_asset_id",
+        "template_version",
+        "version",
+        "generated_by_id",
+        "generated_at",
+    )
+
+    class Meta:
+        ordering = ("-version", "-id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("proposal_version", "version"),
+                name="unique_proposal_pdf_artifact_version",
+            ),
+        )
+
+    def clean(self):
+        super().clean()
+        if (
+            self.proposal_version_id
+            and self.proposal_version.status != ProposalVersion.Status.FINALIZED
+        ):
+            raise ValidationError(
+                {"proposal_version": "Only finalized proposals can have a final PDF."}
+            )
 
 
 class EstimateLine(ImmutableFieldsMixin):

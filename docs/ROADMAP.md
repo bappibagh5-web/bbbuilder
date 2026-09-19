@@ -233,7 +233,7 @@ Validate with actual BB Builders subtrade quotes and workflow evidence. Complete
 
 **30 hours / $750**
 
-**Status: IN PROGRESS. M4-01 through M4-04 are complete and manually validated; M4-05 is next/not started.**
+**Status: IN PROGRESS. M4-01 through M4-07 are complete and manually validated; M4-08 is next/not started.**
 
 **Business objective:** Turn reviewed and selected trade bids and project intelligence into deterministic estimate/proposal versions, client-ready output, and a controlled award workflow.
 
@@ -265,17 +265,23 @@ Represent commercial conditions explicitly rather than burying them in prose, in
 
 Preserve estimate and proposal revisions and client PO/award evidence. Never overwrite prior client proposal versions.
 
-**Status: NEXT / NOT STARTED.**
+**Status: COMPLETE / MANUALLY VALIDATED.**
 
 ### M4-06 Client Proposal PDF Generation
+
+**Status: COMPLETE / MANUALLY VALIDATED.**
 
 Produce versioned, dated, client-ready proposals with deterministic numbers and controlled wording.
 
 ### M4-07 Human Proposal Review / Finalization
 
+**Status: COMPLETE / MANUALLY VALIDATED.**
+
 Require explicit estimator approval; never finalize for the client automatically.
 
 ### M4-08 Award Decision & Subcontractor Award Records
+
+**Status: NEXT / NOT STARTED.**
 
 Record selected subcontractors and human award decisions while preserving non-winning bid history.
 

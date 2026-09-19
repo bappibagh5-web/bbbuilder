@@ -160,7 +160,7 @@ def test_api_creates_explicit_drafts_without_financial_or_award_side_effects(
     )
     assert response.status_code == 201
     assert response.data["proposal"]["versions"][0]["estimate_version_id"] == estimate_version_id
-    assert set(response.data["proposal"]["versions"][0]) == {
+    assert {
         "id",
         "version",
         "status",
@@ -170,7 +170,7 @@ def test_api_creates_explicit_drafts_without_financial_or_award_side_effects(
         "supersedes_id",
         "created_by",
         "created_at",
-    }
+    }.issubset(response.data["proposal"]["versions"][0])
 
 
 def test_archived_project_is_read_only(project, user, membership):

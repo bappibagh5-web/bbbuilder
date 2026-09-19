@@ -95,6 +95,7 @@ def create_proposal(*, estimate, estimate_version, actor, title=None, client_con
         estimate_version=estimate_version,
         version=1,
         status=ProposalVersion.Status.DRAFT,
+        client_contact=client_contact,
         created_by=actor,
     )
     record_event(
@@ -126,6 +127,11 @@ def create_proposal_version(*, proposal, estimate_version, actor):
         version=(predecessor.version + 1 if predecessor else 1),
         supersedes=predecessor,
         status=ProposalVersion.Status.DRAFT,
+        client_contact=predecessor.client_contact if predecessor else locked.client_contact,
+        introduction=predecessor.introduction if predecessor else "",
+        scope_summary=predecessor.scope_summary if predecessor else "",
+        commercial_notes=predecessor.commercial_notes if predecessor else "",
+        terms_conditions=predecessor.terms_conditions if predecessor else "",
         created_by=actor,
     )
     record_event(

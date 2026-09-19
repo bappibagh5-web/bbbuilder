@@ -18,6 +18,7 @@ from .commercial import (
     save_exclusion,
     save_financial_adjustment,
 )
+from .lifecycle import finalize_proposal, proposal_number, update_draft_content
 from .models import (
     Estimate,
     EstimateAllowance,
@@ -26,7 +27,10 @@ from .models import (
     EstimateFinancialAdjustment,
     EstimateVersion,
     Proposal,
+    ProposalPdfArtifact,
+    ProposalVersion,
 )
+from .pdf import TEMPLATE_VERSION, download_response, generate_final_pdf
 from .services import (
     create_estimate,
     create_estimate_version,
@@ -54,10 +58,12 @@ def _estimate_version(version):
         "supersedes_id": version.supersedes_id,
         "created_by": _user_label(version.created_by),
         "created_at": version.created_at,
+        "frozen_at": version.frozen_at,
     }
 
 
 def _proposal_version(version):
+    artifact = next(iter(version.pdf_artifacts.all()), None)
     return {
         "id": version.id,
         "version": version.version,
@@ -68,6 +74,28 @@ def _proposal_version(version):
         "supersedes_id": version.supersedes_id,
         "created_by": _user_label(version.created_by),
         "created_at": version.created_at,
+        "proposal_number": version.proposal_number or proposal_number(version),
+        "issue_date": version.issue_date,
+        "introduction": version.introduction,
+        "scope_summary": version.scope_summary,
+        "commercial_notes": version.commercial_notes,
+        "terms_conditions": version.terms_conditions,
+        "client_contact_id": version.client_contact_id,
+        "client_project_snapshot": version.client_project_snapshot,
+        "commercial_snapshot": version.commercial_snapshot,
+        "finalized_by": _user_label(version.finalized_by) if version.finalized_by else None,
+        "finalized_at": version.finalized_at,
+        "pdf_artifact": None
+        if artifact is None
+        else {
+            "id": artifact.pk,
+            "filename": artifact.file_asset.original_filename,
+            "generated_at": artifact.generated_at,
+            "version": artifact.version,
+            "template_version": artifact.template_version,
+        },
+        "pdf_update_available": artifact is not None
+        and artifact.template_version != TEMPLATE_VERSION,
     }
 
 
@@ -94,6 +122,7 @@ def _estimate_detail(version, project):
         "id": version.pk,
         "version": version.version,
         "status": version.status,
+        "frozen_at": version.frozen_at,
         "calculation": calculate_estimate_version(version).as_dict(),
         "eligible_selected_reviews": eligible_selected_reviews(project, version),
         "source_lines": [
@@ -174,7 +203,12 @@ def proposal_workspace(project, user):
     proposal = (
         Proposal.objects.filter(project=project)
         .select_related("created_by", "client_contact", "estimate")
-        .prefetch_related("versions__created_by", "versions__estimate_version")
+        .prefetch_related(
+            "versions__created_by",
+            "versions__estimate_version",
+            "versions__finalized_by",
+            "versions__pdf_artifacts__file_asset",
+        )
         .first()
     )
     membership = active_membership(user, project.organization)
@@ -208,6 +242,15 @@ def proposal_workspace(project, user):
             "client_name": project.client_name,
         },
         "can_edit": can_edit,
+        "client_contacts": [
+            {
+                "id": item.pk,
+                "name": item.person_name,
+                "company": item.company_name,
+                "email": item.email,
+            }
+            for item in project.contacts.filter(is_active=True)
+        ],
         "current_estimate_version": current_estimate_version,
         "bound_proposal_estimate": bound_proposal_estimate,
         "estimate": None
@@ -236,6 +279,7 @@ def proposal_workspace(project, user):
             "created_by": _user_label(proposal.created_by),
             "created_at": proposal.created_at,
             "versions": [_proposal_version(item) for item in proposal.versions.all()],
+            "current_version": _proposal_version(proposal.versions.order_by("-version").first()),
         },
     }
 
@@ -341,6 +385,94 @@ class ProposalVersionCreateView(ProjectDocumentContextMixin, APIView):
         except DjangoValidationError as error:
             raise _validation_error(error) from error
         return Response(proposal_workspace(project, request.user), status=status.HTTP_201_CREATED)
+
+
+class ProposalVersionContentView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def patch(self, request, *args, **kwargs):
+        project = self.get_project()
+        version = get_object_or_404(
+            ProposalVersion.objects.select_related("proposal__organization", "proposal__project"),
+            pk=self.kwargs["version_pk"],
+            proposal__project=project,
+        )
+        serializer = serializers.Serializer(data=request.data, partial=True)
+        serializer.fields["issue_date"] = serializers.DateField(required=False, allow_null=True)
+        for field in ("introduction", "scope_summary", "commercial_notes", "terms_conditions"):
+            serializer.fields[field] = serializers.CharField(required=False, allow_blank=True)
+        serializer.fields["client_contact_id"] = serializers.IntegerField(
+            required=False, allow_null=True, min_value=1
+        )
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        if "client_contact_id" in data:
+            contact_id = data.pop("client_contact_id")
+            data["client_contact"] = (
+                None
+                if contact_id is None
+                else get_object_or_404(ProjectContact, pk=contact_id, project=project)
+            )
+        try:
+            update_draft_content(version=version, actor=request.user, data=data)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))
+
+
+class ProposalFinalizeView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        version = get_object_or_404(
+            ProposalVersion, pk=self.kwargs["version_pk"], proposal__project=project
+        )
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["note"] = serializers.CharField(
+            required=False, allow_blank=True, max_length=2000
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            finalize_proposal(
+                version=version, actor=request.user, note=serializer.validated_data.get("note", "")
+            )
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))
+
+
+class ProposalPdfGenerateView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        version = get_object_or_404(
+            ProposalVersion, pk=self.kwargs["version_pk"], proposal__project=project
+        )
+        try:
+            _, created = generate_final_pdf(version=version, actor=request.user)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(
+            proposal_workspace(project, request.user),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ProposalPdfDownloadView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        artifact = get_object_or_404(
+            ProposalPdfArtifact.objects.select_related("file_asset", "proposal_version__proposal"),
+            pk=self.kwargs["artifact_pk"],
+            proposal_version__proposal__project=self.get_project(),
+        )
+        try:
+            return download_response(artifact)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
 
 
 class EstimateAssemblyView(ProjectDocumentContextMixin, APIView):

@@ -1,9 +1,9 @@
-import { apiRequest } from "@/lib/api-client";
+import { apiRequest, apiResponse } from "@/lib/api-client";
 
 export type EstimateVersionSummary = {
   id: number;
   version: number;
-  status: "draft";
+  status: "draft" | "frozen" | "finalized";
   status_label: string;
   supersedes_id: number | null;
   created_by: string;
@@ -13,6 +13,12 @@ export type EstimateVersionSummary = {
 export type ProposalVersionSummary = EstimateVersionSummary & {
   estimate_version_id: number;
   estimate_version: number;
+  proposal_number: string; issue_date: string | null; introduction: string; scope_summary: string;
+  commercial_notes: string; terms_conditions: string; client_contact_id: number | null; finalized_by: string | null; finalized_at: string | null;
+  client_project_snapshot: Record<string, unknown>;
+  commercial_snapshot: { currency?: string; pre_tax_amount?: string; tax_amount?: string; total_amount?: string; allowances?: Array<{ description: string; amount: string; currency: string }>; alternates?: Array<{ description: string; direction: string; amount: string; currency: string }>; exclusions?: Array<{ description: string }> };
+  pdf_artifact: null | { id: number; filename: string; generated_at: string; version: number; template_version: string };
+  pdf_update_available: boolean;
 };
 
 export type EstimateCalculation = {
@@ -35,7 +41,7 @@ export type EstimateCalculation = {
 };
 
 export type EstimateVersionDetail = {
-  id: number; version: number; status: "draft"; calculation: EstimateCalculation;
+  id: number; version: number; status: "draft" | "frozen"; frozen_at: string | null; calculation: EstimateCalculation;
   eligible_selected_reviews: Array<{
     review_id: number; review_version: number; entry_id: number; bid_revision_id: number;
     scope_version_id: number; trade: string; company_id: number; company_name: string;
@@ -57,6 +63,7 @@ export type EstimateVersionDetail = {
 export type ProposalWorkspace = {
   project: { id: number; name: string; project_number: string; client_name: string };
   can_edit: boolean;
+  client_contacts?: Array<{ id: number; name: string; company: string; email: string }>;
   current_estimate_version: EstimateVersionDetail | null;
   bound_proposal_estimate: null | {
     proposal_version_id: number; estimate_version_id: number; estimate_version: number;
@@ -77,6 +84,7 @@ export type ProposalWorkspace = {
     created_by: string;
     created_at: string;
     versions: ProposalVersionSummary[];
+    current_version?: ProposalVersionSummary;
   };
 };
 
@@ -120,5 +128,18 @@ export const proposalsApi = {
     return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/estimate-versions/${estimateVersionId}/${kind}/${itemId}/`, {
       method: "PATCH", body: JSON.stringify(payload),
     });
+  },
+  updateProposalContent(slug: string, projectId: number, versionId: number, payload: Record<string, unknown>) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/proposal-versions/${versionId}/content/`, { method: "PATCH", body: JSON.stringify(payload) });
+  },
+  finalizeProposal(slug: string, projectId: number, versionId: number) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/proposal-versions/${versionId}/finalize/`, { method: "POST", body: "{}" });
+  },
+  generatePdf(slug: string, projectId: number, versionId: number) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/proposal-versions/${versionId}/pdf/`, { method: "POST", body: "{}" });
+  },
+  async downloadPdf(slug: string, projectId: number, artifactId: number) {
+    const response = await apiResponse(`${base(slug, projectId)}/proposal-pdfs/${artifactId}/download/`);
+    return response.blob();
   },
 };

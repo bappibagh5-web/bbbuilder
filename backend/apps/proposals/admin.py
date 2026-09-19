@@ -9,6 +9,7 @@ from .models import (
     EstimateLine,
     EstimateVersion,
     Proposal,
+    ProposalPdfArtifact,
     ProposalVersion,
 )
 
@@ -60,5 +61,6 @@ for model in (
     EstimateAlternate,
     EstimateExclusion,
     EstimateFinancialAdjustment,
+    ProposalPdfArtifact,
 ):
     admin.site.register(model, ReadOnlyAdmin)
