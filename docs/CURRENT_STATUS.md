@@ -6,7 +6,9 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestones 1, 2, and 3 are **COMPLETE and manually validated**. M3-01 through M3-10 are complete. Milestone 4 — Proposal Generator & Award Workflow is **NEXT / NOT STARTED**.
+Milestones 1, 2, and 3 are **COMPLETE and manually validated**. M3-01 through M3-10 are complete. M4-01 — Estimate / Proposal Domain Model is **COMPLETE / MANUALLY VALIDATED**. M4-02 is **NEXT / NOT STARTED**.
+
+M4-01 adds separate organization/project-scoped `Estimate`, `EstimateVersion`, `Proposal`, and `ProposalVersion` records. An authorized Admin/Estimator explicitly creates the first Draft identity/version and later work appends successor Draft versions instead of rewriting history. Every ProposalVersion binds permanently to one exact EstimateVersion, and an optional existing ProjectContact may identify the intended client contact. The production Proposal tab exposes the real empty state, Draft summaries, exact-version binding, and history. Project 3 manual validation created one Estimate with preserved Draft V1/V2 and one Proposal with preserved Draft V1→Estimate V1 and V2→Estimate V2; hard refresh and Viewer read-only behavior passed. M3 Selected for Proposal did not create these records automatically and M3 subcontractor pricing was not copied into proposal preparation. This foundation intentionally includes no financial calculations, selected-bid assembly, PDFs, finalization, awards, subcontracts, or purchase orders.
 
 M3-10 is complete and manually validated against Project 3's integrated procurement workflow. Exact HVAC Ready ScopePackageVersion 79 remained intact from outreach through the frozen comparison and finalized human review. The existing controlled ACR recipient remained delivered/responded and received one explicit persisted `qualified` decision; private quote access, structured commercial truth, provenance, comparison totals, finalized bidder decisions, and Viewer read-only behavior all passed hard-refresh validation. No new campaign, batch, email, provider request, proposal, award, subcontract, or purchase order was created. Milestone 3 comparison evidence used controlled validation quote PDFs rather than genuine contractor-issued commercial pricing; real production infrastructure was separately validated for SMTP delivery, Resend webhooks/Receiving, inbound responses and attachments, private quote intake, structured-bid processing, comparison, and human procurement decisions. **Selected for Proposal remains an internal procurement state and is not an award.**
 
@@ -55,7 +57,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestones 1, 2, and 3 are COMPLETE and manually validated. M4 is NEXT / NOT STARTED.**
+**Milestones 1, 2, and 3 are COMPLETE and manually validated. M4-01 is COMPLETE / MANUALLY VALIDATED. M4-02 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -742,9 +744,11 @@ Historical BB Builders data proves the system must support:
 
 Do not implement during Milestone 1.
 
-## Milestone 4 — Future
+## Milestone 4 — In progress
 
 **Final Client Proposal & Award Workflow**
+
+M4-01's Estimate/Proposal identity and Draft-version foundation is complete and manually validated. M4-02 deterministic financial calculations and every later proposal/award capability below remain not started.
 
 High-level goals only:
 

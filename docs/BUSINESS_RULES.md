@@ -2,6 +2,15 @@
 
 These rules are implementation invariants. Where a rule requires a technical choice that has not been finalized, the invariant remains binding while the mechanism is recorded as unresolved in [DECISIONS.md](./DECISIONS.md).
 
+## M4 estimate and proposal foundation
+
+1. Estimate and Proposal are separate stable project aggregates; their versions are append-only.
+2. A ProposalVersion permanently references one exact EstimateVersion and never follows a later estimate dynamically.
+3. Estimate and Proposal creation is an explicit Admin/Estimator action. M3 Selected for Proposal never creates M4 records automatically, and Viewer remains read-only.
+4. Subcontractor bid/comparison amounts are procurement evidence, not client sell pricing. M4-01 copies no M3 amount and performs no arithmetic.
+5. Deterministic subtotal, markup, overhead, profit, contingency, tax, and proposal-price calculations begin in M4-02.
+6. Proposal finalization, client-facing documents, awards, subcontracts, and purchase orders remain later human-controlled work.
+
 ## Organization and access
 
 1. All production business records belong to an organization, initially BB Builders Ltd.

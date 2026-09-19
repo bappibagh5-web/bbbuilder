@@ -14,4 +14,5 @@ urlpatterns = [
     path("api/v1/", include("apps.scope_packages.urls")),
     path("api/v1/", include("apps.contractors.urls")),
     path("api/v1/", include("apps.outreach.urls")),
+    path("api/v1/", include("apps.proposals.urls")),
 ]
