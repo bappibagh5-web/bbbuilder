@@ -6,7 +6,9 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestones 1, 2, and 3 are **COMPLETE and manually validated**. M3-01 through M3-10 are complete. M4-01 through M4-07 are **COMPLETE / MANUALLY VALIDATED**. M4-08 is **NEXT / NOT STARTED**. Milestone 4 remains **IN PROGRESS**.
+Milestones 1, 2, 3, and 4 are **COMPLETE and manually validated**. M4-01 through M4-10 are complete. M5 is **NEXT / NOT STARTED**.
+
+M4-08 through M4-10 add explicit human project-award and trade-award decisions plus an awarded-project handoff boundary. A Project Award is bound permanently to one Finalized ProposalVersion and its exact Frozen EstimateVersion; it records an explicit accepted amount, currency, date, rationale, optional client reference and optional controlled evidence. A Trade Award is separate and binds the exact finalized M3 human review, comparison entry, Ready BidRevision, ScopePackageVersion, Company, quoted Base Bid and evaluated amount while requiring a separate explicit awarded amount. Draft-to-Confirmed transitions are human actions, confirmed records are immutable, and corrections append successor decisions. Only a Confirmed Project Award can explicitly transition a project to Awarded and create an immutable, versioned M5-ready handoff snapshot. No client acceptance, trade award, project status change, subcontract, purchase order, notification or external synchronization is inferred or automatic. The production Proposal workspace and Awarded Projects page expose these states with Viewer read-only. Project 3 manual validation created one controlled confirmed Project Award, one controlled confirmed ACR trade award and handoff snapshot V1, then explicitly transitioned the project to Awarded. These are validation records only and do not represent a real JD Sports commercial award.
 
 M4-05 through M4-07 add human-controlled Draft proposal content, atomic finalization, exact client/project/financial snapshots, EstimateVersion freezing, and private version-bound final PDF generation. Finalization is Admin/Estimator-only, freezes the exact EstimateVersion and ProposalVersion, and requires deterministic single-currency totals plus client/project metadata and a client-facing scope summary. Corrections require successor Estimate/Proposal versions. Client preview and PDF exclude contractor identity, Base Bid, M3 leveling, internal adjustment rates and procurement rationale. PDFs are generated locally with PyMuPDF from the immutable snapshot, stored as private append-only template-versioned FileAssets, and downloaded only through authenticated project-scoped endpoints. Project 3 manually validated finalized Proposal V2 and frozen Estimate V2 at CAD 190,000 pre-tax, CAD 9,500 tax and CAD 199,500 total. Historical PDF artifact V1 remains preserved; corrected template V2 produced a separate immutable artifact with portable punctuation and formatted money. Finalization is not acceptance or award; no M4-08 behavior exists.
 
@@ -63,7 +65,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestones 1, 2, and 3 are COMPLETE and manually validated. M4-01 through M4-07 are COMPLETE / MANUALLY VALIDATED. Milestone 4 is IN PROGRESS. M4-08 is NEXT / NOT STARTED.**
+**Milestones 1, 2, 3, and 4 are COMPLETE and manually validated. M4-01 through M4-10 are COMPLETE / MANUALLY VALIDATED. M5 is NEXT / NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
@@ -754,7 +756,7 @@ Do not implement during Milestone 1.
 
 **Final Client Proposal & Award Workflow**
 
-M4-01 through M4-07 are complete and manually validated. M4-08 is next and not started.
+M4-01 through M4-10 and Milestone 4 are complete and manually validated. M5 is next and has not started.
 
 High-level goals only:
 

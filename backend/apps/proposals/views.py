@@ -7,8 +7,18 @@ from rest_framework.views import APIView
 from apps.documents.views import ProjectDocumentContextMixin
 from apps.organizations.permissions import ActiveOrganizationMember, OrganizationOperator
 from apps.organizations.services import active_membership
+from apps.outreach.models import BidHumanReview
 from apps.projects.models import ProjectContact
+from apps.projects.views import OrganizationContextMixin
 
+from .awards import (
+    confirm_project_award,
+    confirm_trade_award,
+    create_project_award,
+    create_trade_award,
+    eligible_trade_reviews,
+    transition_project_to_awarded,
+)
 from .calculations import calculate_estimate_version, calculation_queryset
 from .commercial import (
     assemble_selected_reviews,
@@ -20,15 +30,18 @@ from .commercial import (
 )
 from .lifecycle import finalize_proposal, proposal_number, update_draft_content
 from .models import (
+    AwardedProjectHandoffSnapshot,
     Estimate,
     EstimateAllowance,
     EstimateAlternate,
     EstimateExclusion,
     EstimateFinancialAdjustment,
     EstimateVersion,
+    ProjectAward,
     Proposal,
     ProposalPdfArtifact,
     ProposalVersion,
+    TradeAward,
 )
 from .pdf import TEMPLATE_VERSION, download_response, generate_final_pdf
 from .services import (
@@ -96,6 +109,105 @@ def _proposal_version(version):
         },
         "pdf_update_available": artifact is not None
         and artifact.template_version != TEMPLATE_VERSION,
+    }
+
+
+def _project_award(item):
+    return {
+        "id": item.pk,
+        "sequence": item.sequence,
+        "status": item.status,
+        "proposal_version_id": item.proposal_version_id,
+        "proposal_number": item.proposal_version.proposal_number,
+        "proposal_version": item.proposal_version.version,
+        "estimate_version_id": item.estimate_version_id,
+        "estimate_version": item.estimate_version.version,
+        "award_amount": str(item.award_amount),
+        "currency": item.currency,
+        "award_date": item.award_date,
+        "rationale": item.rationale,
+        "client_reference": item.client_reference,
+        "created_by": _user_label(item.created_by),
+        "created_at": item.created_at,
+        "confirmed_by": _user_label(item.confirmed_by) if item.confirmed_by else None,
+        "confirmed_at": item.confirmed_at,
+    }
+
+
+def _trade_award(item):
+    return {
+        "id": item.pk,
+        "sequence": item.sequence,
+        "status": item.status,
+        "review_id": item.human_review_id,
+        "trade": item.scope_package.trade_category,
+        "scope_version_id": item.scope_version_id,
+        "company_id": item.company_id,
+        "company_name": item.company.display_name,
+        "bid_revision_id": item.bid_revision_id,
+        "quoted_base_bid": str(item.quoted_base_bid),
+        "evaluated_amount": str(item.evaluated_amount),
+        "award_amount": str(item.award_amount),
+        "currency": item.currency,
+        "award_date": item.award_date,
+        "rationale": item.rationale,
+        "reference_number": item.reference_number,
+        "created_by": _user_label(item.created_by),
+        "created_at": item.created_at,
+        "confirmed_by": _user_label(item.confirmed_by) if item.confirmed_by else None,
+        "confirmed_at": item.confirmed_at,
+    }
+
+
+def _award_state(project):
+    project_awards = list(
+        ProjectAward.objects.filter(project=project).select_related(
+            "proposal_version", "estimate_version", "created_by", "confirmed_by"
+        )
+    )
+    trade_awards = list(
+        TradeAward.objects.filter(project=project).select_related(
+            "scope_package",
+            "scope_version",
+            "company",
+            "bid_revision",
+            "created_by",
+            "confirmed_by",
+        )
+    )
+    awarded_review_ids = {item.human_review_id for item in trade_awards}
+    eligible = []
+    for item in eligible_trade_reviews(project):
+        eligible.append(
+            {
+                "review_id": item["review"].pk,
+                "trade": item["trade"],
+                "scope_version_id": item["review"].scope_version_id,
+                "company_id": item["entry"].company_id,
+                "company_name": item["company"],
+                "bid_revision_id": item["entry"].revision_id,
+                "quoted_base_bid": str(item["base_bid"]),
+                "currency": item["currency"],
+                "evaluated_amount": str(item["evaluated_amount"]),
+                "has_award": item["review"].pk in awarded_review_ids,
+            }
+        )
+    handoff = AwardedProjectHandoffSnapshot.objects.filter(project=project).first()
+    return {
+        "project_status": project.status,
+        "project_awards": [_project_award(item) for item in project_awards],
+        "trade_awards": [_trade_award(item) for item in trade_awards],
+        "eligible_trade_awards": eligible,
+        "handoff": None
+        if handoff is None
+        else {
+            "id": handoff.pk,
+            "sequence": handoff.sequence,
+            "project_award_id": handoff.project_award_id,
+            "created_by": _user_label(handoff.created_by),
+            "created_at": handoff.created_at,
+            "fingerprint": handoff.fingerprint,
+        },
     }
 
 
@@ -253,6 +365,7 @@ def proposal_workspace(project, user):
         ],
         "current_estimate_version": current_estimate_version,
         "bound_proposal_estimate": bound_proposal_estimate,
+        "awards": _award_state(project),
         "estimate": None
         if estimate is None
         else {
@@ -473,6 +586,153 @@ class ProposalPdfDownloadView(ProjectDocumentContextMixin, APIView):
             return download_response(artifact)
         except DjangoValidationError as error:
             raise _validation_error(error) from error
+
+
+class AwardInputSerializer(serializers.Serializer):
+    award_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    currency = serializers.CharField(max_length=3)
+    award_date = serializers.DateField()
+    rationale = serializers.CharField(max_length=4000)
+    client_reference = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    reference_number = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    acceptance_evidence_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+
+class ProjectAwardCreateView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        serializer = AwardInputSerializer(data=request.data)
+        serializer.fields["proposal_version_id"] = serializers.IntegerField(min_value=1)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        version = get_object_or_404(
+            ProposalVersion, pk=data.pop("proposal_version_id"), proposal__project=project
+        )
+        evidence_id = data.pop("acceptance_evidence_id", None)
+        if evidence_id:
+            from apps.documents.models import FileAsset
+
+            data["acceptance_evidence"] = get_object_or_404(
+                FileAsset, pk=evidence_id, organization=project.organization
+            )
+        try:
+            create_project_award(
+                project=project, proposal_version=version, actor=request.user, data=data
+            )
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user), status=status.HTTP_201_CREATED)
+
+
+class ProjectAwardConfirmView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        award = get_object_or_404(ProjectAward, pk=self.kwargs["award_pk"], project=project)
+        try:
+            confirm_project_award(award=award, actor=request.user)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))
+
+
+class TradeAwardCreateView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        serializer = AwardInputSerializer(data=request.data)
+        serializer.fields["review_id"] = serializers.IntegerField(min_value=1)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        review = get_object_or_404(BidHumanReview, pk=data.pop("review_id"), project=project)
+        data.pop("client_reference", None)
+        data.pop("acceptance_evidence_id", None)
+        try:
+            create_trade_award(project=project, review=review, actor=request.user, data=data)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user), status=status.HTTP_201_CREATED)
+
+
+class TradeAwardConfirmView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        award = get_object_or_404(TradeAward, pk=self.kwargs["award_pk"], project=project)
+        try:
+            confirm_trade_award(award=award, actor=request.user)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        return Response(proposal_workspace(project, request.user))
+
+
+class ProjectAwardTransitionView(ProjectDocumentContextMixin, APIView):
+    permission_classes = (OrganizationOperator,)
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        award = get_object_or_404(ProjectAward, pk=self.kwargs["award_pk"], project=project)
+        try:
+            transition_project_to_awarded(award=award, actor=request.user)
+        except DjangoValidationError as error:
+            raise _validation_error(error) from error
+        project.refresh_from_db()
+        return Response(proposal_workspace(project, request.user))
+
+
+class AwardedProjectsView(OrganizationContextMixin, APIView):
+    permission_classes = (ActiveOrganizationMember,)
+
+    def get(self, request, *args, **kwargs):
+        awards = (
+            ProjectAward.objects.filter(
+                organization=self.get_organization(),
+                status=ProjectAward.Status.CONFIRMED,
+                project__status="awarded",
+            )
+            .select_related("project", "proposal_version", "estimate_version", "confirmed_by")
+            .prefetch_related(
+                "project__trade_awards__company",
+                "project__trade_awards__scope_package",
+                "project__award_handoffs",
+            )
+            .order_by("-award_date", "project__project_number")[:100]
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "project_id": item.project_id,
+                        "project_number": item.project.project_number,
+                        "project_name": item.project.name,
+                        "client_name": item.project.client_name,
+                        "award_date": item.award_date,
+                        "award_amount": str(item.award_amount),
+                        "currency": item.currency,
+                        "client_reference": item.client_reference,
+                        "proposal_number": item.proposal_version.proposal_number,
+                        "proposal_version": item.proposal_version.version,
+                        "trade_awards": [
+                            {
+                                "trade": award.scope_package.trade_category,
+                                "company": award.company.display_name,
+                                "award_amount": str(award.award_amount),
+                                "currency": award.currency,
+                            }
+                            for award in item.project.trade_awards.all()
+                            if award.status == TradeAward.Status.CONFIRMED
+                        ],
+                        "handoff_ready": bool(list(item.project.award_handoffs.all())),
+                    }
+                    for item in awards
+                ]
+            }
+        )
 
 
 class EstimateAssemblyView(ProjectDocumentContextMixin, APIView):

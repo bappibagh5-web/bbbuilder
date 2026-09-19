@@ -5,6 +5,8 @@ import test from "node:test";
 const api = readFileSync("src/lib/proposals.ts", "utf8");
 const moduleSource = readFileSync("src/components/proposals/production-proposal-workspace.tsx", "utf8");
 const workspace = readFileSync("src/components/projects/production-project-workspace.tsx", "utf8");
+const awardedPage = readFileSync("src/app/(app)/awarded/page.tsx", "utf8");
+const awardedDirectory = readFileSync("src/components/awarded/awarded-directory.tsx", "utf8");
 
 test("numeric Proposal tab uses the production M4 workspace", () => {
   assert.match(workspace, /section === "proposal"/);
@@ -107,4 +109,43 @@ test("proposal refresh tolerates an older workspace payload during service reloa
   assert.match(moduleSource, /current_version \?\? workspace\.proposal!\.versions\.at\(-1\)/);
   assert.match(moduleSource, /client_contacts \?\?= \[\]/);
   assert.match(moduleSource, /if \(!currentVersion\) return null/);
+});
+
+test("award decisions remain explicit human actions after proposal finalization", () => {
+  assert.match(moduleSource, /workspace\.awards \?\?/);
+  assert.match(moduleSource, /project_awards: \[\]/);
+  assert.match(moduleSource, /trade_awards: \[\]/);
+  assert.match(moduleSource, /eligible_trade_awards: \[\]/);
+  assert.match(moduleSource, /Proposal finalized — awaiting client award\/acceptance/);
+  assert.match(moduleSource, /Record Client Award \/ Acceptance/);
+  assert.match(moduleSource, /Confirm Client Award/);
+  assert.match(moduleSource, /Record Subcontractor Award/);
+  assert.match(moduleSource, /Confirm Subcontractor Award/);
+  assert.match(moduleSource, /window\.confirm\("Confirm this client award as an immutable human decision\?"/);
+  assert.match(moduleSource, /workspace\.can_edit && latest\.status === "draft"/);
+  assert.doesNotMatch(moduleSource, /useEffect[\s\S]{0,300}(createProjectAward|confirmProjectAward|createTradeAward|confirmTradeAward)/);
+});
+
+test("quoted evaluated and awarded trade values stay visibly distinct", () => {
+  assert.match(moduleSource, />Quoted</);
+  assert.match(moduleSource, />Evaluated internally</);
+  assert.match(moduleSource, />Awarded</);
+  assert.match(moduleSource, /Explicit award amount/);
+  assert.match(moduleSource, /no notification or subcontract was sent/);
+});
+
+test("awarded transition and M5 handoff are explicit and do not run external sync", () => {
+  assert.match(moduleSource, /Transition Project to Awarded/);
+  assert.match(moduleSource, /create an immutable M5-ready handoff snapshot/);
+  assert.match(moduleSource, /No external synchronization has run/);
+  assert.match(api, /transitionAwarded/);
+  assert.doesNotMatch(api, /createSubcontract|createPurchaseOrder|syncAward/);
+});
+
+test("Awarded Projects uses the production award read model", () => {
+  assert.match(awardedPage, /AwardedDirectory/);
+  assert.match(awardedDirectory, /awardedProjects/);
+  assert.match(awardedDirectory, /client awards/i);
+  assert.match(awardedDirectory, /Proposal/);
+  assert.match(awardedDirectory, /Procurement history/);
 });

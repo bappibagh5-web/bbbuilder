@@ -140,3 +140,14 @@ These rules are implementation invariants. Where a rule requires a technical cho
 - No Acceptable Bid is a valid outcome and requires a null selected entry plus explicit human rationale.
 - Finalization requires every entry decided, a legal explicit outcome and rationale, then freezes decisions, selection, actor and time. Corrections preserve the finalized record through a successor review.
 - Admin and Estimator may mutate Draft reviews; Viewer is read-only. Actual award belongs to later workflow.
+
+## Award decisions and awarded-project handoff
+
+- Proposal finalization, Selected for Proposal, contractor shortlist and outreach approval are not awards.
+- A Project Award requires an explicit authorized human decision bound to one exact Finalized ProposalVersion and its exact Frozen EstimateVersion.
+- A Trade Award is a separate explicit decision bound to one exact finalized human bid review, comparison entry, Ready BidRevision, ScopePackageVersion and Company.
+- Quoted Base Bid, internal evaluated amount and explicit awarded amount remain distinct; neither lowest price nor M3 selection supplies an award amount automatically.
+- Draft awards may be corrected; Confirmed awards are immutable and later correction appends a successor decision.
+- A project transitions to Awarded only through an explicit action against a Confirmed Project Award. That transition creates an immutable versioned M5-ready handoff snapshot but performs no external synchronization.
+- Award decisions do not create a subcontract, purchase order, contractor notification or client communication. Viewer remains read-only.
+- Project 3 award records created during M4 acceptance are controlled validation records only and do not represent a real JD Sports commercial award.

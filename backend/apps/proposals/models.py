@@ -325,6 +325,184 @@ class ProposalPdfArtifact(ImmutableFieldsMixin):
             )
 
 
+class ProjectAward(ImmutableFieldsMixin):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="project_awards")
+    proposal_version = models.ForeignKey(
+        ProposalVersion, on_delete=models.PROTECT, related_name="project_awards"
+    )
+    estimate_version = models.ForeignKey(
+        EstimateVersion, on_delete=models.PROTECT, related_name="project_awards"
+    )
+    sequence = models.PositiveIntegerField()
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    award_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    award_date = models.DateField()
+    rationale = models.TextField()
+    client_reference = models.CharField(max_length=255, blank=True)
+    acceptance_evidence = models.ForeignKey(
+        "documents.FileAsset", null=True, blank=True, on_delete=models.PROTECT
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_project_awards"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="confirmed_project_awards",
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "proposal_version_id",
+        "estimate_version_id",
+        "sequence",
+        "supersedes_id",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-sequence", "-id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("project", "sequence"), name="unique_project_award_sequence"
+            ),
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, status=self.Status.CONFIRMED).exists():
+            raise ValidationError("Confirmed Project Awards are immutable.")
+        return super().save(*args, **kwargs)
+
+
+class TradeAward(ImmutableFieldsMixin):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="trade_awards")
+    scope_package = models.ForeignKey("scope_packages.ScopePackage", on_delete=models.PROTECT)
+    scope_version = models.ForeignKey(
+        "scope_packages.ScopePackageVersion", on_delete=models.PROTECT
+    )
+    company = models.ForeignKey("contractors.Company", on_delete=models.PROTECT)
+    human_review = models.ForeignKey("outreach.BidHumanReview", on_delete=models.PROTECT)
+    comparison = models.ForeignKey("outreach.BidComparison", on_delete=models.PROTECT)
+    comparison_entry = models.ForeignKey("outreach.BidComparisonEntry", on_delete=models.PROTECT)
+    bid_revision = models.ForeignKey("outreach.BidRevision", on_delete=models.PROTECT)
+    sequence = models.PositiveIntegerField()
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    quoted_base_bid = models.DecimalField(max_digits=18, decimal_places=2)
+    evaluated_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    award_amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    award_date = models.DateField()
+    rationale = models.TextField()
+    reference_number = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_trade_awards"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="confirmed_trade_awards",
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "scope_package_id",
+        "scope_version_id",
+        "company_id",
+        "human_review_id",
+        "comparison_id",
+        "comparison_entry_id",
+        "bid_revision_id",
+        "sequence",
+        "supersedes_id",
+        "quoted_base_bid",
+        "evaluated_amount",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("scope_package_id", "-sequence", "-id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("project", "scope_package", "sequence"), name="unique_trade_award_sequence"
+            ),
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, status=self.Status.CONFIRMED).exists():
+            raise ValidationError("Confirmed Trade Awards are immutable.")
+        return super().save(*args, **kwargs)
+
+
+class AwardedProjectHandoffSnapshot(ImmutableFieldsMixin):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="award_handoffs")
+    project_award = models.ForeignKey(
+        ProjectAward, on_delete=models.PROTECT, related_name="handoffs"
+    )
+    sequence = models.PositiveIntegerField()
+    supersedes = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="successors"
+    )
+    snapshot = models.JSONField()
+    fingerprint = models.CharField(max_length=64)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_award_handoffs"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    immutable_fields = (
+        "organization_id",
+        "project_id",
+        "project_award_id",
+        "sequence",
+        "supersedes_id",
+        "snapshot",
+        "fingerprint",
+        "created_by_id",
+        "created_at",
+    )
+
+    class Meta:
+        ordering = ("-sequence", "-id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("project", "sequence"), name="unique_award_handoff_sequence"
+            ),
+            models.UniqueConstraint(
+                fields=("project", "fingerprint"), name="unique_award_handoff_fingerprint"
+            ),
+        )
+
+
 class EstimateLine(ImmutableFieldsMixin):
     class LineType(models.TextChoices):
         SOURCE_BASE_BID = "source_base_bid", "Selected contractor base bid"

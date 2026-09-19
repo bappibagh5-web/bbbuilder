@@ -69,6 +69,13 @@ export type ProposalWorkspace = {
     proposal_version_id: number; estimate_version_id: number; estimate_version: number;
     calculation: EstimateCalculation;
   };
+  awards?: {
+    project_status: string;
+    project_awards: ProjectAwardSummary[];
+    trade_awards: TradeAwardSummary[];
+    eligible_trade_awards: EligibleTradeAward[];
+    handoff: null | { id: number; sequence: number; project_award_id: number; created_by: string; created_at: string; fingerprint: string };
+  };
   estimate: null | {
     id: number;
     title: string;
@@ -86,6 +93,30 @@ export type ProposalWorkspace = {
     versions: ProposalVersionSummary[];
     current_version?: ProposalVersionSummary;
   };
+};
+
+export type ProjectAwardSummary = {
+  id: number; sequence: number; status: "draft" | "confirmed";
+  proposal_version_id: number; proposal_number: string; proposal_version: number;
+  estimate_version_id: number; estimate_version: number;
+  award_amount: string; currency: string; award_date: string; rationale: string;
+  client_reference: string; created_by: string; created_at: string;
+  confirmed_by: string | null; confirmed_at: string | null;
+};
+
+export type TradeAwardSummary = {
+  id: number; sequence: number; status: "draft" | "confirmed"; review_id: number;
+  trade: string; scope_version_id: number; company_id: number; company_name: string;
+  bid_revision_id: number; quoted_base_bid: string; evaluated_amount: string;
+  award_amount: string; currency: string; award_date: string; rationale: string;
+  reference_number: string; created_by: string; created_at: string;
+  confirmed_by: string | null; confirmed_at: string | null;
+};
+
+export type EligibleTradeAward = {
+  review_id: number; trade: string; scope_version_id: number; company_id: number;
+  company_name: string; bid_revision_id: number; quoted_base_bid: string;
+  currency: string; evaluated_amount: string; has_award: boolean;
 };
 
 function base(slug: string, projectId: number) {
@@ -142,4 +173,37 @@ export const proposalsApi = {
     const response = await apiResponse(`${base(slug, projectId)}/proposal-pdfs/${artifactId}/download/`);
     return response.blob();
   },
+  createProjectAward(slug: string, projectId: number, payload: Record<string, unknown>) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/project-awards/`, {
+      method: "POST", body: JSON.stringify(payload),
+    });
+  },
+  confirmProjectAward(slug: string, projectId: number, awardId: number) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/project-awards/${awardId}/confirm/`, { method: "POST", body: "{}" });
+  },
+  transitionAwarded(slug: string, projectId: number, awardId: number) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/project-awards/${awardId}/transition/`, { method: "POST", body: "{}" });
+  },
+  createTradeAward(slug: string, projectId: number, payload: Record<string, unknown>) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/trade-awards/`, {
+      method: "POST", body: JSON.stringify(payload),
+    });
+  },
+  confirmTradeAward(slug: string, projectId: number, awardId: number) {
+    return apiRequest<ProposalWorkspace>(`${base(slug, projectId)}/trade-awards/${awardId}/confirm/`, { method: "POST", body: "{}" });
+  },
 };
+
+export type AwardedProjectSummary = {
+  project_id: number; project_number: string; project_name: string; client_name: string;
+  award_date: string; award_amount: string; currency: string; client_reference: string;
+  proposal_number: string; proposal_version: number;
+  trade_awards: Array<{ trade: string; company: string; award_amount: string; currency: string }>;
+  handoff_ready: boolean;
+};
+
+export function awardedProjects(slug: string, signal?: AbortSignal) {
+  return apiRequest<{ results: AwardedProjectSummary[] }>(
+    `/organizations/${encodeURIComponent(slug)}/awarded-projects/`, { signal },
+  );
+}

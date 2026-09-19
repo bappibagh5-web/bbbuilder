@@ -1,10 +1,14 @@
 from django.urls import path
 
 from .views import (
+    AwardedProjectsView,
     EstimateAssemblyView,
     EstimateCommercialView,
     EstimateCreateView,
     EstimateVersionCreateView,
+    ProjectAwardConfirmView,
+    ProjectAwardCreateView,
+    ProjectAwardTransitionView,
     ProposalCreateView,
     ProposalFinalizeView,
     ProposalPdfDownloadView,
@@ -12,9 +16,16 @@ from .views import (
     ProposalVersionContentView,
     ProposalVersionCreateView,
     ProposalWorkspaceView,
+    TradeAwardConfirmView,
+    TradeAwardCreateView,
 )
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/awarded-projects/",
+        AwardedProjectsView.as_view(),
+        name="awarded-projects",
+    ),
     path(
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-workspace/",
         ProposalWorkspaceView.as_view(),
@@ -74,5 +85,30 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/projects/<int:project_pk>/proposal-pdfs/<int:artifact_pk>/download/",
         ProposalPdfDownloadView.as_view(),
         name="proposal-pdf-download",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-awards/",
+        ProjectAwardCreateView.as_view(),
+        name="project-award-create",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-awards/<int:award_pk>/confirm/",
+        ProjectAwardConfirmView.as_view(),
+        name="project-award-confirm",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/project-awards/<int:award_pk>/transition/",
+        ProjectAwardTransitionView.as_view(),
+        name="project-award-transition",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/trade-awards/",
+        TradeAwardCreateView.as_view(),
+        name="trade-award-create",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/projects/<int:project_pk>/trade-awards/<int:award_pk>/confirm/",
+        TradeAwardConfirmView.as_view(),
+        name="trade-award-confirm",
     ),
 ]

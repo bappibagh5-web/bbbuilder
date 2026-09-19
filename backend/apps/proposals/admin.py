@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AwardedProjectHandoffSnapshot,
     Estimate,
     EstimateAllowance,
     EstimateAlternate,
@@ -8,9 +9,11 @@ from .models import (
     EstimateFinancialAdjustment,
     EstimateLine,
     EstimateVersion,
+    ProjectAward,
     Proposal,
     ProposalPdfArtifact,
     ProposalVersion,
+    TradeAward,
 )
 
 
@@ -62,5 +65,8 @@ for model in (
     EstimateExclusion,
     EstimateFinancialAdjustment,
     ProposalPdfArtifact,
+    ProjectAward,
+    TradeAward,
+    AwardedProjectHandoffSnapshot,
 ):
     admin.site.register(model, ReadOnlyAdmin)

@@ -233,7 +233,7 @@ Validate with actual BB Builders subtrade quotes and workflow evidence. Complete
 
 **30 hours / $750**
 
-**Status: IN PROGRESS. M4-01 through M4-07 are complete and manually validated; M4-08 is next/not started.**
+**Status: COMPLETE / MANUALLY VALIDATED. M4-01 through M4-10 are complete. M5 is next/not started.**
 
 **Business objective:** Turn reviewed and selected trade bids and project intelligence into deterministic estimate/proposal versions, client-ready output, and a controlled award workflow.
 
