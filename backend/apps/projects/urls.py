@@ -1,5 +1,10 @@
 from django.urls import path
 
+from .procurement_directories import (
+    CampaignDirectoryView,
+    ComparisonDirectoryView,
+    ProposalDirectoryView,
+)
 from .views import (
     DashboardActivityView,
     DashboardSummaryView,
@@ -19,6 +24,21 @@ contact_detail = ProjectContactViewSet.as_view(
 audit_event_collection = ProjectAuditEventViewSet.as_view({"get": "list"})
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/procurement-campaigns/",
+        CampaignDirectoryView.as_view(),
+        name="procurement-campaign-directory",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/procurement-comparisons/",
+        ComparisonDirectoryView.as_view(),
+        name="procurement-comparison-directory",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/client-proposals/",
+        ProposalDirectoryView.as_view(),
+        name="client-proposal-directory",
+    ),
     path(
         "organizations/<slug:organization_slug>/dashboard/",
         DashboardSummaryView.as_view(),

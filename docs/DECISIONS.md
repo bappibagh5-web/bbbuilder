@@ -1,5 +1,14 @@
 # Architecture and Decision Log
 
+## 2026-09-20 — Global procurement pages are bounded directories, not alternate workflows
+
+- Organization Campaigns, Comparisons, and Proposals project existing production records into paginated read models; all mutation remains in the established project workspace.
+- Directory links carry the exact campaign, comparison, or proposal identity back to its owning project route.
+- Campaign directory counts are aggregate operational state only and never include full message, reply, attachment, or event history.
+- Comparison directory state comes from explicit frozen comparisons and human reviews. It never infers a winner, recommendation, rank, or cheapest bid.
+- Proposal directory amounts come only from the latest ProposalVersion client-facing commercial snapshot. Contractor Base Bid, M3 leveling, internal adjustments/rates, and procurement identifiers are not directory fields.
+- PRE-M5-02 introduces no duplicate business records, migration, provider action, Prospecting, or M5 behavior.
+
 ## 2026-09-20 — The global subcontractor directory is a bounded read model over existing contractor truth
 
 - `/subcontractors` uses organization-scoped `Company` records as its identity source; it does not introduce a directory/CRM duplicate.

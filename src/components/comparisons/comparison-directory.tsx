@@ -1,147 +1,30 @@
 "use client";
-import { useMemo, useState } from "react";
+
 import Link from "next/link";
-import type { ComparisonQueueItem } from "@/types";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, Scale, Search } from "lucide-react";
+import { OrganizationAccessState } from "@/components/organizations/organization-access-state";
+import { useOrganization } from "@/components/organizations/organization-provider";
 import { Card } from "@/components/ui/card";
-export function ComparisonDirectory({
-  items,
-  summary,
-}: {
-  items: ComparisonQueueItem[];
-  summary: {
-    ready: number;
-    inReview: number;
-    approved: number;
-    clarifications: number;
-    nearProposal: number;
-  };
-}) {
-  const [f, setF] = useState({ q: "", trade: "", status: "" });
-  const shown = useMemo(
-    () =>
-      items.filter(
-        (i) =>
-          (!f.q || i.projectName.toLowerCase().includes(f.q.toLowerCase())) &&
-          (!f.trade || i.trade === f.trade) &&
-          (!f.status || i.status === f.status),
-      ),
-    [items, f],
-  );
-  return (
-    <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Bid Comparisons</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Review subcontractor pricing, scope coverage, exclusions, and
-          estimator recommendations.
-        </p>
-        <p className="mt-2 text-xs font-medium text-violet-700">
-          Demo environment — pricing, comparisons, and recommendation results
-          shown here are simulated.
-        </p>
-      </header>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {[
-          ["Trades Ready for Comparison", summary.ready],
-          ["Comparisons In Review", summary.inReview],
-          ["Selections Approved", summary.approved],
-          ["Clarifications Open", summary.clarifications],
-          ["Projects Nearing Proposal", summary.nearProposal],
-        ].map(([l, v]) => (
-          <Card key={l as string} className="p-4">
-            <p className="text-2xl font-semibold">{v}</p>
-            <p className="text-xs text-slate-500">{l}</p>
-          </Card>
-        ))}
-      </section>
-      <Card>
-        <div className="grid gap-3 border-b p-4 sm:grid-cols-3">
-          <input
-            aria-label="Search project"
-            placeholder="Search project"
-            value={f.q}
-            onChange={(e) => setF((v) => ({ ...v, q: e.target.value }))}
-            className="h-10 rounded-lg border px-3"
-          />
-          <select
-            aria-label="Filter by trade"
-            value={f.trade}
-            onChange={(e) => setF((v) => ({ ...v, trade: e.target.value }))}
-            className="h-10 rounded-lg border bg-white px-3"
-          >
-            <option value="">All trades</option>
-            {[...new Set(items.map((i) => i.trade))].map((v) => (
-              <option key={v}>{v}</option>
-            ))}
-          </select>
-          <select
-            aria-label="Filter by comparison status"
-            value={f.status}
-            onChange={(e) => setF((v) => ({ ...v, status: e.target.value }))}
-            className="h-10 rounded-lg border bg-white px-3"
-          >
-            <option value="">All statuses</option>
-            {[
-              "Not Ready",
-              "Needs More Bids",
-              "Ready for Review",
-              "Clarifications Required",
-              "Selection Approved",
-              "Closed",
-            ].map((v) => (
-              <option key={v}>{v}</option>
-            ))}
-          </select>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                {[
-                  "Project",
-                  "Trade",
-                  "Bids",
-                  "Price Range",
-                  "Scope Coverage",
-                  "Open Clarifications",
-                  "Recommendation",
-                  "Status",
-                  "Actions",
-                ].map((h) => (
-                  <th key={h} className="px-4 py-3">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {shown.map((i) => (
-                <tr key={i.id}>
-                  <td className="px-4 py-3 font-semibold">{i.projectName}</td>
-                  <td className="px-4 py-3">{i.trade}</td>
-                  <td className="px-4 py-3">{i.bids}</td>
-                  <td className="px-4 py-3">{i.priceRange}</td>
-                  <td className="px-4 py-3">{i.coverageRange}</td>
-                  <td className="px-4 py-3">{i.clarifications}</td>
-                  <td className="px-4 py-3">{i.recommendation}</td>
-                  <td className="px-4 py-3">{i.status}</td>
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/projects/${i.projectId}/comparisons`}
-                      className="font-semibold text-blue-700"
-                    >
-                      Open Comparison
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="border-t p-4 text-xs text-slate-500">
-          Showing {shown.length} comparison records.
-        </p>
-      </Card>
-    </div>
-  );
+import { procurementDirectoriesApi, type ComparisonDirectoryResponse } from "@/lib/procurement-directories";
+
+export function ComparisonDirectory() {
+  const { memberships, activeMembership } = useOrganization();
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState({ search: "", trade: "", status: "", review_status: "" });
+  const [page, setPage] = useState(1); const [data, setData] = useState<ComparisonDirectoryResponse | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  useEffect(() => { const timer = window.setTimeout(() => { setLoading(true); setError(""); setFilters((value) => ({ ...value, search })); setPage(1); }, 250); return () => window.clearTimeout(timer); }, [search]);
+  useEffect(() => { if (!activeMembership) return; const controller = new AbortController(); const query = new URLSearchParams({ page: String(page), page_size: "25" }); Object.entries(filters).forEach(([key, value]) => value && query.set(key, value)); procurementDirectoriesApi.comparisons(activeMembership.organization.slug, query, controller.signal).then(setData).catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Comparisons could not be loaded."); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [activeMembership, filters, page]);
+  if (!activeMembership) return <OrganizationAccessState multiple={memberships.length > 1} />;
+  const change = (key: "trade" | "status" | "review_status", value: string) => { setLoading(true); setError(""); setFilters((current) => ({ ...current, [key]: value })); setPage(1); };
+  const filtered = Object.values(filters).some(Boolean);
+  return <div className="space-y-5"><header><h1 className="text-2xl font-semibold">Bid Comparisons</h1><p className="mt-1 text-sm text-slate-500">Human-controlled comparison workspaces across your organization. No bidder is ranked or recommended here.</p></header>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Total Comparisons" value={data?.summary.total} /><Metric label="Draft" value={data?.summary.draft} /><Metric label="Ready for Human Review" value={data?.summary.ready} /><Metric label="Selected for Proposal" value={data?.summary.selected_for_proposal} /></section>
+    <Card><div className="grid gap-3 border-b p-4 md:grid-cols-2 xl:grid-cols-4"><label className="relative"><span className="sr-only">Search comparisons</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search project or trade" className="h-10 w-full rounded-lg border pl-9 pr-3" /></label><Select label="Trade" value={filters.trade} options={(data?.filters.trades ?? []).map((item) => [item.scope_package__trade_key, item.scope_package__trade_category])} onChange={(value) => change("trade", value)} /><Select label="Comparison status" value={filters.status} options={(data?.filters.statuses ?? []).map((item) => [item.value, item.label])} onChange={(value) => change("status", value)} /><Select label="Human review" value={filters.review_status} options={[["not_started", "Not started"], ["draft", "Draft"], ["finalized", "Finalized"]]} onChange={(value) => change("review_status", value)} /></div>
+      {error ? <State title="Comparisons unavailable" detail={error} /> : loading && !data ? <State title="Loading bid comparisons…" /> : !data?.results.length ? <State title={filtered ? "No comparisons match these filters" : "No bid comparisons yet"} /> : <><div className={`overflow-x-auto ${loading ? "opacity-60" : ""}`}><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["Project", "Trade / Scope", "Comparison", "Bidders", "Human Review", "Procurement State", "Created", "Action"].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead><tbody className="divide-y">{data.results.map((item) => <tr key={item.id}><td className="px-4 py-3"><strong>{item.project_number}</strong><p className="text-xs text-slate-500">{item.project_name}</p></td><td className="px-4 py-3">{item.trade}<p className="text-xs text-slate-500">Scope V{item.scope_version_id}</p></td><td className="px-4 py-3 capitalize">{item.status === "ready" ? "Ready for Human Review" : item.status}<p className="text-xs text-slate-500">Comparison #{item.id}</p></td><td className="px-4 py-3">{item.bidder_count}</td><td className="px-4 py-3 capitalize">{item.human_review_status.replaceAll("_", " ")}{item.human_review_version ? ` · V${item.human_review_version}` : ""}</td><td className="px-4 py-3">{item.selected_for_proposal ? <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">Selected for Proposal</span> : <span className="text-slate-500">No finalized selection</span>}</td><td className="px-4 py-3">{new Date(item.created_at).toLocaleDateString()}</td><td className="px-4 py-3"><Link href={item.project_url} className="font-semibold text-blue-700 hover:underline">Open Comparison</Link></td></tr>)}</tbody></table></div><Pager data={data} loading={loading} setPage={(update) => { setLoading(true); setError(""); setPage(update); }} /></>}
+    </Card></div>;
 }
+function Metric({ label, value }: { label: string; value?: number }) { return <Card className="bg-indigo-50 p-4 text-indigo-900"><p className="text-2xl font-semibold">{value ?? "—"}</p><p className="text-xs font-medium">{label}</p></Card>; }
+function Select({ label, value, options, onChange }: { label: string; value: string; options: string[][]; onChange: (value: string) => void }) { return <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="h-10 rounded-lg border bg-white px-3"><option value="">All {label.toLowerCase()}</option>{options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select>; }
+function State({ title, detail }: { title: string; detail?: string }) { return <div className="flex min-h-56 flex-col items-center justify-center p-8 text-center"><Scale className="h-8 w-8 text-slate-400" /><h2 className="mt-3 font-semibold">{title}</h2>{detail && <p className="mt-1 text-sm text-slate-500">{detail}</p>}</div>; }
+function Pager({ data, loading, setPage }: { data: ComparisonDirectoryResponse; loading: boolean; setPage: React.Dispatch<React.SetStateAction<number>> }) { return <div className="flex items-center justify-between border-t px-4 py-3 text-sm"><span>Page {data.page} · {data.count} comparisons</span><div className="flex gap-2"><button aria-label="Previous page" disabled={!data.previous || loading} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded border p-2 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button aria-label="Next page" disabled={!data.next || loading} onClick={() => setPage((value) => value + 1)} className="rounded border p-2 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>; }
