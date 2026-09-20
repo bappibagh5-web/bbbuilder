@@ -1,5 +1,13 @@
 # Architecture and Decision Log
 
+## 2026-09-20 — Global Activity is a safe bounded projection of AuditEvent history
+
+- `/activity` reads existing organization-scoped `AuditEvent` records; it does not create a second activity domain or mutate audit history.
+- The endpoint is newest-first with stable timestamp/id ordering, server pagination (25 default, 50 maximum), and project plus controlled activity-family filters.
+- Responses contain controlled business labels and bounded actor/project/target identity only. Raw metadata, message bodies, attachments, webhook/provider details, PDF data and AI payloads are excluded.
+- Exact project workspace links are returned only where the action family makes the destination deterministic. Unknown actions use a neutral label rather than exposing internal metadata.
+- Active members including Viewers may read the feed; no Activity mutation endpoint exists. PRE-M5-03 introduces no schema, provider, Project 3, Prospecting or M5 behavior.
+
 ## 2026-09-20 — Global procurement pages are bounded directories, not alternate workflows
 
 - Organization Campaigns, Comparisons, and Proposals project existing production records into paginated read models; all mutation remains in the established project workspace.

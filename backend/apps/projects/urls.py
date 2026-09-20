@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .activity_directory import ActivityDirectoryView
 from .procurement_directories import (
     CampaignDirectoryView,
     ComparisonDirectoryView,
@@ -24,6 +25,11 @@ contact_detail = ProjectContactViewSet.as_view(
 audit_event_collection = ProjectAuditEventViewSet.as_view({"get": "list"})
 
 urlpatterns = [
+    path(
+        "organizations/<slug:organization_slug>/activity/",
+        ActivityDirectoryView.as_view(),
+        name="organization-activity-directory",
+    ),
     path(
         "organizations/<slug:organization_slug>/procurement-campaigns/",
         CampaignDirectoryView.as_view(),

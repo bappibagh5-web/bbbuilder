@@ -6,7 +6,9 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestones 1, 2, 3, and 4 are **COMPLETE and manually validated**. M4-01 through M4-10 are complete. PRE-M5-01 and PRE-M5-02 are **COMPLETE / MANUALLY VALIDATED**. PRE-M5-03 is **NEXT / NOT STARTED**. M5 remains **NOT STARTED**.
+Milestones 1, 2, 3, and 4 are **COMPLETE and manually validated**. M4-01 through M4-10 are complete. PRE-M5-01, PRE-M5-02, and PRE-M5-03 are **COMPLETE / MANUALLY VALIDATED**. PRE-M5-04 is **NEXT / NOT STARTED**. M5 remains **NOT STARTED**.
+
+PRE-M5-03 replaces the fictional global Activity route with a read-only organization-wide feed over existing `AuditEvent` truth. The bounded endpoint is stable newest-first, paginated to 25 by default and 50 maximum, and supports server-side project and controlled activity-family filters. It returns only safe actor/project/target summaries, controlled business labels and deterministic project-workspace links; raw metadata, message content, attachments, provider/webhook data and AI payloads are never serialized. Unknown action codes degrade to a neutral label. Active Viewer membership remains read-only, organization isolation is enforced, and no project or business record is changed.
 
 PRE-M5-02 replaces the global Campaigns, Comparisons, and Proposals demo routes with read-only organization procurement directories. Each directory is membership-scoped, server-paginated, searchable, filterable, and links back to the exact project workflow identity. Campaign rows provide bounded invitation/delivery/response/qualification/quote counts without loading message or reply content. Comparison rows expose exact scope versions, bidder counts, and explicit human-review state without winner, ranking, recommendation, or cheapest-bid inference. Proposal rows expose only client-facing latest-version, exact EstimateVersion, finalized amount/currency, PDF availability, and award state; contractor Base Bid, M3 leveling, internal rates, and procurement detail remain excluded. No project workflow, business record, schema, provider, M5, or Prospecting behavior changed.
 
@@ -69,7 +71,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestones 1, 2, 3, and 4 are COMPLETE and manually validated. M4-01 through M4-10 are COMPLETE / MANUALLY VALIDATED. M5 is NEXT / NOT STARTED.**
+**Milestones 1, 2, 3, and 4 are COMPLETE and manually validated. PRE-M5-03 is COMPLETE / MANUALLY VALIDATED. PRE-M5-04 is NEXT / NOT STARTED. M5 is NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 
