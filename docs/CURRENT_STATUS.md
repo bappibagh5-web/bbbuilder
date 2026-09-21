@@ -6,7 +6,9 @@ BB Builders AI Bid Automation System
 
 ## Current milestone
 
-Milestones 1, 2, 3, and 4 are **COMPLETE and manually validated**. M4-01 through M4-10 are complete. PRE-M5-01, PRE-M5-02, and PRE-M5-03 are **COMPLETE / MANUALLY VALIDATED**. PRE-M5-04 is **NEXT / NOT STARTED**. M5 remains **NOT STARTED**.
+Milestones 1, 2, 3, and 4 are **COMPLETE and manually validated**. M4-01 through M4-10 are complete. PRE-M5-01 through PRE-M5-04 are **COMPLETE / MANUALLY VALIDATED**. PRE-M5-05 is **NEXT / NOT STARTED**. M5 remains **NOT STARTED**.
+
+PRE-M5-04 replaces the single Settings screen with production Organization, Users & Access, Email & Outreach, and Integrations sections. Existing organization and membership records remain the source of truth. Active members may inspect organization identity and access; only Admins may add an existing BB Builders account, change another member's role, or deactivate/reactivate access. Membership history is preserved without delete semantics, self-lockout and removal of the last active Admin fail closed, and meaningful changes append safe audit events. Account invitation delivery is explicitly not implemented. Existing encrypted SMTP/sender/webhook configuration remains available without returning credentials, and no provider is contacted by opening Settings. No schema migration, Project 3 mutation, Prospecting, or M5 behavior is introduced.
 
 PRE-M5-03 replaces the fictional global Activity route with a read-only organization-wide feed over existing `AuditEvent` truth. The bounded endpoint is stable newest-first, paginated to 25 by default and 50 maximum, and supports server-side project and controlled activity-family filters. It returns only safe actor/project/target summaries, controlled business labels and deterministic project-workspace links; raw metadata, message content, attachments, provider/webhook data and AI payloads are never serialized. Unknown action codes degrade to a neutral label. Active Viewer membership remains read-only, organization isolation is enforced, and no project or business record is changed.
 
@@ -71,7 +73,7 @@ M1-11 — Intelligence Snapshot, Approval & Audit is **complete**. Automated val
 
 M1-12 — Real BB Builders Project Validation & Milestone Polish is **complete**.
 
-**Milestones 1, 2, 3, and 4 are COMPLETE and manually validated. PRE-M5-03 is COMPLETE / MANUALLY VALIDATED. PRE-M5-04 is NEXT / NOT STARTED. M5 is NOT STARTED.**
+**Milestones 1, 2, 3, and 4 are COMPLETE and manually validated. PRE-M5-04 is COMPLETE / MANUALLY VALIDATED. PRE-M5-05 is NEXT / NOT STARTED. M5 is NOT STARTED.**
 
 M2A-01 — Deterministic Trade Scope Builder is **complete**. Approved Project Information is transformed through a controlled, provider-free trade taxonomy into immutable, editable scope-package versions. The real JD Sports approved Version 1 aggregates into four packages—HVAC / Mechanical, Plumbing, Fire Protection / Sprinkler, and General Requirements—and all four were manually validated through the explicit Ready transition. Editing appends a new Draft version; Mark Ready appends a new Ready version. Existing history and approved M1 intelligence remain unchanged.
 

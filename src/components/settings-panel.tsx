@@ -19,7 +19,7 @@ function formFrom(settings: SMTPSettings): SMTPForm {
   };
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ section = "email" }: { section?: "email" | "integrations" }) {
   const { activeMembership } = useOrganization();
   const slug = activeMembership?.organization.slug;
   const canEdit = activeMembership?.role === "admin";
@@ -45,17 +45,26 @@ export function SettingsPanel() {
     if (!slug) return;
     const organizationSlug = slug;
     let live = true;
-    Promise.all([outreachApi.sender(organizationSlug), outreachApi.smtpSettings(organizationSlug), outreachApi.webhookSettings(organizationSlug)])
-      .then(([senderValue, smtpValue, webhookValue]) => {
+    const request = section === "email"
+      ? Promise.all([
+          outreachApi.sender(organizationSlug),
+          outreachApi.smtpSettings(organizationSlug),
+        ]).then(([senderValue, smtpValue]) => {
+          if (!live) return;
+          setSender(senderValue);
+          setSmtp(smtpValue);
+          setSmtpForm(formFrom(smtpValue));
+        })
+      : outreachApi.webhookSettings(organizationSlug).then((webhookValue) => {
         if (!live) return;
-        setSender(senderValue); setSmtp(smtpValue); setSmtpForm(formFrom(smtpValue));
-        setWebhook(webhookValue); setWebhookEnabled(webhookValue.enabled);
-      })
-      .catch((reason: unknown) => {
-        if (live) setError(reason instanceof Error ? reason.message : "Email settings could not be loaded.");
+        setWebhook(webhookValue);
+        setWebhookEnabled(webhookValue.enabled);
       });
+    request.catch((reason: unknown) => {
+      if (live) setError(reason instanceof Error ? reason.message : "Settings could not be loaded.");
+    });
     return () => { live = false; };
-  }, [slug]);
+  }, [section, slug]);
 
   async function act(action: () => Promise<void>) {
     setBusy(true); setError(null); setNotice(null);
@@ -127,7 +136,7 @@ export function SettingsPanel() {
   return <div className="mt-6 grid max-w-4xl gap-5">
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{notice}</p>}
-    <Card className="space-y-4 p-6">
+    {section === "email" && <Card className="space-y-4 p-6">
       <div><h2 className="text-lg font-semibold text-slate-900">Email Delivery / SMTP Setup</h2><p className="mt-1 text-sm text-slate-600">Configure your mail server here. Nothing connects or sends until an Admin explicitly tests or sends.</p></div>
       <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">Status: {smtp?.provider.label ?? "Loading…"} · Security: {smtp?.provider.tls_mode ?? "Not set"}. {smtp?.provider.encryption_ready === false ? "A server encryption key must be set before saving a password." : ""}</p>
       {canEdit && smtpForm && <>
@@ -146,8 +155,8 @@ export function SettingsPanel() {
         {connectionResult && <p role="status" className={`rounded-lg p-3 text-sm ${connectionResult.success ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{connectionResult.message}</p>}
         <div className="rounded-lg border p-4"><h3 className="font-semibold">Send Test Email</h3><p className="mt-1 text-sm text-slate-600">Enter your controlled test mailbox. Contractor contact addresses cannot be used. This sends one real test message, not an invitation.</p><div className="mt-3 flex flex-wrap gap-2"><input type="email" aria-label="Controlled test recipient email" value={testRecipient} disabled={busy} onChange={(event) => setTestRecipient(event.target.value)} placeholder="your-test-mailbox@example.com" className="min-w-64 flex-1 rounded-lg border p-2 text-sm" /><button type="button" disabled={busy || testEmailBlockers.length > 0} onClick={() => void sendTestEmail()} className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-800 disabled:opacity-50">Send Test Email</button></div>{testEmailBlockers.length > 0 && <div className="mt-2 text-sm text-amber-800"><p>Before sending a test email:</p><ul className="ml-5 list-disc">{testEmailBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}</div>
       </>}
-    </Card>
-    <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Outreach sender identity</h2><p className="mt-1 text-sm text-slate-600">The From and Reply-To addresses are frozen into each prepared invitation. SMTP credentials are stored separately and never shown here.</p></div>{sender ? <>{([ ["Sender display name", "display_name"], ["From email", "from_address"], ["Reply-To email", "reply_to"] ] as const).map(([label, field]) => <label key={field} className="block text-sm font-medium">{label}<input type={field === "display_name" ? "text" : "email"} value={sender[field]} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, [field]: event.target.value })} className="mt-1 block w-full rounded-lg border p-2 disabled:bg-slate-50" /></label>)}<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sender.is_enabled ?? false} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, is_enabled: event.target.checked })} />Enable this sender for outreach</label>{canEdit && <button type="button" disabled={busy} onClick={() => void saveSender()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save sender settings</button>}</> : <p className="text-sm text-slate-500">Loading sender settings…</p>}</Card>
-    <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Resend webhook</h2><p className="mt-1 text-sm text-slate-600">Delivery and inbound-reply events are accepted only after signature verification. Set up this endpoint in the Resend dashboard; opening Settings makes no provider request.</p></div><p className="text-sm">Status: {webhook?.enabled ? "Enabled" : "Disabled"} · Signing secret: {webhook?.signing_secret_saved ? "Saved securely" : "Not saved"}</p>{webhook?.endpoint_url && <div className="rounded-lg bg-slate-50 p-3 text-sm"><p className="font-medium">Webhook endpoint URL</p><code className="break-all">{webhook.endpoint_url}</code><p className="mt-1 text-xs text-amber-800">Resend requires a publicly reachable HTTPS endpoint; this local URL is for development only.</p></div>}{canEdit && <><label className="block text-sm font-medium">Resend signing secret<input type="password" value={webhookSecret} disabled={busy} autoComplete="new-password" onChange={(event) => setWebhookSecret(event.target.value)} placeholder={webhook?.signing_secret_saved ? "Leave blank to keep saved secret" : "Paste whsec_ signing secret"} className="mt-1 block w-full rounded-lg border p-2" /></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={webhookEnabled} disabled={busy} onChange={(event) => setWebhookEnabled(event.target.checked)} />Enable verified Resend webhooks</label><button type="button" disabled={busy} onClick={() => void saveWebhook()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save webhook settings</button></>}</Card>
+    </Card>}
+    {section === "email" && <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Outreach sender identity</h2><p className="mt-1 text-sm text-slate-600">The From and Reply-To addresses are frozen into each prepared invitation. SMTP credentials are stored separately and never shown here.</p></div>{sender ? <>{([ ["Sender display name", "display_name"], ["From email", "from_address"], ["Reply-To email", "reply_to"] ] as const).map(([label, field]) => <label key={field} className="block text-sm font-medium">{label}<input type={field === "display_name" ? "text" : "email"} value={sender[field]} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, [field]: event.target.value })} className="mt-1 block w-full rounded-lg border p-2 disabled:bg-slate-50" /></label>)}<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sender.is_enabled ?? false} disabled={!canEdit || busy} onChange={(event) => setSender({ ...sender, is_enabled: event.target.checked })} />Enable this sender for outreach</label>{canEdit && <button type="button" disabled={busy} onClick={() => void saveSender()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save sender settings</button>}</> : <p className="text-sm text-slate-500">Loading sender settings…</p>}</Card>}
+    {section === "integrations" && <Card className="space-y-4 p-6"><div><h2 className="text-lg font-semibold">Resend webhook</h2><p className="mt-1 text-sm text-slate-600">Delivery and inbound-reply events are accepted only after signature verification. Set up this endpoint in the Resend dashboard; opening Settings makes no provider request.</p></div><p className="text-sm">Status: {webhook?.enabled ? "Enabled" : "Disabled"} · Signing secret: {webhook?.signing_secret_saved ? "Saved securely" : "Not saved"}</p>{webhook?.endpoint_url && <div className="rounded-lg bg-slate-50 p-3 text-sm"><p className="font-medium">Webhook endpoint URL</p><code className="break-all">{webhook.endpoint_url}</code><p className="mt-1 text-xs text-amber-800">Resend requires a publicly reachable HTTPS endpoint; this local URL is for development only.</p></div>}{canEdit && <><label className="block text-sm font-medium">Resend signing secret<input type="password" value={webhookSecret} disabled={busy} autoComplete="new-password" onChange={(event) => setWebhookSecret(event.target.value)} placeholder={webhook?.signing_secret_saved ? "Leave blank to keep saved secret" : "Paste whsec_ signing secret"} className="mt-1 block w-full rounded-lg border p-2" /></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={webhookEnabled} disabled={busy} onChange={(event) => setWebhookEnabled(event.target.checked)} />Enable verified Resend webhooks</label><button type="button" disabled={busy} onClick={() => void saveWebhook()} className="rounded-lg bg-[#173f5f] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save webhook settings</button></>}</Card>}
   </div>;
 }

@@ -1,5 +1,15 @@
 # Architecture and Decision Log
 
+## 2026-09-21 — Organization access is managed through preserved Membership truth
+
+- Settings presents Organization identity, Users & Access, Email & Outreach, and Integrations without introducing a duplicate administration domain.
+- Existing `Organization` and `Membership` records remain authoritative. Active members may read safe organization/member summaries; only Admins may add an existing account or change access.
+- Memberships are deactivated/reactivated rather than deleted so historical ownership and audit actors remain intact. Admins cannot demote/deactivate themselves, and the final active Admin cannot be removed.
+- Unknown email addresses produce a clear validation result. PRE-M5-04 does not imply or send an account invitation.
+- Role and status changes append safe audit events containing record identifiers and role/status meaning, never credentials or secrets.
+- Existing SMTP, sender, and webhook configuration remains in its established encrypted models. Reading Settings does not test a provider or expose stored credentials.
+- PRE-M5-04 adds no schema migration, Project 3 mutation, provider call, Prospecting behavior, or M5 workflow.
+
 ## 2026-09-20 — Global Activity is a safe bounded projection of AuditEvent history
 
 - `/activity` reads existing organization-scoped `AuditEvent` records; it does not create a second activity domain or mutate audit history.

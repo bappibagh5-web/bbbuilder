@@ -64,7 +64,13 @@ PREFIX_FAMILIES = {
     "comparisons": ("bid_comparison", "bid_leveling_adjustment", "bid_human_review"),
     "proposals": ("estimate", "proposal"),
     "awards": ("project_award", "trade_award", "awarded_handoff"),
-    "organization": ("smtp_configuration", "smtp_connection", "smtp_test_email", "outreach_sender"),
+    "organization": (
+        "smtp_configuration",
+        "smtp_connection",
+        "smtp_test_email",
+        "outreach_sender",
+        "organization_membership",
+    ),
 }
 ACTION_LABELS = {
     "project.created": "Project created",
@@ -104,6 +110,10 @@ ACTION_LABELS = {
     "project_award.confirmed": "Project award confirmed",
     "trade_award.confirmed": "Trade award confirmed",
     "awarded_handoff.created": "Handoff snapshot created",
+    "organization_membership.added": "Organization access added",
+    "organization_membership.role_changed": "Organization role changed",
+    "organization_membership.deactivated": "Organization access deactivated",
+    "organization_membership.reactivated": "Organization access reactivated",
 }
 
 

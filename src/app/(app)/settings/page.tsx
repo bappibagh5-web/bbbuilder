@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/page-header";
-import { SettingsPanel } from "@/components/settings-panel";
+import { ProductionSettingsWorkspace } from "@/components/settings/production-settings-workspace";
 
 export const metadata: Metadata = { title: "Settings" };
 export default function Page() {
@@ -8,9 +8,9 @@ export default function Page() {
     <div className="mx-auto max-w-[1400px]">
       <PageHeader
         title="Settings"
-        description="Manage your organization’s outreach sender identity and delivery readiness."
+        description="Manage organization identity, user access, outreach email, and integrations."
       />
-      <SettingsPanel />
+      <ProductionSettingsWorkspace />
     </div>
   );
 }
