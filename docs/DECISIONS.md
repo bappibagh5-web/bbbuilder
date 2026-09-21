@@ -1,5 +1,12 @@
 # Architecture and Decision Log
 
+## 2026-09-21 — Production navigation exposes only implemented production workflows
+
+- The sidebar contains Dashboard, Projects, Subcontractors, Outreach Campaigns, Bid Comparisons, Client Proposals, Awarded Projects, Activity, and Settings.
+- Bid Opportunities is hidden until a production-backed domain and workflow are deliberately implemented. Its isolated demo fixtures may remain for tests/development but are not a production capability.
+- Global application metadata uses production wording. Non-functional shell search and notification controls are omitted rather than presenting unsupported actions.
+- PRE-M5-05 does not add Prospecting, M5 behavior, provider calls, schema changes, or Project 3 mutations.
+
 ## 2026-09-21 — Organization access is managed through preserved Membership truth
 
 - Settings presents Organization identity, Users & Access, Email & Outreach, and Integrations without introducing a duplicate administration domain.

@@ -6,9 +6,7 @@ import { useState } from "react";
 import {
   Activity,
   BarChart3,
-  Bell,
   Building2,
-  ClipboardList,
   FileChartColumn,
   FolderKanban,
   Gavel,
@@ -16,7 +14,6 @@ import {
   LogOut,
   Menu,
   PanelLeftClose,
-  Search,
   Send,
   Settings,
   Users,
@@ -26,7 +23,6 @@ import { cn } from "@/lib/utils";
 import { roleLabel } from "@/lib/auth";
 import { useAuth } from "@/components/auth/auth-provider";
 import { useOrganization } from "@/components/organizations/organization-provider";
-import { Button } from "./ui/button";
 
 const groups = [
   {
@@ -36,11 +32,6 @@ const groups = [
   {
     label: "Preconstruction",
     items: [
-      {
-        label: "Bid Opportunities",
-        href: "/bid-opportunities",
-        icon: ClipboardList,
-      },
       { label: "Projects", href: "/projects", icon: FolderKanban },
       { label: "Subcontractors", href: "/subcontractors", icon: Users },
     ],
@@ -174,8 +165,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { memberships, activeMembership, selectOrganization } = useOrganization();
   const [navOpen, setNavOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [noticeOpen, setNoticeOpen] = useState(false);
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Member";
   const initials = displayName
     .split(/\s+/)
@@ -203,42 +192,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span>Bid Management</span>
             </div>
           </div>
-          <div className="relative flex items-center gap-2">
-            {searchOpen && (
-              <label className="absolute right-[244px] top-0 hidden sm:block">
-                <span className="sr-only">Search projects</span>
-                <input
-                  autoFocus
-                  placeholder="Search projects..."
-                  className="h-9 w-64 rounded-lg border bg-slate-50 px-3 text-sm outline-none focus:border-blue-600"
-                />
-              </label>
-            )}
-            <Button
-              onClick={() => setSearchOpen((value) => !value)}
-              aria-label={searchOpen ? "Close search" : "Open search"}
-              aria-expanded={searchOpen}
-              className="w-9 px-0"
-            >
-              <Search className="h-4 w-4" />
-            </Button>
-            <div className="relative">
-              <Button
-                onClick={() => setNoticeOpen((value) => !value)}
-                aria-label="View notifications"
-                aria-expanded={noticeOpen}
-                className="relative w-9 px-0"
-              >
-                <Bell className="h-4 w-4" />
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
-              </Button>
-              {noticeOpen && (
-                <div className="absolute right-0 top-12 w-72 rounded-xl border bg-white p-4 shadow-lg">
-                  <p className="text-sm font-semibold">Items requiring attention</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">Open the dashboard to review current project exceptions.</p>
-                </div>
-              )}
-            </div>
+          <div className="flex items-center gap-2">
             <div className="ml-1 hidden items-center gap-2 border-l pl-3 sm:flex">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-[#dce8f0] text-xs font-bold text-[#163451]">
                 {initials}

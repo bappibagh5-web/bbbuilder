@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth/auth-provider";
 
-const title = "BB Builders | Preconstruction & Bid Management Demo";
+const title = "BB Builders | Preconstruction & Bid Management";
 const description =
-  "Interactive demonstration of BB Builders' proposed preconstruction, subcontractor procurement, bid comparison, and proposal workflow.";
+  "Organization-scoped preconstruction, subcontractor procurement, bid comparison, and proposal management.";
 
 export const metadata: Metadata = {
-  applicationName: "BB Builders Bid Management Demo",
+  applicationName: "BB Builders Bid Management",
   title: { default: title, template: "%s | BB Builders" },
   description,
   openGraph: {
