@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.core.validators import validate_email
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -12,6 +14,7 @@ from .services import active_membership
 UNKNOWN_USER_MESSAGE = (
     "No existing user has this email. Account invitations are not implemented yet."
 )
+EXISTING_ACCOUNT_MESSAGE = "A BB Builders account already uses this email address."
 
 
 def _authorize_admin(actor, organization):
@@ -94,6 +97,81 @@ def add_existing_user(*, organization, actor, email, role):
         project=None,
         actor=actor,
         action_code="organization_membership.added",
+        target=membership,
+        metadata={"membership_id": membership.pk, "user_id": user.pk, "role": role},
+    )
+    return membership
+
+
+@transaction.atomic
+def create_user_with_membership(
+    *, organization, actor, full_name, email, password, password_confirmation, role
+):
+    _authorize_admin(actor, organization)
+    user_model = get_user_model()
+    normalized_email = user_model.objects.normalize_email(str(email or "").strip()).lower()
+    normalized_name = " ".join(str(full_name or "").split())
+    password = str(password or "")
+    password_confirmation = str(password_confirmation or "")
+    role = str(role or "")
+
+    if not normalized_name:
+        raise ValidationError({"full_name": "Enter the user's full name."})
+    name_parts = normalized_name.split(" ", 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) == 2 else ""
+    if (
+        len(first_name) > user_model._meta.get_field("first_name").max_length
+        or len(last_name) > user_model._meta.get_field("last_name").max_length
+    ):
+        raise ValidationError({"full_name": "Enter a shorter full name."})
+
+    if not normalized_email:
+        raise ValidationError({"email": "Enter an email address."})
+    try:
+        validate_email(normalized_email)
+    except ValidationError as error:
+        raise ValidationError({"email": "Enter a valid email address."}) from error
+    if user_model.objects.filter(email__iexact=normalized_email).exists():
+        raise ValidationError({"email": EXISTING_ACCOUNT_MESSAGE})
+    if role not in Membership.Role.values:
+        raise ValidationError({"role": "Choose a valid organization role."})
+    if password != password_confirmation:
+        raise ValidationError({"password_confirmation": "The passwords do not match."})
+
+    prospective_user = user_model(
+        email=normalized_email,
+        first_name=first_name,
+        last_name=last_name,
+        is_active=True,
+    )
+    try:
+        validate_password(password, user=prospective_user)
+    except ValidationError as error:
+        raise ValidationError({"password": error.messages}) from error
+
+    try:
+        with transaction.atomic():
+            user = user_model.objects.create_user(
+                email=normalized_email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                is_active=True,
+            )
+    except IntegrityError as error:
+        raise ValidationError({"email": EXISTING_ACCOUNT_MESSAGE}) from error
+
+    membership = Membership.objects.create(
+        organization=organization,
+        user=user,
+        role=role,
+    )
+    record_event(
+        organization=organization,
+        project=None,
+        actor=actor,
+        action_code="organization_user.created",
         target=membership,
         metadata={"membership_id": membership.pk, "user_id": user.pk, "role": role},
     )

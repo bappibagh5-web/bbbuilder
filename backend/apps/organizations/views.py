@@ -6,7 +6,12 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .access import add_existing_user, member_payload, update_membership
+from .access import (
+    add_existing_user,
+    create_user_with_membership,
+    member_payload,
+    update_membership,
+)
 from .models import Membership, Organization
 from .permissions import ActiveOrganizationMember, OrganizationAdmin
 
@@ -123,3 +128,24 @@ class MembershipDetailView(OrganizationContextMixin, APIView):
             _safe_validation(error)
         membership = Membership.objects.select_related("user", "organization").get(pk=membership.pk)
         return Response(member_payload(membership, request.user))
+
+
+class OrganizationUserCreateView(OrganizationContextMixin, APIView):
+    permission_classes = (OrganizationAdmin,)
+    http_method_names = ("post", "options")
+
+    def post(self, request, *args, **kwargs):
+        try:
+            membership = create_user_with_membership(
+                organization=self.get_organization(),
+                actor=request.user,
+                full_name=request.data.get("full_name", ""),
+                email=request.data.get("email", ""),
+                password=request.data.get("password", ""),
+                password_confirmation=request.data.get("password_confirmation", ""),
+                role=request.data.get("role", ""),
+            )
+        except DjangoValidationError as error:
+            _safe_validation(error)
+        membership = Membership.objects.select_related("user", "organization").get(pk=membership.pk)
+        return Response(member_payload(membership, request.user), status=status.HTTP_201_CREATED)

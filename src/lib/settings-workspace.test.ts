@@ -26,7 +26,14 @@ test("member management uses backend-authoritative access flags", () => {
   assert.match(workspace, /window\.confirm/);
 });
 
-test("access can be added only to an existing account", () => {
+test("Admins can create a new account or add access to an existing account", () => {
+  assert.match(workspace, /Create new user/);
+  assert.match(workspace, /Temporary password/);
+  assert.match(workspace, /Confirm temporary password/);
+  assert.match(workspace, /settingsApi\.createUser/);
+  assert.match(workspace, /settingsApi\.memberships\(slug\)/);
+  assert.match(workspace, /New user created with organization access/);
+  assert.match(api, /createUser/);
   assert.match(workspace, /Add existing user/);
   assert.match(workspace, /Email invitations are not implemented/);
   assert.match(api, /addMembership/);

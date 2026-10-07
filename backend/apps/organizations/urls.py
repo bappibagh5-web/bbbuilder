@@ -1,6 +1,11 @@
 from django.urls import path
 
-from .views import MembershipDetailView, MembershipListView, OrganizationSettingsView
+from .views import (
+    MembershipDetailView,
+    MembershipListView,
+    OrganizationSettingsView,
+    OrganizationUserCreateView,
+)
 
 urlpatterns = [
     path(
@@ -17,5 +22,10 @@ urlpatterns = [
         "organizations/<slug:organization_slug>/memberships/<int:membership_pk>/",
         MembershipDetailView.as_view(),
         name="organization-membership-detail",
+    ),
+    path(
+        "organizations/<slug:organization_slug>/users/",
+        OrganizationUserCreateView.as_view(),
+        name="organization-user-create",
     ),
 ]

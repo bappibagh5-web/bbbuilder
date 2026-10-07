@@ -1,7 +1,8 @@
 import pytest
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from rest_framework.test import APIClient
 
+from apps.organizations.access import create_user_with_membership
 from apps.organizations.models import Membership, Organization
 from apps.projects.models import AuditEvent
 
@@ -20,6 +21,10 @@ def members_url(organization):
 
 def member_url(organization, membership):
     return f"{members_url(organization)}{membership.pk}/"
+
+
+def create_user_url(organization):
+    return f"/api/v1/organizations/{organization.slug}/users/"
 
 
 def make_user(email):
@@ -64,6 +69,128 @@ def test_admin_adds_only_an_existing_user_and_action_is_audited(user, organizati
     )
     assert unknown.status_code == 400
     assert "invitations are not implemented" in str(unknown.data).lower()
+
+
+def test_admin_creates_user_and_membership_atomically_with_hashed_password_and_audit(
+    user, organization, membership
+):
+    membership.role = Membership.Role.ADMIN
+    membership.save(update_fields=["role"])
+    temporary_password = "Temporary-Strong!482"
+
+    response = client_for(user).post(
+        create_user_url(organization),
+        {
+            "full_name": "  Taylor   Jordan  ",
+            "email": " New.User@Example.COM ",
+            "password": temporary_password,
+            "password_confirmation": temporary_password,
+            "role": Membership.Role.ESTIMATOR_OPERATOR,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    created_user = get_user_model().objects.get(email="new.user@example.com")
+    created_membership = Membership.objects.get(organization=organization, user=created_user)
+    assert created_user.get_full_name() == "Taylor Jordan"
+    assert created_user.password != temporary_password
+    assert created_user.check_password(temporary_password)
+    assert authenticate(email=created_user.email, password=temporary_password) == created_user
+    assert created_membership.role == Membership.Role.ESTIMATOR_OPERATOR
+    event = AuditEvent.objects.get(action_code="organization_user.created")
+    assert event.actor == user
+    assert event.target_id == str(created_membership.pk)
+    assert event.metadata == {
+        "membership_id": created_membership.pk,
+        "user_id": created_user.pk,
+        "role": Membership.Role.ESTIMATOR_OPERATOR,
+    }
+    assert temporary_password not in str(response.data)
+    assert temporary_password not in str(event.metadata)
+
+
+def test_create_user_rejects_duplicate_email_weak_password_and_password_mismatch(
+    user, organization, membership
+):
+    membership.role = Membership.Role.ADMIN
+    membership.save(update_fields=["role"])
+    make_user("duplicate@example.com")
+    base = {
+        "full_name": "New Person",
+        "email": "new-person@example.com",
+        "password": "Temporary-Strong!482",
+        "password_confirmation": "Temporary-Strong!482",
+        "role": Membership.Role.VIEWER,
+    }
+
+    duplicate = client_for(user).post(
+        create_user_url(organization),
+        {**base, "email": " DUPLICATE@EXAMPLE.COM "},
+        format="json",
+    )
+    weak = client_for(user).post(
+        create_user_url(organization),
+        {**base, "password": "password", "password_confirmation": "password"},
+        format="json",
+    )
+    mismatch = client_for(user).post(
+        create_user_url(organization),
+        {**base, "password_confirmation": "Different-Strong!927"},
+        format="json",
+    )
+
+    assert duplicate.status_code == 400
+    assert "already uses" in str(duplicate.data).lower()
+    assert weak.status_code == 400
+    assert "common" in str(weak.data).lower()
+    assert mismatch.status_code == 400
+    assert "do not match" in str(mismatch.data).lower()
+    assert not get_user_model().objects.filter(email="new-person@example.com").exists()
+
+
+@pytest.mark.parametrize("role", [Membership.Role.ESTIMATOR_OPERATOR, Membership.Role.VIEWER])
+def test_non_admin_cannot_create_new_user(user, organization, membership, role):
+    membership.role = role
+    membership.save(update_fields=["role"])
+
+    response = client_for(user).post(
+        create_user_url(organization),
+        {
+            "full_name": "Denied Person",
+            "email": f"denied-{role}@example.com",
+            "password": "Temporary-Strong!482",
+            "password_confirmation": "Temporary-Strong!482",
+            "role": Membership.Role.VIEWER,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert not get_user_model().objects.filter(email=f"denied-{role}@example.com").exists()
+
+
+def test_membership_failure_rolls_back_new_user(user, organization, membership, monkeypatch):
+    membership.role = Membership.Role.ADMIN
+    membership.save(update_fields=["role"])
+
+    def fail_membership_creation(**kwargs):
+        raise RuntimeError("simulated membership failure")
+
+    monkeypatch.setattr(Membership.objects, "create", fail_membership_creation)
+
+    with pytest.raises(RuntimeError, match="simulated membership failure"):
+        create_user_with_membership(
+            organization=organization,
+            actor=user,
+            full_name="Rollback Person",
+            email="rollback@example.com",
+            password="Temporary-Strong!482",
+            password_confirmation="Temporary-Strong!482",
+            role=Membership.Role.VIEWER,
+        )
+
+    assert not get_user_model().objects.filter(email="rollback@example.com").exists()
 
 
 def test_admin_changes_role_and_deactivates_then_reactivates_without_deleting_history(
