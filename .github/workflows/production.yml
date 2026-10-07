@@ -1,0 +1,258 @@
+name: Production CI/CD
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run backend tests
+        run: pytest
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Check Ruff formatting
+        run: ruff format --check .
+
+  frontend:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm run test:frontend
+
+      - name: Run TypeScript checks
+        run: npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://app.bbuildersltd.com/api/v1
+        run: npm run build
+
+  deploy:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-latest
+    concurrency:
+      group: bb-builders-production
+      cancel-in-progress: false
+    env:
+      PROD_HOST: ${{ secrets.PROD_HOST }}
+      PROD_USER: ${{ secrets.PROD_USER }}
+      PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PROD_HOST" || { echo "PROD_HOST is not configured." >&2; exit 1; }
+          test -n "$PROD_USER" || { echo "PROD_USER is not configured." >&2; exit 1; }
+          test -n "$PROD_SSH_KEY" || { echo "PROD_SSH_KEY is not configured." >&2; exit 1; }
+          test -n "$PROD_KNOWN_HOSTS" || { echo "PROD_KNOWN_HOSTS is not configured." >&2; exit 1; }
+
+      - name: Prepare temporary SSH files
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_key_file="$(mktemp)"
+          known_hosts_file="$(mktemp)"
+          trap 'rm -f -- "$ssh_key_file" "$known_hosts_file"' ERR
+          printf '%s' "$PROD_SSH_KEY" > "$ssh_key_file"
+          chmod 600 "$ssh_key_file"
+          printf '%s' "$PROD_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$known_hosts_file"
+          echo "SSH_KEY_FILE=$ssh_key_file" >> "$GITHUB_ENV"
+          echo "SSH_KNOWN_HOSTS_FILE=$known_hosts_file" >> "$GITHUB_ENV"
+
+      - name: Deploy exact commit to production
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$SSH_KEY_FILE" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_FILE" \
+            "$PROD_USER@$PROD_HOST" \
+            bash -s -- "$GITHUB_SHA" <<'REMOTE_DEPLOY'
+          set -Eeuo pipefail
+
+          deploy_sha="$1"
+          app_path="/opt/bb-builders/app"
+          backend_env="/opt/bb-builders/secrets/backend.env"
+          python_bin="$app_path/backend/.venv/bin/python"
+
+          cd "$app_path"
+
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "Deployment refused: tracked local modifications exist in $app_path." >&2
+            git status --short --untracked-files=no >&2
+            exit 1
+          fi
+
+          git fetch --prune origin master
+
+          if ! git cat-file -e "${deploy_sha}^{commit}" 2>/dev/null; then
+            echo "Deployment refused: requested commit does not exist after fetch." >&2
+            exit 1
+          fi
+
+          resolved_sha="$(git rev-parse "${deploy_sha}^{commit}")"
+          if [ "$resolved_sha" != "$deploy_sha" ]; then
+            echo "Deployment refused: requested SHA did not resolve exactly." >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$deploy_sha" origin/master; then
+            echo "Deployment refused: requested commit is not contained in origin/master." >&2
+            exit 1
+          fi
+
+          git reset --hard "$deploy_sha"
+
+          "$python_bin" -m pip install --disable-pip-version-check -e "$app_path/backend"
+
+          npm ci
+          npm run build
+
+          if [ ! -r "$backend_env" ]; then
+            echo "Deployment refused: production backend environment file is unavailable." >&2
+            exit 1
+          fi
+
+          run_with_backend_env() {
+            "$python_bin" - "$backend_env" "$@" <<'PYTHON_ENV_LOADER'
+          import os
+          import re
+          import sys
+
+          env_path = sys.argv[1]
+          command = sys.argv[2:]
+          if not command:
+              raise SystemExit("No command supplied to production environment loader.")
+
+          env = os.environ.copy()
+          with open(env_path, encoding="utf-8-sig") as env_file:
+              for line_number, raw_line in enumerate(env_file, start=1):
+                  line = raw_line.rstrip("\r\n")
+                  if not line.strip() or line.lstrip().startswith("#"):
+                      continue
+
+                  key, separator, value = line.partition("=")
+                  key = key.strip()
+                  if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                      raise SystemExit(
+                          f"Invalid production environment entry on line {line_number}."
+                      )
+
+                  if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                      value = value[1:-1]
+                  if "\x00" in value:
+                      raise SystemExit(
+                          f"Invalid production environment value on line {line_number}."
+                      )
+                  env[key] = value
+
+          os.execvpe(command[0], command, env)
+          PYTHON_ENV_LOADER
+          }
+
+          cd "$app_path/backend"
+          run_with_backend_env \
+            "$python_bin" manage.py check --deploy --settings=config.settings.production
+          run_with_backend_env \
+            "$python_bin" manage.py migrate --noinput --settings=config.settings.production
+          run_with_backend_env \
+            "$python_bin" manage.py collectstatic --noinput --settings=config.settings.production
+
+          services=(
+            bb-builders-gunicorn.service
+            bb-builders-celery.service
+            bb-builders-next.service
+          )
+
+          sudo -n /usr/bin/systemctl restart bb-builders-gunicorn.service
+          sudo -n /usr/bin/systemctl restart bb-builders-celery.service
+          sudo -n /usr/bin/systemctl restart bb-builders-next.service
+
+          for service in "${services[@]}"; do
+            if ! systemctl is-active --quiet "$service"; then
+              echo "Deployment failed: $service is not active." >&2
+              exit 1
+            fi
+          done
+
+          curl --fail --silent --show-error --location \
+            --retry 12 --retry-delay 5 --retry-connrefused --max-time 20 \
+            https://app.bbuildersltd.com/api/v1/health/ >/dev/null
+          curl --fail --silent --show-error --location \
+            --retry 12 --retry-delay 5 --retry-connrefused --max-time 20 \
+            https://app.bbuildersltd.com/login >/dev/null
+
+          echo "Production deployment completed for commit $deploy_sha."
+          REMOTE_DEPLOY
+
+      - name: Remove temporary SSH files
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${SSH_KEY_FILE:-}" ]; then
+            rm -f -- "$SSH_KEY_FILE"
+          fi
+          if [ -n "${SSH_KNOWN_HOSTS_FILE:-}" ]; then
+            rm -f -- "$SSH_KNOWN_HOSTS_FILE"
+          fi
