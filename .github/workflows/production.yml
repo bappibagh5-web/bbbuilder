@@ -109,9 +109,12 @@ jobs:
           ssh_key_file="$(mktemp)"
           known_hosts_file="$(mktemp)"
           trap 'rm -f -- "$ssh_key_file" "$known_hosts_file"' ERR
-          printf '%s' "$PROD_SSH_KEY" > "$ssh_key_file"
+          printf '%s' "$PROD_SSH_KEY" | tr -d '\r' > "$ssh_key_file"
+          printf '\n' >> "$ssh_key_file"
           chmod 600 "$ssh_key_file"
-          printf '%s' "$PROD_KNOWN_HOSTS" > "$known_hosts_file"
+          ssh-keygen -y -f "$ssh_key_file" >/dev/null
+          printf '%s' "$PROD_KNOWN_HOSTS" | tr -d '\r' > "$known_hosts_file"
+          printf '\n' >> "$known_hosts_file"
           chmod 600 "$known_hosts_file"
           echo "SSH_KEY_FILE=$ssh_key_file" >> "$GITHUB_ENV"
           echo "SSH_KNOWN_HOSTS_FILE=$known_hosts_file" >> "$GITHUB_ENV"
