@@ -20,7 +20,7 @@ from apps.outreach.models import (
     OutreachSenderSettings,
     OutreachSMTPConfiguration,
 )
-from apps.outreach.smtp import provider_status
+from apps.outreach.smtp import _send, provider_status
 from apps.outreach.smtp_setup import run_connection_test, run_test_email, save_smtp_configuration
 from apps.projects.models import AuditEvent
 
@@ -226,3 +226,33 @@ def test_connection_only_and_test_email_are_explicit_and_audited(admin, monkeypa
     assert failure["code"] == "smtp_authentication"
     assert AuditEvent.objects.filter(action_code="smtp_test_email.failed").count() == 1
     assert len(StubSMTP.sent) == 2
+
+
+def test_shared_smtp_transport_adds_html_only_when_requested(admin, monkeypatch):
+    user, organization = admin
+    save_config(organization, user)
+    StubSMTP.sent = []
+    StubSMTP.fail_login = False
+    monkeypatch.setattr(smtplib, "SMTP", StubSMTP)
+    common = {
+        "organization": organization,
+        "from_name": "BB Builders",
+        "from_address": "from@example.invalid",
+        "reply_to": "reply@example.invalid",
+        "to_address": "controlled@example.invalid",
+        "subject": "Safe content",
+        "body": "Plain text remains canonical.",
+    }
+    _send(**common, message_id="<plain@example.invalid>")
+    _send(
+        **common,
+        message_id="<multipart@example.invalid>",
+        html_body="<html><body><p>HTML alternative.</p></body></html>",
+    )
+
+    plain, multipart = StubSMTP.sent
+    assert plain.get_content_type() == "text/plain"
+    assert not plain.is_multipart()
+    assert multipart.get_content_type() == "multipart/alternative"
+    assert multipart.get_body(preferencelist=("plain",)).get_content().strip() == common["body"]
+    assert "HTML alternative." in multipart.get_body(preferencelist=("html",)).get_content()

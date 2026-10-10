@@ -82,6 +82,7 @@ def _send(
     body,
     message_id,
     additional_headers=None,
+    html_body=None,
 ):
     config = OutreachSMTPConfiguration.objects.get(organization=organization)
     if provider_status(organization)["state"] != "configured":
@@ -98,6 +99,8 @@ def _send(
     if config.host.lower() == "smtp.resend.com":
         email["Resend-Idempotency-Key"] = message_id.strip("<>")
     email.set_content(body)
+    if html_body is not None:
+        email.add_alternative(html_body, subtype="html")
     with _open_connection(config) as connection:
         refused = connection.send_message(email)
         if refused:

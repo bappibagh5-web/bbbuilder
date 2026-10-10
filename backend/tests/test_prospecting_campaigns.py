@@ -16,6 +16,7 @@ from apps.outreach.models import (
     ResendWebhookConfiguration,
     ResendWebhookEvent,
 )
+from apps.prospecting.analytics import metric_bundle
 from apps.prospecting.campaigns import (
     approve_campaign,
     campaign_metrics,
@@ -37,10 +38,11 @@ from apps.prospecting.models import (
     ProspectList,
     ProspectListEntry,
     ProspectMessage,
+    ProspectProviderEmail,
     ProspectReply,
     ProspectSuppression,
 )
-from apps.prospecting.webhooks import reconcile_event
+from apps.prospecting.webhooks import _exact_sent_message, reconcile_event
 
 pytestmark = pytest.mark.django_db
 
@@ -540,6 +542,8 @@ def test_two_recipients_send_threaded_follow_up_and_complete_independently(
         organization=organization, send_function=first_send, return_summary=True
     )
     assert first == {"processed": 2, "sent": 2, "scheduled": 2, "skipped": 0, "failed": 0}
+    assert all("<html><body>" in sent["html_body"] for sent in first_headers.values())
+    assert all(">Unsubscribe</a>" in sent["html_body"] for sent in first_headers.values())
     realistic_message_id = (
         "<852469f750de4959d9f5fdf73aae7120f34cd2b722151466d11db78780614bbd@mybusinesslocal.com>"
     )
@@ -574,6 +578,8 @@ def test_two_recipients_send_threaded_follow_up_and_complete_independently(
         )
         assert headers["In-Reply-To"] == expected_message_id
         assert headers["References"] == expected_message_id
+        assert "<html><body>" in follow_ups[recipient.normalized_email]["html_body"]
+        assert ">Unsubscribe</a>" in follow_ups[recipient.normalized_email]["html_body"]
     assert ProspectDeliveryAttempt.objects.filter(status="succeeded").count() == 4
     assert process_due_prospecting_messages(
         organization=organization,
@@ -665,6 +671,182 @@ def test_hard_bounce_creates_suppression_and_provider_events_are_analytics_only(
     reconcile_event(opened)
     assert campaign_metrics(campaign)["opened"] == 1
     assert ProspectReply.objects.count() == 0
+
+
+def test_rewritten_resend_message_id_uses_exact_details_and_replays_stored_events(
+    monkeypatch, settings, user, organization, membership
+):
+    entry = make_entry(organization, user)
+    campaign, recipient = make_campaign(monkeypatch, settings, organization, user, entry)
+    attempt = deliver_recipient(recipient, send_function=lambda *args, **kwargs: None)
+    message = attempt.message
+    provider_id = "prospecting-provider-rewritten"
+    provider_rfc = "<provider-generated@email.amazonses.com>"
+    config = ResendWebhookConfiguration.objects.create(organization=organization, updated_by=user)
+    events = []
+    for index, event_type in enumerate(
+        ("email.sent", "email.delivered", "email.opened", "email.opened", "email.clicked")
+    ):
+        events.append(
+            ResendWebhookEvent.objects.create(
+                configuration=config,
+                organization=organization,
+                webhook_id=f"prospecting-replay-{index}",
+                event_type=event_type,
+                provider_email_id=provider_id,
+                rfc_message_id=provider_rfc,
+                occurred_at=attempt.attempted_at + timedelta(seconds=index),
+            )
+        )
+    details = {
+        "id": provider_id,
+        "message_id": provider_rfc,
+        "from": message.from_address,
+        "to": [message.to_address],
+        "subject": message.subject,
+        "text": f"{message.body}\n",
+        "created_at": attempt.attempted_at.isoformat(),
+    }
+    monkeypatch.setattr("apps.prospecting.webhooks._sent_details", lambda *args: details)
+
+    assert reconcile_event(events[-1]) == message
+    mapping = ProspectProviderEmail.objects.get(provider_email_id=provider_id)
+    assert mapping.message_id == message.pk
+    assert mapping.rfc_message_id == provider_rfc
+    metrics = metric_bundle(organization, campaign_id=campaign.pk)
+    assert metrics["delivered"] == 1
+    assert metrics["opened"] == 1
+    assert metrics["clicked"] == 1
+    assert reconcile_event(events[0]) == message
+    assert ProspectProviderEmail.objects.filter(provider_email_id=provider_id).count() == 1
+    assert ResendWebhookEvent.objects.filter(provider_email_id=provider_id).count() == 5
+
+
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("from", "wrong@example.com"),
+        ("to", ["wrong@example.com"]),
+        ("subject", "Wrong subject"),
+        ("text", "Wrong body"),
+    ],
+)
+def test_provider_detail_fallback_rejects_changed_content(
+    monkeypatch,
+    settings,
+    user,
+    organization,
+    membership,
+    changed_field,
+    changed_value,
+):
+    entry = make_entry(organization, user)
+    _, recipient = make_campaign(monkeypatch, settings, organization, user, entry)
+    attempt = deliver_recipient(recipient, send_function=lambda *args, **kwargs: None)
+    message = attempt.message
+    details = {
+        "id": "provider-exact-check",
+        "message_id": "<provider-generated@email.amazonses.com>",
+        "from": message.from_address,
+        "to": [message.to_address],
+        "subject": message.subject,
+        "text": message.body,
+        "created_at": attempt.attempted_at.isoformat(),
+        changed_field: changed_value,
+    }
+    assert _exact_sent_message(organization, details) is None
+
+
+def test_provider_detail_fallback_rejects_old_or_ambiguous_attempts(
+    monkeypatch, settings, user, organization, membership
+):
+    entry = make_entry(organization, user)
+    _, recipient = make_campaign(monkeypatch, settings, organization, user, entry)
+    attempt = deliver_recipient(recipient, send_function=lambda *args, **kwargs: None)
+    message = attempt.message
+    details = {
+        "id": "provider-timing-check",
+        "message_id": "<provider-generated@email.amazonses.com>",
+        "from": message.from_address,
+        "to": [message.to_address],
+        "subject": message.subject,
+        "text": message.body,
+        "created_at": (attempt.attempted_at + timedelta(hours=1)).isoformat(),
+    }
+    assert _exact_sent_message(organization, details) is None
+    details["created_at"] = attempt.attempted_at.isoformat()
+    ProspectDeliveryAttempt.objects.create(
+        message=message,
+        sequence=2,
+        provider_key="smtp",
+        idempotency_key="ambiguous-provider-attempt",
+        rfc_message_id=message.rfc_message_id,
+        status=ProspectDeliveryAttempt.Status.SUCCEEDED,
+        completed_at=attempt.completed_at,
+    )
+    assert _exact_sent_message(organization, details) is None
+
+
+def test_provider_detail_fallback_fails_when_details_also_match_m3(
+    monkeypatch, settings, user, organization, membership
+):
+    entry = make_entry(organization, user)
+    _, recipient = make_campaign(monkeypatch, settings, organization, user, entry)
+    attempt = deliver_recipient(recipient, send_function=lambda *args, **kwargs: None)
+    message = attempt.message
+    details = {
+        "id": "provider-domain-collision",
+        "message_id": "<provider-generated@email.amazonses.com>",
+        "from": message.from_address,
+        "to": [message.to_address],
+        "subject": message.subject,
+        "text": message.body,
+        "created_at": attempt.attempted_at.isoformat(),
+    }
+    monkeypatch.setattr(
+        "apps.outreach.resend_webhooks._exact_sent_message",
+        lambda *args, **kwargs: object(),
+    )
+    assert _exact_sent_message(organization, details) is None
+
+
+def test_provider_id_already_owned_by_m3_never_fetches_or_maps_prospecting(
+    monkeypatch, settings, user, organization, membership
+):
+    entry = make_entry(organization, user)
+    _, recipient = make_campaign(monkeypatch, settings, organization, user, entry)
+    attempt = deliver_recipient(recipient, send_function=lambda *args, **kwargs: None)
+    config = ResendWebhookConfiguration.objects.create(organization=organization, updated_by=user)
+    event = ResendWebhookEvent.objects.create(
+        configuration=config,
+        organization=organization,
+        webhook_id="m3-owned-provider-id",
+        event_type="email.sent",
+        provider_email_id="provider-owned-by-m3",
+        rfc_message_id="<provider-generated@email.amazonses.com>",
+        occurred_at=attempt.attempted_at,
+    )
+
+    class ExistingOwnership:
+        @staticmethod
+        def exists():
+            return True
+
+    class M3OwnershipManager:
+        @staticmethod
+        def filter(**kwargs):
+            return ExistingOwnership()
+
+    from apps.prospecting import webhooks
+
+    monkeypatch.setattr(webhooks.OutreachProviderEmail, "objects", M3OwnershipManager())
+    monkeypatch.setattr(
+        webhooks,
+        "_sent_details",
+        lambda *args: pytest.fail("M3-owned provider ID must not be retrieved"),
+    )
+    assert reconcile_event(event) is None
+    assert ProspectProviderEmail.objects.count() == 0
 
 
 def test_limits_and_sending_window_block_delivery(

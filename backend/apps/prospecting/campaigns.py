@@ -1,5 +1,6 @@
 # ruff: noqa: E501
 import hashlib
+import html
 import json
 import logging
 import re
@@ -40,6 +41,7 @@ from .models import (
 ALLOWED_TOKENS = {"contact_name", "first_name", "name", "company_name", "city", "trade"}
 TOKEN_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 RFC_MESSAGE_ID_PATTERN = re.compile(r"^<[^<>\s@]+@[^<>\s@]+>$")
+HTTP_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 logger = logging.getLogger(__name__)
 STOPPED_STATES = {
     ProspectCampaignRecipient.State.REPLIED,
@@ -558,6 +560,50 @@ def _render(template, recipient=None):
     return TOKEN_PATTERN.sub(lambda match: values[match.group(1)], template)
 
 
+def _linkify_html_line(value):
+    parts = []
+    cursor = 0
+    for match in HTTP_URL_PATTERN.finditer(value):
+        url = match.group(0)
+        trailing = ""
+        while url and url[-1] in ".,;:!?)]}":
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        if not url:
+            continue
+        parts.append(html.escape(value[cursor : match.start()]))
+        escaped_url = html.escape(url, quote=True)
+        parts.append(f'<a href="{escaped_url}">{escaped_url}</a>')
+        parts.append(html.escape(trailing))
+        cursor = match.end()
+    parts.append(html.escape(value[cursor:]))
+    return "".join(parts)
+
+
+def render_prospecting_html(body, *, unsubscribe_url=""):
+    """Build a safe HTML alternative from the immutable plain-text message."""
+    paragraphs = []
+    current_lines = []
+
+    def append_paragraph():
+        if current_lines:
+            paragraphs.append(f"<p>{'<br>'.join(current_lines)}</p>")
+            current_lines.clear()
+
+    for line in body.splitlines():
+        if not line.strip():
+            append_paragraph()
+            continue
+        if unsubscribe_url and line == f"Unsubscribe: {unsubscribe_url}":
+            append_paragraph()
+            escaped_url = html.escape(unsubscribe_url, quote=True)
+            paragraphs.append(f'<p>Unsubscribe: <a href="{escaped_url}">Unsubscribe</a></p>')
+            continue
+        current_lines.append(_linkify_html_line(line))
+    append_paragraph()
+    return f"<html><body>{''.join(paragraphs)}</body></html>"
+
+
 def render_draft_preview(*, campaign, step, recipient):
     if step.campaign_id != campaign.pk or recipient.campaign_id != campaign.pk:
         raise ValidationError("Preview prospect and step must belong to this campaign.")
@@ -612,6 +658,7 @@ def send_test_email(*, campaign, step, actor, test_email, recipient=None, send_f
         f"{content}\n\n{config.business_identity}\n{config.compliance_footer}"
         "\nUnsubscribe: [test message - no subscription link]"
     )
+    html_body = render_prospecting_html(body)
     key = hashlib.sha256(
         f"prospecting-test:{campaign.pk}:{step.pk}:{test_email}:{timezone.now().isoformat()}".encode()
     ).hexdigest()
@@ -625,6 +672,7 @@ def send_test_email(*, campaign, step, actor, test_email, recipient=None, send_f
             to_address=test_email,
             subject=f"[TEST] {_render(step.subject, recipient)}",
             body=body,
+            html_body=html_body,
             message_id=f"<{key}@{domain}>",
             additional_headers={"X-BB-Builders-Test": "true"},
         )
@@ -829,6 +877,10 @@ def deliver_recipient(recipient, *, send_function=_send, now=None):
         attempt.refresh_from_db()
         return attempt
     try:
+        html_body = render_prospecting_html(
+            message.body,
+            unsubscribe_url=message.unsubscribe_url,
+        )
         send_function(
             recipient.campaign.organization,
             from_name=message.from_name,
@@ -837,6 +889,7 @@ def deliver_recipient(recipient, *, send_function=_send, now=None):
             to_address=message.to_address,
             subject=message.subject,
             body=message.body,
+            html_body=html_body,
             message_id=message.rfc_message_id,
             additional_headers=headers,
         )

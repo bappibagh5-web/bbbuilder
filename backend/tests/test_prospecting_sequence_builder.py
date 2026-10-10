@@ -14,6 +14,7 @@ from apps.prospecting.campaigns import (
     enroll_entries,
     launch_campaign,
     render_draft_preview,
+    render_prospecting_html,
     reorder_steps,
     save_step,
     send_test_email,
@@ -210,6 +211,8 @@ def test_preview_and_test_send_share_personalization_without_campaign_side_effec
     assert sent[0]["to_address"] == "owner@example.com"
     assert sent[0]["subject"] == "[TEST] Quick question for Acme Mechanical"
     assert "[test message - no subscription link]" in sent[0]["body"]
+    assert "<html><body>" in sent[0]["html_body"]
+    assert "Hi Taylor" in sent[0]["html_body"]
     recipient.refresh_from_db()
     assert recipient.state == ProspectCampaignRecipient.State.PENDING
     assert recipient.current_step == 0
@@ -233,10 +236,42 @@ def test_preview_and_test_send_share_personalization_without_campaign_side_effec
     assert real_sent[0]["subject"] == "Quick question for Acme Mechanical"
     assert not real_sent[0]["subject"].startswith("[TEST]")
     assert "/unsubscribe/" in real_sent[0]["body"]
+    assert '<a href="https://app.example.com/unsubscribe/' in real_sent[0]["html_body"]
+    assert ">Unsubscribe</a>" in real_sent[0]["html_body"]
     assert "[test message - no subscription link]" not in real_sent[0]["body"]
     message = ProspectMessage.objects.get()
     assert message.subject == "Quick question for Acme Mechanical"
     assert "/unsubscribe/" in message.unsubscribe_url
+
+
+def test_prospecting_html_is_escaped_linkified_and_preserves_paragraphs():
+    unsubscribe_url = "https://app.example.com/unsubscribe/safe-token"
+    body = (
+        "Hi <script>alert('no')</script>\n"
+        "Visit https://bbuildersltd.com/path?a=1&b=2.\n\n"
+        "Plain http://example.com/info!\n"
+        "Never javascript:alert(1)\n"
+        "BB Builders <Team>\n"
+        "Compliance & unsubscribe required\n"
+        f"Unsubscribe: {unsubscribe_url}"
+    )
+
+    rendered = render_prospecting_html(body, unsubscribe_url=unsubscribe_url)
+
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;alert(&#x27;no&#x27;)&lt;/script&gt;" in rendered
+    assert (
+        '<a href="https://bbuildersltd.com/path?a=1&amp;b=2">'
+        "https://bbuildersltd.com/path?a=1&amp;b=2</a>."
+    ) in rendered
+    assert '<a href="http://example.com/info">http://example.com/info</a>!' in rendered
+    assert 'href="javascript:' not in rendered
+    assert "Never javascript:alert(1)" in rendered
+    assert "BB Builders &lt;Team&gt;" in rendered
+    assert "Compliance &amp; unsubscribe required" in rendered
+    assert "<br>" in rendered
+    assert rendered.count("<p>") >= 3
+    assert f'<a href="{unsubscribe_url}">Unsubscribe</a>' in rendered
 
 
 def test_templates_are_org_scoped_copied_content_and_viewer_read_only(
