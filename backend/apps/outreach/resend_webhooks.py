@@ -16,6 +16,8 @@ from django.utils.dateparse import parse_datetime
 
 from apps.organizations.models import Membership
 from apps.organizations.services import active_membership
+from apps.projects.audit import record_event
+from apps.prospecting.webhooks import reconcile_event as reconcile_prospecting_event
 
 from .credentials import decrypt_password, encrypt_password, encryption_ready
 from .models import (
@@ -66,6 +68,14 @@ def save_webhook_configuration(*, organization, actor, signing_secret, enabled):
     configuration.is_enabled = enabled
     configuration.updated_by = actor
     configuration.save()
+    record_event(
+        organization=organization,
+        project=None,
+        actor=actor,
+        action_code="resend_webhook_configuration.updated",
+        target=configuration,
+        metadata={"enabled": configuration.is_enabled},
+    )
     return configuration
 
 
@@ -494,9 +504,15 @@ def ingest_verified_event(configuration, raw_body, headers):
         configuration=configuration, webhook_id=event_id
     ).first():
         if existing.event_type == "email.received":
-            _reconcile_inbound_event(existing)
+            prospect_reply = reconcile_prospecting_event(
+                existing,
+                _received_details(existing.organization, existing.provider_email_id),
+            )
+            if prospect_reply is None:
+                _reconcile_inbound_event(existing)
         else:
-            _reconcile_outbound_event(existing)
+            if _reconcile_outbound_event(existing) is None:
+                reconcile_prospecting_event(existing)
         return existing, False
     try:
         payload = json.loads(raw_body)
@@ -520,7 +536,8 @@ def ingest_verified_event(configuration, raw_body, headers):
             rfc_message_id=rfc_message_id,
         ).first()
         if duplicate:
-            _reconcile_outbound_event(duplicate)
+            if _reconcile_outbound_event(duplicate) is None:
+                reconcile_prospecting_event(duplicate)
             return duplicate, False
     details = (
         _received_details(configuration.organization, provider_email_id)
@@ -542,7 +559,9 @@ def ingest_verified_event(configuration, raw_body, headers):
         occurred_at=occurred_at,
     )
     if event_type == "email.received":
-        _inbound_response(configuration, event, data, details)
+        if reconcile_prospecting_event(event, details) is None:
+            _inbound_response(configuration, event, data, details)
     else:
-        _reconcile_outbound_event(event)
+        if _reconcile_outbound_event(event) is None:
+            reconcile_prospecting_event(event)
     return event, True

@@ -12,8 +12,8 @@ type SMTPForm = {
 
 function formFrom(settings: SMTPSettings): SMTPForm {
   return {
-    host: settings.host ?? "", port: settings.port ?? 587,
-    username: settings.username ?? "", password: "", clear_password: false,
+    host: settings.host || "smtp.resend.com", port: settings.port ?? 587,
+    username: settings.username || "resend", password: "", clear_password: false,
     security: settings.security ?? "starttls", timeout_seconds: settings.timeout_seconds ?? 20,
     is_enabled: settings.is_enabled ?? false,
   };
@@ -55,11 +55,18 @@ export function SettingsPanel({ section = "email" }: { section?: "email" | "inte
           setSmtp(smtpValue);
           setSmtpForm(formFrom(smtpValue));
         })
-      : outreachApi.webhookSettings(organizationSlug).then((webhookValue) => {
-        if (!live) return;
-        setWebhook(webhookValue);
-        setWebhookEnabled(webhookValue.enabled);
-      });
+      : Promise.all([
+          outreachApi.webhookSettings(organizationSlug),
+          outreachApi.sender(organizationSlug),
+          outreachApi.smtpSettings(organizationSlug),
+        ]).then(([webhookValue, senderValue, smtpValue]) => {
+          if (!live) return;
+          setWebhook(webhookValue);
+          setWebhookEnabled(webhookValue.enabled);
+          setSender(senderValue);
+          setSmtp(smtpValue);
+          setSmtpForm(formFrom(smtpValue));
+        });
     request.catch((reason: unknown) => {
       if (live) setError(reason instanceof Error ? reason.message : "Settings could not be loaded.");
     });

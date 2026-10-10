@@ -1,0 +1,19 @@
+[Unit]
+Description=BB Builders Celery Beat scheduler
+After=network.target redis-server.service
+PartOf=bb-builders-celery.service
+
+[Service]
+Type=simple
+User=bbdeploy
+Group=bbdeploy
+WorkingDirectory=/opt/bb-builders/app/backend
+EnvironmentFile=/opt/bb-builders/secrets/backend.env
+StateDirectory=bb-builders
+ExecStart=/opt/bb-builders/app/backend/.venv/bin/celery -A config beat --loglevel=INFO --schedule=/var/lib/bb-builders/celerybeat-schedule
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

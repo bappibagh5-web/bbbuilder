@@ -302,6 +302,50 @@ def dedupe_company(organization, result, provider_name):
     return matches[0] if len(matches) == 1 else None
 
 
+def upsert_discovered_company(*, organization, result, provider_name, actor):
+    """Reuse canonical company truth without weakening existing internal data."""
+    company = dedupe_company(organization, result, provider_name)
+    if company is None:
+        return (
+            Company.objects.create(
+                organization=organization,
+                display_name=result.display_name,
+                website=result.website,
+                phone=result.phone,
+                email=result.email,
+                address=result.address,
+                city=result.city,
+                province=result.province,
+                postal_code=result.postal_code,
+                country=result.country,
+                source_type=Company.Source.DISCOVERED,
+                external_provider=provider_name,
+                external_place_id=result.external_place_id,
+                latitude=(
+                    coordinate_decimal(result.latitude) if result.latitude is not None else None
+                ),
+                longitude=(
+                    coordinate_decimal(result.longitude) if result.longitude is not None else None
+                ),
+                created_by=actor,
+                updated_by=actor,
+            ),
+            True,
+        )
+
+    changed = []
+    if company.latitude is None and result.latitude is not None:
+        company.latitude = coordinate_decimal(result.latitude)
+        changed.append("latitude")
+    if company.longitude is None and result.longitude is not None:
+        company.longitude = coordinate_decimal(result.longitude)
+        changed.append("longitude")
+    if changed:
+        company.updated_by = actor
+        company.save(update_fields=(*changed, "updated_by", "updated_at"))
+    return company, False
+
+
 def internal_companies(*, organization, trade_key, city, province):
     capabilities = TradeCapability.objects.filter(
         company__organization=organization,
@@ -379,42 +423,12 @@ def discover_contractors(*, project, package, actor, keywords=None):
         keywords=keywords,
     )
     for result in outcome.results:
-        company = dedupe_company(project.organization, result, provider_name)
-        if company is None:
-            company = Company.objects.create(
-                organization=project.organization,
-                display_name=result.display_name,
-                website=result.website,
-                phone=result.phone,
-                email=result.email,
-                address=result.address,
-                city=result.city,
-                province=result.province,
-                postal_code=result.postal_code,
-                country=result.country,
-                source_type=Company.Source.DISCOVERED,
-                external_provider=provider_name,
-                external_place_id=result.external_place_id,
-                latitude=(
-                    coordinate_decimal(result.latitude) if result.latitude is not None else None
-                ),
-                longitude=(
-                    coordinate_decimal(result.longitude) if result.longitude is not None else None
-                ),
-                created_by=actor,
-                updated_by=actor,
-            )
-        else:
-            changed = []
-            if company.latitude is None and result.latitude is not None:
-                company.latitude = coordinate_decimal(result.latitude)
-                changed.append("latitude")
-            if company.longitude is None and result.longitude is not None:
-                company.longitude = coordinate_decimal(result.longitude)
-                changed.append("longitude")
-            if changed:
-                company.updated_by = actor
-                company.save(update_fields=(*changed, "updated_by", "updated_at"))
+        company, _ = upsert_discovered_company(
+            organization=project.organization,
+            result=result,
+            provider_name=provider_name,
+            actor=actor,
+        )
         capability, capability_created = TradeCapability.objects.get_or_create(
             company=company,
             trade_key=package.trade_key,

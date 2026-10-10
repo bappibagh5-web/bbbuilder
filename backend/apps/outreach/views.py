@@ -35,6 +35,7 @@ from .models import (
     OutreachSenderSettings,
     OutreachSMTPConfiguration,
     ResendWebhookConfiguration,
+    ResendWebhookEvent,
 )
 from .resend_webhooks import ingest_verified_event, save_webhook_configuration
 from .responses import decide_qualification, record_manual_response
@@ -441,6 +442,7 @@ class OutreachSMTPSettingsView(APIView):
                 "timeout_seconds": config.timeout_seconds if config else 20,
                 "is_enabled": config.is_enabled if config else False,
                 "last_test_status": config.last_test_status if config else "",
+                "last_tested_at": config.last_tested_at if config else None,
             }
         )
 
@@ -518,15 +520,67 @@ class ResendWebhookSettingsView(APIView):
     def get(self, request, *args, **kwargs):
         organization = self.get_organization()
         config = ResendWebhookConfiguration.objects.filter(organization=organization).first()
+        latest_event = (
+            ResendWebhookEvent.objects.filter(organization=organization)
+            .order_by("-received_at", "-id")
+            .first()
+        )
+        observed_types = list(
+            ResendWebhookEvent.objects.filter(organization=organization)
+            .values_list("event_type", flat=True)
+            .distinct()
+            .order_by("event_type")
+        )
+        sender = OutreachSenderSettings.objects.filter(organization=organization).first()
+        smtp_status = provider_status(organization)
+        endpoint_url = (
+            request.build_absolute_uri(
+                reverse("resend-webhook", kwargs={"endpoint_token": config.endpoint_token})
+            )
+            if config
+            else ""
+        )
+        endpoint_public_https = endpoint_url.startswith("https://")
+        webhook_configured = bool(config and config.encrypted_signing_secret)
+        tracking_active = bool(config and config.is_enabled and latest_event)
+        email_ready = bool(
+            smtp_status["state"] == "configured"
+            and sender
+            and sender.is_enabled
+            and sender.from_address
+            and sender.reply_to
+        )
+        if tracking_active:
+            integration_state = "tracking_active"
+        elif webhook_configured and config and config.is_enabled:
+            integration_state = "awaiting_events"
+        else:
+            integration_state = "needs_setup"
         safe = {
             "enabled": bool(config and config.is_enabled),
-            "signing_secret_saved": bool(config and config.encrypted_signing_secret),
-            "endpoint_url": (
-                request.build_absolute_uri(
-                    reverse("resend-webhook", kwargs={"endpoint_token": config.endpoint_token})
+            "signing_secret_saved": webhook_configured,
+            "endpoint_url": endpoint_url,
+            "endpoint_public_https": endpoint_public_https,
+            "endpoint_status": (
+                "Public HTTPS endpoint ready."
+                if endpoint_public_https
+                else (
+                    "Development endpoint — provider events cannot reach this URL "
+                    "from the Internet."
                 )
-                if config
-                else ""
+                if endpoint_url
+                else "Save webhook settings to create the organization endpoint."
+            ),
+            "provider_events_received": bool(latest_event),
+            "last_event_at": latest_event.received_at if latest_event else None,
+            "last_event_type": latest_event.event_type if latest_event else "",
+            "observed_event_types": observed_types,
+            "integration_state": integration_state,
+            "email_sending_ready": email_ready,
+            "tracking_ready": tracking_active,
+            "smtp": smtp_status,
+            "sender_configured": bool(
+                sender and sender.is_enabled and sender.from_address and sender.reply_to
             ),
         }
         return Response(safe)

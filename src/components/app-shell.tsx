@@ -16,6 +16,7 @@ import {
   PanelLeftClose,
   Send,
   Settings,
+  Telescope,
   Users,
   X,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const groups = [
     items: [
       { label: "Projects", href: "/projects", icon: FolderKanban },
       { label: "Subcontractors", href: "/subcontractors", icon: Users },
+      { label: "Prospecting", href: "/prospecting", icon: Telescope },
     ],
   },
   {

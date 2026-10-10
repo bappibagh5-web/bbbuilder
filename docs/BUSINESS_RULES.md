@@ -10,7 +10,13 @@ These rules are implementation invariants. Where a rule requires a technical cho
 4. Global company history is a bounded projection of existing project candidates, outreach recipients and bid submissions. It does not rewrite those records or expose private quote files.
 5. Qualification is contextual to an exact invitation/project decision. One contextual result never becomes universal Company qualification.
 6. Same-project/same-trade historical candidate records may be grouped for display, with a deterministic relevant record and expandable preserved history. Different trades remain separate.
-7. Prospecting is a separate future capability and is not part of the production Subcontractor Directory.
+7. Prospecting is a separate organization-level workflow and is not project bid outreach. It references the same canonical Company/Contact truth rather than copying contractors.
+8. A prospect may be Contact ready only with an explicitly selected active Contact that has an email address. Discovery/enrichment never fabricates or silently saves a contact.
+9. Removing a prospect from a list never deletes Company truth. P1 never creates project candidate, InvitationCampaign, RFQ, recipient, bid, or send records.
+10. Prospecting campaigns require explicit Admin approval and launch. Frozen campaign/step/message versions cannot be edited after launch.
+11. Active organization/email suppression is a hard backend delivery prohibition checked immediately before every provider call. Unsuppressing does not resume or re-enroll a recipient.
+12. Replies require exact durable thread identifiers. Delivered/opened/clicked events do not constitute a reply and do not stop a sequence.
+13. Every Prospecting email includes configured business identity/footer and a functional one-click unsubscribe link. The application provides technical controls and makes no legal-compliance claim.
 
 ## M4 estimate and proposal foundation
 

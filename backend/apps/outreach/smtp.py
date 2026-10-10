@@ -72,7 +72,16 @@ def test_connection(organization):
 
 
 def _send(
-    organization, *, from_name, from_address, reply_to, to_address, subject, body, message_id
+    organization,
+    *,
+    from_name,
+    from_address,
+    reply_to,
+    to_address,
+    subject,
+    body,
+    message_id,
+    additional_headers=None,
 ):
     config = OutreachSMTPConfiguration.objects.get(organization=organization)
     if provider_status(organization)["state"] != "configured":
@@ -83,6 +92,9 @@ def _send(
     email["Reply-To"] = reply_to
     email["Subject"] = subject
     email["Message-ID"] = message_id
+    for name, value in (additional_headers or {}).items():
+        if name.lower() not in {"from", "to", "reply-to", "subject", "message-id"}:
+            email[name] = value
     if config.host.lower() == "smtp.resend.com":
         email["Resend-Idempotency-Key"] = message_id.strip("<>")
     email.set_content(body)

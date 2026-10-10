@@ -5,6 +5,7 @@ import { Building2, Link2, Mail, ShieldCheck, UserPlus } from "lucide-react";
 import { OrganizationAccessState } from "@/components/organizations/organization-access-state";
 import { useOrganization } from "@/components/organizations/organization-provider";
 import { SettingsPanel } from "@/components/settings-panel";
+import { ResendIntegrationPanel } from "@/components/settings/resend-integration-panel";
 import { Card } from "@/components/ui/card";
 import { settingsApi, type MembershipListResponse, type MembershipRole, type OrganizationMember, type OrganizationSettingsResponse } from "@/lib/settings";
 
@@ -28,7 +29,7 @@ export function ProductionSettingsWorkspace() {
       {tab === "organization" && <OrganizationSection slug={activeMembership.organization.slug} />}
       {tab === "users" && <UsersAccessSection slug={activeMembership.organization.slug} />}
       {tab === "email" && <SettingsPanel section="email" />}
-      {tab === "integrations" && <><SettingsPanel section="integrations" /><Card className="max-w-4xl p-6"><h2 className="font-semibold text-slate-900">Future integrations</h2><p className="mt-1 text-sm text-slate-600">Google discovery, Prospecting providers, and project-management synchronization are not configured in this checkpoint.</p></Card></>}
+      {tab === "integrations" && <ResendIntegrationPanel />}
     </div>
   );
 }

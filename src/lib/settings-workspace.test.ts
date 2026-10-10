@@ -8,6 +8,10 @@ const workspace = readFileSync(
 );
 const page = readFileSync(new URL("../app/(app)/settings/page.tsx", import.meta.url), "utf8");
 const api = readFileSync(new URL("./settings.ts", import.meta.url), "utf8");
+const resend = readFileSync(
+  new URL("../components/settings/resend-integration-panel.tsx", import.meta.url),
+  "utf8",
+);
 
 test("settings uses four production sections", () => {
   assert.match(page, /ProductionSettingsWorkspace/);
@@ -42,5 +46,15 @@ test("Admins can create a new account or add access to an existing account", () 
 
 test("production email and webhook settings remain available", () => {
   assert.match(workspace, /<SettingsPanel section="email" \/>/);
-  assert.match(workspace, /<SettingsPanel section="integrations" \/>/);
+  assert.match(workspace, /<ResendIntegrationPanel \/>/);
+  assert.match(resend, /Resend Email &amp; Tracking/);
+  assert.match(resend, /Leave blank to keep saved API key/);
+  assert.match(resend, /Saved securely/);
+  assert.match(resend, /Paste this URL into Resend → Webhooks/);
+  assert.match(resend, /Required Resend events/);
+  assert.match(resend, /Tracking requirements/);
+  assert.match(resend, /Test SMTP Connection/);
+  assert.match(resend, /Controlled test email/);
+  assert.doesNotMatch(workspace, /Future integrations/);
+  assert.doesNotMatch(resend, /encrypted_password|encrypted_signing_secret/);
 });

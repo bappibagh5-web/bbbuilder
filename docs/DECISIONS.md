@@ -1,5 +1,30 @@
 # Architecture and Decision Log
 
+## 2026-10-10 — Production workers remain separated by workload
+
+- The normal Celery worker consumes the default `celery` queue with prefork concurrency 3. AI analysis uses a dedicated threads worker with concurrency 6, prefetch 1, and only `analysis-pages,analysis-synthesis`; `AI_PAGE_CONCURRENCY=6` is the production tuning value.
+- Prospecting due-send scheduling uses one Celery Beat instance and the existing five-minute schedule. Beat and the analysis worker are installed once from repository systemd templates; deployment CI remains unchanged until restricted sudoers explicitly permits those services.
+- Prospecting due-send processing is bounded to 50 recipients by default and 100 maximum. Each recipient retains independent locking, durable messages/attempts, suppression checks, and idempotency protection; batching never creates one transaction across the entire audience.
+- A 500-recipient, three-step fake-provider checkpoint produced 1,500 unique successful submissions with no duplicate send. This validates application behavior but does not replace production PostgreSQL profiling or controlled post-deployment delivery validation.
+
+## 2026-10-08 — Prospecting delivery freezes content and fails closed on suppression
+
+- Prospecting campaigns, versions, recipients, messages, attempts, replies and suppressions are separate from every M3 project procurement record. Only generic organization SMTP and verified Resend infrastructure is shared.
+- Admin approval freezes sender, footer and controlled sequence steps. Launch is a second explicit Admin action. Sent content is never edited; later content requires a new campaign/version.
+- Organization/email suppression is authoritative and is rechecked immediately before delivery. Unsubscribe, hard bounce and complaint stop all organization Prospecting sequences for that normalized email; unsuppress never resumes or re-enrolls them.
+- Public unsubscribe uses a high-entropy opaque token with a stored SHA-256 digest. Prospecting messages alone receive one-click List-Unsubscribe headers.
+- Provider events must resolve exactly to either M3 or Prospecting, never both. Reply correlation requires verified In-Reply-To/References; address, subject and time alone are insufficient. Opens/clicks are engagement only.
+- Celery workers execute due sends, while a separate Beat service schedules them. A service template is committed, but installation/enablement remains an explicit production operation and current deployment does not depend on it.
+
+## 2026-10-08 — Prospecting is separate from project procurement outreach
+
+- Prospecting P1 is organization-scoped and uses reusable Prospect Lists whose entries reference the canonical contractor `Company`; it never creates a duplicate company/contact directory.
+- Discovery is an explicit Admin/Estimator action and reuses the established provider, identity normalization and deterministic dedupe rules. Search parameters, provider identity and safe result provenance are persisted; provider secrets and unnecessary raw payloads are not.
+- Prospecting does not create or reinterpret `ScopeContractorCandidate`, `InvitationCampaign`, `InvitationRecipient`, bid outreach, or project shortlisting records.
+- An entry becomes Contact ready only after a human selects an active canonical Contact with email. Public enrichment remains suggestion-first and never fabricates or automatically saves contact data.
+- Removing an entry or archiving a list preserves Company, Contact, discovery and audit history. Viewer access is read-only.
+- P1 includes no marketing sends, sequences, follow-ups, unsubscribe endpoint, suppression automation, analytics, AI copy, unauthorized scraping, or purchased lead data. These remain P2 concerns.
+
 ## 2026-09-21 — Production navigation exposes only implemented production workflows
 
 - The sidebar contains Dashboard, Projects, Subcontractors, Outreach Campaigns, Bid Comparisons, Client Proposals, Awarded Projects, Activity, and Settings.

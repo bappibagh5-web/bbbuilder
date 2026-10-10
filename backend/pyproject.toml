@@ -15,6 +15,7 @@ dependencies = [
     "django-environ==0.14.0",
     "django-storages[s3]==1.14.6",
     "djangorestframework==3.18.0",
+    "openpyxl==3.1.5",
     "psycopg[binary]==3.3.4",
     "PyMuPDF==1.28.2",
     "pydantic==2.12.5",

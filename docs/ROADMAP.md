@@ -281,19 +281,29 @@ Require explicit estimator approval; never finalize for the client automatically
 
 ### M4-08 Award Decision & Subcontractor Award Records
 
-**Status: NEXT / NOT STARTED.**
+**Status: COMPLETE / MANUALLY VALIDATED.**
 
 Record selected subcontractors and human award decisions while preserving non-winning bid history.
 
 ### M4-09 Awarded Project Handoff State
 
+**Status: COMPLETE / MANUALLY VALIDATED.**
+
 Transition to Awarded Project and define the handoff payload for M5.
 
 ### M4-10 Real Project Validation & Milestone Polish
 
+**Status: COMPLETE / MANUALLY VALIDATED.**
+
 Validate against real BB Builders proposals, estimate revisions, and client award evidence; complete milestone acceptance.
 
 **M4 is not:** Accounting software, a full ERP, an invoicing/change-order platform, or a full project-management system.
+
+## Production Prospecting checkpoint
+
+**Status: IMPLEMENTED / FULL REGRESSION COMPLETE / PRODUCTION DEPLOYMENT PENDING.**
+
+Organization-level Prospecting is separate from project procurement. It includes controlled discovery and lists over canonical Company/Contact truth, manual and spreadsheet intake, versioned human-approved sequences, bounded idempotent follow-ups, suppression/unsubscribe/reply stops, analytics, and shared Resend configuration. It remains disabled by default. Production enablement requires controlled Resend setup, one Celery Beat scheduler, and post-deployment validation; it does not start M5.
 
 ## 10. Milestone 5 — Project Management Sync
 

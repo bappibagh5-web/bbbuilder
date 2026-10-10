@@ -1,0 +1,19 @@
+[Unit]
+Description=BB Builders dedicated AI analysis worker
+After=network.target redis-server.service
+PartOf=bb-builders-celery.service
+
+[Service]
+Type=simple
+User=bbdeploy
+Group=bbdeploy
+WorkingDirectory=/opt/bb-builders/app/backend
+EnvironmentFile=/opt/bb-builders/secrets/backend.env
+Environment=AI_PAGE_CONCURRENCY=6
+ExecStart=/opt/bb-builders/app/backend/.venv/bin/celery -A config worker --loglevel=INFO --pool=threads --concurrency=6 --prefetch-multiplier=1 --queues=analysis-pages,analysis-synthesis --hostname=analysis@%%h
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

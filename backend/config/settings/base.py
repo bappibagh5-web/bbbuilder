@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "apps.analysis",
     "apps.scope_packages",
     "apps.contractors",
+    "apps.prospecting",
     "apps.outreach",
     "apps.proposals",
 ]
@@ -160,6 +161,12 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_TASK_ANNOTATIONS = {
     "apps.analysis.tasks.process_analysis_page_task": {"rate_limit": AI_PAGE_RATE_LIMIT}
+}
+CELERY_BEAT_SCHEDULE = {
+    "process-due-prospecting-messages": {
+        "task": "prospecting.process_due_messages",
+        "schedule": 300.0,
+    }
 }
 
 FRONTEND_ORIGIN = env("FRONTEND_ORIGIN", default="")
